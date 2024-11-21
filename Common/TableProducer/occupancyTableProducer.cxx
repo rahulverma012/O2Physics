@@ -108,9 +108,9 @@ struct occTableProducer {
 
   void FillNewListFromOldList(std::vector<int64_t>& NewList, std::vector<int64_t> OldList)
   {
-    for (long unsigned int ii = 0; ii < OldList.size(); ii++) {
+    for (uint ii = 0; ii < OldList.size(); ii++) {
       bool RepeatEntry = false;
-      for (long unsigned int jj = 0; jj < NewList.size(); jj++) {
+      for (uint jj = 0; jj < NewList.size(); jj++) {
         if (OldList[ii] == NewList[jj]) {
           RepeatEntry = true;
         }
@@ -123,7 +123,7 @@ struct occTableProducer {
 
   void InsertionSortVector(std::vector<int64_t>& UnsortedVector)
   {
-    for (long unsigned int i = 1; i < UnsortedVector.size(); i++) {
+    for (uint i = 1; i < UnsortedVector.size(); i++) {
       int currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
       int j;                                  //(j+1) is the correct position of current element
       for (j = i - 1; j >= 0 && (UnsortedVector[j] > currentElement); j--) {
@@ -136,7 +136,7 @@ struct occTableProducer {
   template <typename T>
   bool vectorAscendingSortCheck(const T& vec)
   {
-    for (long unsigned int i = 1; i < vec.size(); i++) {
+    for (uint i = 1; i < vec.size(); i++) {
       if (vec[i] < vec[i - 1]) {
         LOG(info) << "DEBUG :: Vector unsorted at Position = " << i;
         return false;
@@ -167,7 +167,7 @@ struct occTableProducer {
   template <typename T>
   void InsertionSortVectorOfVector(std::vector<std::vector<T>>& UnsortedVector)
   {
-    for (long unsigned int i = 1; i < UnsortedVector.size(); i++) {
+    for (uint i = 1; i < UnsortedVector.size(); i++) {
       std::vector<T> currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
       int j;                                             //(j+1) is the correct position of current element
       for (j = i - 1; j >= 0 && (UnsortedVector[j][0] > currentElement[0]); j--) {
@@ -180,18 +180,16 @@ struct occTableProducer {
   // // template<typename T>
   std::vector<std::vector<float>> GetNormalisedVectors(const std::vector<std::vector<float>>& vectors)
   {
-    const int n = vectors.size(); // no of vectors
-    // const int size = vectors[0].size(); //size of each vector
+    double mean0, meanI, scaleFactor; // scaleFactor = mean[n]/mean[0]
 
-    double mean[n];
-    double scaleFactor; // scaleFactor = mean[n]/mean[0]
     std::vector<std::vector<float>> normVectors;
 
     int i = -1;
+    mean0 = TMath::Mean(vectors[0].size(), vectors[0].data());
     for (const auto& vec : vectors) {
       i++;
-      mean[i] = TMath::Mean(vec.size(), vec.data());
-      scaleFactor = mean[0] / mean[i];
+      meanI = TMath::Mean(vec.size(), vec.data());
+      scaleFactor = mean0 / meanI;
 
       std::vector<float> normVec;
       for (auto val : vec) {
@@ -207,14 +205,11 @@ struct occTableProducer {
     const int n = vectors.size();       // no of vectors
     const int size = vectors[0].size(); // size of each vector
 
-    // std::vector<float> medianVector;
-    // std::vector<std::vector<int>> medianPosVec;
-    // FromWhichIndexIsThisInformationComing;
     for (int i = 0; i < size; i++) {
       std::vector<std::vector<double>> data;
       double iEntry = 0;
       for (const auto& vec : vectors) {
-        data.push_back({vec[i], double(iEntry)});
+        data.push_back({vec[i], iEntry});
         iEntry++;
       }
       // Now sort the vector;
@@ -226,11 +221,11 @@ struct occTableProducer {
       if (n % 2 == 0) {
         // cout<<"Even Case ::m=";
         median = (data[(n - 1) / 2][0] + data[(n - 1) / 2 + 1][0]) / 2;
-        medianPos = {int(data[(n - 1) / 2][1] + 0.001), int(data[(n - 1) / 2 + 1][1] + 0.001)};
+        medianPos = {static_cast<int>(data[(n - 1) / 2][1] + 0.001), static_cast<int>(data[(n - 1) / 2 + 1][1] + 0.001)};
       } else {
         // cout<<"Odd  Case ::m=";
         median = data[(n) / 2][0];
-        medianPos = {int(data[(n) / 2][1] + 0.001)};
+        medianPos = {static_cast<int>(data[(n) / 2][1] + 0.001)};
       }
       medianVector.push_back(median);
       medianPosVec.push_back(medianPos);
@@ -259,17 +254,15 @@ struct occTableProducer {
 
   using myCollisions = soa::Join<aod::Collisions, aod::Mults>;
 
-  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
-                             ,
-                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe, aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
+  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra, //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
+                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass,
+                             aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe,
+                             aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
 
   Preslice<myTracks> TracksPerCollisionPreslice = o2::aod::track::collisionId;
 
   // Process the Data
-  int iEvent = -1;
   int dfCount = 0;
-  int debugCounter = 0;
-  int FV0A_Debug = 0;
   void process(o2::aod::BCsWithTimestamps const& BCs, myCollisions const& collisions, myTracks const& tracks, aod::TracksQA const& tracksQA, o2::aod::Origins const& Origins)
   {
     dfCount++;
@@ -287,27 +280,27 @@ struct occTableProducer {
     const int nBCinDrift = 114048 / 32; /// to get from ccdb in future
 
     // Occupancy Maps Per DF // a DF contains one or more timesFrames (TFs)
-    std::unordered_map<long int, std::vector<int64_t>> BC_TF_Map;
+    std::unordered_map<int64_t, std::vector<int64_t>> BC_TF_Map;
 
-    std::unordered_map<long int, std::vector<float>> occ_Prim_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FV0A_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FV0C_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FT0A_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FT0C_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FDDA_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_FDDC_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_Prim_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FV0A_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FV0C_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FT0A_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FT0C_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FDDA_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_FDDC_Unfm_80;
 
-    std::unordered_map<long int, std::vector<float>> occ_NTrack_PVC_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrack_ITS_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrack_TPC_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrack_TRD_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrack_TOF_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackSize_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackTPC_A_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackTPC_C_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackITS_TPC_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackITS_TPC_A_Unfm_80;
-    std::unordered_map<long int, std::vector<float>> occ_NTrackITS_TPC_C_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrack_PVC_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrack_ITS_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrack_TPC_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrack_TRD_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrack_TOF_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackSize_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackTPC_A_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackTPC_C_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackITS_TPC_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackITS_TPC_A_Unfm_80;
+    std::unordered_map<int64_t, std::vector<float>> occ_NTrackITS_TPC_C_Unfm_80;
     //
     // Calculation of TFid and BCinTF
     auto bc = collisions.iteratorAt(0).bc_as<aod::BCsWithTimestamps>();
@@ -435,43 +428,61 @@ struct occTableProducer {
       std::vector<float>& TFocc_NTrackITS_TPC_A_Unfm_80 = occ_NTrackITS_TPC_A_Unfm_80[TFidThis];
       std::vector<float>& TFocc_NTrackITS_TPC_C_Unfm_80 = occ_NTrackITS_TPC_C_Unfm_80[TFidThis];
 
-      if (TFocc_Prim_Unfm_80.size() <= 0)
+      if (TFocc_Prim_Unfm_80.size() <= 0) {
         TFocc_Prim_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FV0A_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FV0A_Unfm_80.size() <= 0) {
         TFocc_FV0A_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FV0C_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FV0C_Unfm_80.size() <= 0) {
         TFocc_FV0C_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FT0A_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FT0A_Unfm_80.size() <= 0) {
         TFocc_FT0A_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FT0C_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FT0C_Unfm_80.size() <= 0) {
         TFocc_FT0C_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FDDA_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FDDA_Unfm_80.size() <= 0) {
         TFocc_FDDA_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_FDDC_Unfm_80.size() <= 0)
+      }
+      if (TFocc_FDDC_Unfm_80.size() <= 0) {
         TFocc_FDDC_Unfm_80.resize(nBCinTF / 80);
+      }
 
-      if (TFocc_NTrack_PVC_Unfm_80.size() <= 0)
+      if (TFocc_NTrack_PVC_Unfm_80.size() <= 0) {
         TFocc_NTrack_PVC_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrack_ITS_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrack_ITS_Unfm_80.size() <= 0) {
         TFocc_NTrack_ITS_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrack_TPC_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrack_TPC_Unfm_80.size() <= 0) {
         TFocc_NTrack_TPC_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrack_TRD_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrack_TRD_Unfm_80.size() <= 0) {
         TFocc_NTrack_TRD_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrack_TOF_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrack_TOF_Unfm_80.size() <= 0) {
         TFocc_NTrack_TOF_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackSize_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackSize_Unfm_80.size() <= 0) {
         TFocc_NTrackSize_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackTPC_A_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackTPC_A_Unfm_80.size() <= 0) {
         TFocc_NTrackTPC_A_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackTPC_C_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackTPC_C_Unfm_80.size() <= 0) {
         TFocc_NTrackTPC_C_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackITS_TPC_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackITS_TPC_Unfm_80.size() <= 0) {
         TFocc_NTrackITS_TPC_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackITS_TPC_A_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackITS_TPC_A_Unfm_80.size() <= 0) {
         TFocc_NTrackITS_TPC_A_Unfm_80.resize(nBCinTF / 80);
-      if (TFocc_NTrackITS_TPC_C_Unfm_80.size() <= 0)
+      }
+      if (TFocc_NTrackITS_TPC_C_Unfm_80.size() <= 0) {
         TFocc_NTrackITS_TPC_C_Unfm_80.resize(nBCinTF / 80);
+      }
 
       // current collision bin in 80/160 grouping.
       int bin80_0 = bcInTF / 80;
@@ -613,11 +624,6 @@ struct occTableProducer {
         }
       }
 
-      // vecRobustOcc_T0V0Prim_Unfm_80_medianPosVec
-
-      // LOG(info)<<"DEBUG :: FirstCheck "<<vecRobustOcc_T0V0Prim_Unfm_80.size();
-      // LOG(info)<<"DEBUG :: FirstCheck "<<vecRobustOcc_T0V0Prim_Unfm_80_medianPosVec[0].size();
-
       const std::vector<float>& vecOccNorm_Prim_Unfm_80 = normVectors[0];
       const std::vector<float>& vecOccNorm_FV0A_Unfm_80 = normVectors[1];
       const std::vector<float>& vecOccNorm_FV0C_Unfm_80 = normVectors[2];
@@ -639,25 +645,49 @@ struct occTableProducer {
 
       keyCounter++;
       GenOccTable(
-        key, BC_TF_Map[key]
-
-        ,
-        vecOccNorm_Prim_Unfm_80, vecOccNorm_FV0A_Unfm_80, vecOccNorm_FV0C_Unfm_80, vecOccNorm_FT0A_Unfm_80, vecOccNorm_FT0C_Unfm_80, vecOccNorm_FDDA_Unfm_80, vecOccNorm_FDDC_Unfm_80
-
-        ,
-        vecOccNorm_NTrack_PVC_Unfm_80, vecOccNorm_NTrack_ITS_Unfm_80, vecOccNorm_NTrack_TPC_Unfm_80, vecOccNorm_NTrack_TRD_Unfm_80, vecOccNorm_NTrack_TOF_Unfm_80, vecOccNorm_NTrackSize_Unfm_80, vecOccNorm_NTrackTPC_A_Unfm_80, vecOccNorm_NTrackTPC_C_Unfm_80, vecOccNorm_NTrackITS_TPC_Unfm_80, vecOccNorm_NTrackITS_TPC_A_Unfm_80, vecOccNorm_NTrackITS_TPC_C_Unfm_80
-
-        ,
-        vecRobustOcc_T0V0Prim_Unfm_80, vecRobustOcc_FDDT0V0Prim_Unfm_80, vecRobustOcc_NtrackDet_Unfm_80
-
-        ,
-        TMath::Mean(vecOcc_Prim_Unfm_80.size(), vecOcc_Prim_Unfm_80.data()), TMath::Mean(vecOcc_FV0A_Unfm_80.size(), vecOcc_FV0A_Unfm_80.data()), TMath::Mean(vecOcc_FV0C_Unfm_80.size(), vecOcc_FV0C_Unfm_80.data()), TMath::Mean(vecOcc_FT0A_Unfm_80.size(), vecOcc_FT0A_Unfm_80.data()), TMath::Mean(vecOcc_FT0C_Unfm_80.size(), vecOcc_FT0C_Unfm_80.data()), TMath::Mean(vecOcc_FDDA_Unfm_80.size(), vecOcc_FDDA_Unfm_80.data()), TMath::Mean(vecOcc_FDDC_Unfm_80.size(), vecOcc_FDDC_Unfm_80.data())
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                        ,
-        TMath::Mean(vecOcc_NTrack_PVC_Unfm_80.size(), vecOcc_NTrack_PVC_Unfm_80.data()), TMath::Mean(vecOcc_NTrack_ITS_Unfm_80.size(), vecOcc_NTrack_ITS_Unfm_80.data()), TMath::Mean(vecOcc_NTrack_TPC_Unfm_80.size(), vecOcc_NTrack_TPC_Unfm_80.data()), TMath::Mean(vecOcc_NTrack_TRD_Unfm_80.size(), vecOcc_NTrack_TRD_Unfm_80.data()), TMath::Mean(vecOcc_NTrack_TOF_Unfm_80.size(), vecOcc_NTrack_TOF_Unfm_80.data()), TMath::Mean(vecOcc_NTrackSize_Unfm_80.size(), vecOcc_NTrackSize_Unfm_80.data()), TMath::Mean(vecOcc_NTrackTPC_A_Unfm_80.size(), vecOcc_NTrackTPC_A_Unfm_80.data()), TMath::Mean(vecOcc_NTrackTPC_C_Unfm_80.size(), vecOcc_NTrackTPC_C_Unfm_80.data()), TMath::Mean(vecOcc_NTrackITS_TPC_Unfm_80.size(), vecOcc_NTrackITS_TPC_Unfm_80.data()), TMath::Mean(vecOcc_NTrackITS_TPC_A_Unfm_80.size(), vecOcc_NTrackITS_TPC_A_Unfm_80.data()), TMath::Mean(vecOcc_NTrackITS_TPC_C_Unfm_80.size(), vecOcc_NTrackITS_TPC_C_Unfm_80.data())
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ,
-        TMath::Mean(vecRobustOcc_T0V0Prim_Unfm_80.size(), vecRobustOcc_T0V0Prim_Unfm_80.data()), TMath::Mean(vecRobustOcc_FDDT0V0Prim_Unfm_80.size(), vecRobustOcc_FDDT0V0Prim_Unfm_80.data()), TMath::Mean(vecRobustOcc_NtrackDet_Unfm_80.size(), vecRobustOcc_NtrackDet_Unfm_80.data()));
+        key, BC_TF_Map[key],
+        vecOccNorm_Prim_Unfm_80,
+        vecOccNorm_FV0A_Unfm_80,
+        vecOccNorm_FV0C_Unfm_80,
+        vecOccNorm_FT0A_Unfm_80,
+        vecOccNorm_FT0C_Unfm_80,
+        vecOccNorm_FDDA_Unfm_80,
+        vecOccNorm_FDDC_Unfm_80,
+        vecOccNorm_NTrack_PVC_Unfm_80,
+        vecOccNorm_NTrack_ITS_Unfm_80,
+        vecOccNorm_NTrack_TPC_Unfm_80,
+        vecOccNorm_NTrack_TRD_Unfm_80,
+        vecOccNorm_NTrack_TOF_Unfm_80,
+        vecOccNorm_NTrackSize_Unfm_80,
+        vecOccNorm_NTrackTPC_A_Unfm_80,
+        vecOccNorm_NTrackTPC_C_Unfm_80,
+        vecOccNorm_NTrackITS_TPC_Unfm_80,
+        vecOccNorm_NTrackITS_TPC_A_Unfm_80,
+        vecOccNorm_NTrackITS_TPC_C_Unfm_80,
+        vecRobustOcc_T0V0Prim_Unfm_80,
+        vecRobustOcc_FDDT0V0Prim_Unfm_80,
+        vecRobustOcc_NtrackDet_Unfm_80,
+        TMath::Mean(vecOcc_Prim_Unfm_80.size(), vecOcc_Prim_Unfm_80.data()),
+        TMath::Mean(vecOcc_FV0A_Unfm_80.size(), vecOcc_FV0A_Unfm_80.data()),
+        TMath::Mean(vecOcc_FV0C_Unfm_80.size(), vecOcc_FV0C_Unfm_80.data()),
+        TMath::Mean(vecOcc_FT0A_Unfm_80.size(), vecOcc_FT0A_Unfm_80.data()),
+        TMath::Mean(vecOcc_FT0C_Unfm_80.size(), vecOcc_FT0C_Unfm_80.data()),
+        TMath::Mean(vecOcc_FDDA_Unfm_80.size(), vecOcc_FDDA_Unfm_80.data()),
+        TMath::Mean(vecOcc_FDDC_Unfm_80.size(), vecOcc_FDDC_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrack_PVC_Unfm_80.size(), vecOcc_NTrack_PVC_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrack_ITS_Unfm_80.size(), vecOcc_NTrack_ITS_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrack_TPC_Unfm_80.size(), vecOcc_NTrack_TPC_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrack_TRD_Unfm_80.size(), vecOcc_NTrack_TRD_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrack_TOF_Unfm_80.size(), vecOcc_NTrack_TOF_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackSize_Unfm_80.size(), vecOcc_NTrackSize_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackTPC_A_Unfm_80.size(), vecOcc_NTrackTPC_A_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackTPC_C_Unfm_80.size(), vecOcc_NTrackTPC_C_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackITS_TPC_Unfm_80.size(), vecOcc_NTrackITS_TPC_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackITS_TPC_A_Unfm_80.size(), vecOcc_NTrackITS_TPC_A_Unfm_80.data()),
+        TMath::Mean(vecOcc_NTrackITS_TPC_C_Unfm_80.size(), vecOcc_NTrackITS_TPC_C_Unfm_80.data()),
+        TMath::Mean(vecRobustOcc_T0V0Prim_Unfm_80.size(), vecRobustOcc_T0V0Prim_Unfm_80.data()),
+        TMath::Mean(vecRobustOcc_FDDT0V0Prim_Unfm_80.size(), vecRobustOcc_FDDT0V0Prim_Unfm_80.data()),
+        TMath::Mean(vecRobustOcc_NtrackDet_Unfm_80.size(), vecRobustOcc_NtrackDet_Unfm_80.data()));
     }
 
     if ((ikey + 1) != int(SortedTFIDList.size())) {
@@ -739,9 +769,10 @@ struct trackMeanOccTableProducer {
   }
 
   using myCollisions = soa::Join<aod::Collisions, aod::Mults>;
-  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
-                             ,
-                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe, aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
+  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra, //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
+                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass,
+                             aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe,
+                             aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
 
   // For manual sliceBy
   Preslice<myTracks> TracksPerCollisionPreslice = o2::aod::track::collisionId;
@@ -756,9 +787,9 @@ struct trackMeanOccTableProducer {
 
   void FillNewListFromOldList(std::vector<int64_t>& NewList, std::vector<int64_t> OldList)
   {
-    for (long unsigned int ii = 0; ii < OldList.size(); ii++) {
+    for (uint ii = 0; ii < OldList.size(); ii++) {
       bool RepeatEntry = false;
-      for (long unsigned int jj = 0; jj < NewList.size(); jj++) {
+      for (uint jj = 0; jj < NewList.size(); jj++) {
         if (OldList[ii] == NewList[jj]) {
           RepeatEntry = true;
         }
@@ -771,7 +802,7 @@ struct trackMeanOccTableProducer {
 
   void InsertionSortVector(std::vector<int64_t>& UnsortedVector)
   {
-    for (long unsigned int i = 1; i < UnsortedVector.size(); i++) {
+    for (uint i = 1; i < UnsortedVector.size(); i++) {
       int currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
       int j;                                  //(j+1) is the correct position of current element
       for (j = i - 1; j >= 0 && (UnsortedVector[j] > currentElement); j--) {
@@ -784,7 +815,7 @@ struct trackMeanOccTableProducer {
   template <typename T>
   bool vectorAscendingSortCheck(const T& vec)
   {
-    for (long unsigned int i = 1; i < vec.size(); i++) {
+    for (int64_t i = 1; i < vec.size(); i++) {
       if (vec[i] < vec[i - 1]) {
         LOG(info) << "DEBUG :: Vector unsorted at Position = " << i;
         return false;
@@ -896,10 +927,7 @@ struct trackMeanOccTableProducer {
   }
 
   // Process the Data
-  int iEvent = -1;
   int dfCount = 0;
-  int debugCounter = 0;
-  int FV0A_Debug = 0;
   using myBCTable = soa::Join<aod::BCsWithTimestamps, aod::OccIndexTable>;
   void process( // processTrackOccTable( //aod::BCsWithTimestamps const& BCs
     myBCTable const& BCs, myCollisions const& collisions, myTracks const& tracks, aod::TracksQA const& tracksQA, o2::aod::Origins const& Origins, o2::aod::AmbiguousTracks const& ambgTracks, aod::Occs const& Occs, aod::OccIndexTable const& OccIndices)
@@ -1129,22 +1157,54 @@ struct trackMeanOccTableProducer {
       BinBCend = bcEnd / 80;
 
       meanOccTable(
-        track.globalIndex(), track.collisionId(), occIDX, bc.globalIndex(), TFidThis, bcInTF, getMeanOccupancy(BinBCbegin, BinBCend, Occ_Prim_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0A_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0C_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0A_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0C_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDA_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDC_Unfm_80)
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            ,
-        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_PVC_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_ITS_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TPC_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TRD_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TOF_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackSize_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_A_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_C_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_A_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_C_Unfm_80)
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ,
-        getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_T0V0Prim_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_FDDT0V0Prim_Unfm_80), getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_NtrackDet_Unfm_80)
-
-                                                                                                                                                     ,
-        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_Prim_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0A_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0C_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0A_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0C_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDA_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDC_Unfm_80)
-
-                                                                                                                                                                                                                                                                                                                                                                                                                      ,
-        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_PVC_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_ITS_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TPC_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TRD_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TOF_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackSize_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_A_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_C_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_A_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_C_Unfm_80)
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ,
-        getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_T0V0Prim_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_FDDT0V0Prim_Unfm_80), getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_NtrackDet_Unfm_80));
+        track.globalIndex(),
+        track.collisionId(),
+        occIDX,
+        bc.globalIndex(),
+        TFidThis,
+        bcInTF,
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_Prim_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0A_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0C_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0A_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0C_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDA_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDC_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_PVC_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_ITS_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TPC_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TRD_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TOF_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackSize_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_A_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_C_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_A_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_C_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_T0V0Prim_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_FDDT0V0Prim_Unfm_80),
+        getMeanOccupancy(BinBCbegin, BinBCend, OccRobust_NtrackDet_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_Prim_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0A_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0C_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0A_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FT0C_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDA_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_FDDC_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_PVC_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_ITS_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TPC_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TRD_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrack_TOF_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackSize_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_A_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackTPC_C_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_A_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, Occ_NTrackITS_TPC_C_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_T0V0Prim_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_FDDT0V0Prim_Unfm_80),
+        getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_NtrackDet_Unfm_80));
     } // end of trackQA loop
 
     // LOG(info)<<"DEBUG ::";
