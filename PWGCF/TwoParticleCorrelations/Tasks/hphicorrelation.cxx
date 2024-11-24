@@ -79,7 +79,6 @@ struct hphicorrelation {
   // HistogramRegistry ME_recoTrigger{"ME_recoTrigger", {}, OutputObjHandlingPolicy::AnalysisObject, true, true};
   HistogramRegistry ME_recoAnalysis{"ME_recoAnalysis", {}, OutputObjHandlingPolicy::AnalysisObject, true, true};
 
-
   // PDG data base
   Service<o2::framework::O2DatabasePDG> pdgDB;
 
