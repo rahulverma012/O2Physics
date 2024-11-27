@@ -279,10 +279,10 @@ struct occTableProducer {
       for (const auto& track : TracksTable_perColl) {
         if (track.isPVContributor()) {
           nTrack_PVC++;
-        } //Run 3: Has this track contributed to the collision vertex fit
+        } // Run 3: Has this track contributed to the collision vertex fit
         if (track.hasITS()) {
           nTrack_ITS++;
-        } //Flag to check if track has a ITS match
+        } // Flag to check if track has a ITS match
         if (track.hasTPC()) {
           nTrack_TPC++;
           if (track.eta() <= 0.0) {
@@ -291,13 +291,13 @@ struct occTableProducer {
           else {
             nTrackTPC_C++;
           }
-        } //Flag to check if track has a TPC match
+        } // Flag to check if track has a TPC match
         if (track.hasTRD()) {
           nTrack_TRD++;
-        } //Flag to check if track has a TRD match
+        } // Flag to check if track has a TRD match
         if (track.hasTOF()) {
           nTrack_TOF++;
-        } //Flag to check if track has a TOF measurement
+        } // Flag to check if track has a TOF measurement
         if (track.hasITS() && track.hasTPC()) {
           nTrackITS_TPC++;
           if (track.eta() <= 0.0) {
