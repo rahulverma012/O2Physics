@@ -56,7 +56,6 @@ struct occTableProducer {
   Configurable<int> customOrbitOffset{"customOrbitOffset", 0, "customOrbitOffset for MC"};
 
   // Histogram registry;
-  //  HistogramRegistry recoTracks  {"recoTracks"  , {}, OutputObjHandlingPolicy::AnalysisObject, true, true};
   HistogramRegistry recoEvent{"recoEvent", {}, OutputObjHandlingPolicy::AnalysisObject, true, true};
 
   void init(InitContext const&)
@@ -681,12 +680,10 @@ struct trackMeanOccTableProducer {
     while (low <= high) {
       int mid = low + (high - low) / 2;
       auto midElement = Table.iteratorAt(mid).trackId();
-      // if (Key == Table.iteratorAt(mid).trackId()) {
       if (Key == midElement) {
         return mid;
       }
-
-      // if (Key > Table.iteratorAt(mid).trackId()) {
+      
       if (Key > midElement) {
         low = mid + 1; // If Key is greater, ignore left  half, update the low
       } else {
