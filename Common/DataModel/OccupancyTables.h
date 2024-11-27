@@ -9,6 +9,10 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+/// \brief  Occupancy Table Header : TPC PID - Calibration
+///
+/// \author Rahul Verma (rahul.verma@iitb.ac.in) :: Marian I Ivanov (marian.ivanov@cern.ch)
+
 #include "Framework/ASoA.h"
 #include "Framework/AnalysisDataModel.h"
 
@@ -130,12 +134,6 @@ DECLARE_SOA_TABLE(OccIndexTable, "AOD", "OCCINDEXTABLE", o2::soa::Index<>,
 namespace trackmeanocc
 {
 DECLARE_SOA_INDEX_COLUMN(Track, track);
-DECLARE_SOA_INDEX_COLUMN(Collision, collision);
-DECLARE_SOA_INDEX_COLUMN(Occ, occ);
-DECLARE_SOA_INDEX_COLUMN(BC, bc);
-
-DECLARE_SOA_COLUMN(TfId, tfId, int64_t);
-DECLARE_SOA_COLUMN(BCinTF, bcInTF, int);
 
 DECLARE_SOA_COLUMN(MeanOcc_Prim_Unfm_80, meanOcc_Prim_Unfm_80, float);
 DECLARE_SOA_COLUMN(MeanOcc_FV0A_Unfm_80, meanOcc_FV0A_Unfm_80, float);
@@ -189,11 +187,6 @@ DECLARE_SOA_COLUMN(WeightMeanOccRobust_NtrackDet_Unfm_80, weightMeanOccRobust_Nt
 
 DECLARE_SOA_TABLE(TrackMeanOccs, "AOD", "TRACKMEANOCCS", o2::soa::Index<>,
                   o2::aod::trackmeanocc::TrackId,
-                  o2::aod::trackmeanocc::CollisionId,
-                  o2::aod::trackmeanocc::OccId,
-                  o2::aod::trackmeanocc::BCId,
-                  o2::aod::trackmeanocc::TfId,
-                  o2::aod::trackmeanocc::BCinTF,
                   o2::aod::trackmeanocc::MeanOcc_Prim_Unfm_80,
                   o2::aod::trackmeanocc::MeanOcc_FV0A_Unfm_80,
                   o2::aod::trackmeanocc::MeanOcc_FV0C_Unfm_80,
@@ -236,5 +229,4 @@ DECLARE_SOA_TABLE(TrackMeanOccs, "AOD", "TRACKMEANOCCS", o2::soa::Index<>,
                   o2::aod::trackmeanocc::WeightMeanOccRobust_T0V0Prim_Unfm_80,
                   o2::aod::trackmeanocc::WeightMeanOccRobust_FDDT0V0Prim_Unfm_80,
                   o2::aod::trackmeanocc::WeightMeanOccRobust_NtrackDet_Unfm_80);
-
 } // namespace o2::aod
