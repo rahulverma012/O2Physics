@@ -18,6 +18,9 @@
 #include "Framework/ASoA.h"
 #include "Framework/AnalysisDataModel.h"
 
+#ifndef COMMON_DATAMODEL_OCCUPANCYTABLES_H_
+#define COMMON_DATAMODEL_OCCUPANCYTABLES_H_
+
 namespace o2::aod
 {
 namespace occp
@@ -232,3 +235,4 @@ DECLARE_SOA_TABLE(TrackMeanOccs, "AOD", "TRACKMEANOCCS", o2::soa::Index<>,
                   o2::aod::trackmeanocc::WeightMeanOccRobust_FDDT0V0Prim_Unfm_80,
                   o2::aod::trackmeanocc::WeightMeanOccRobust_NtrackDet_Unfm_80);
 } // namespace o2::aod
+#endif // COMMON_DATAMODEL_OCCUPANCYTABLES_H_
