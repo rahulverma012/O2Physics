@@ -15,6 +15,7 @@
 /// \author Rahul Verma (rahul.verma@iitb.ac.in) :: Marian I Ivanov (marian.ivanov@cern.ch)
 
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
 
 #include "Framework/runDataProcessing.h"
@@ -131,9 +132,8 @@ struct occTableProducer {
       }
 
       if (Key > List[mid]) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
+        low = mid + 1; // If Key is greater, ignore left  half, update the low
+      } else {
         high = mid - 1;
       } // If Key is smaller, ignore right half, update the high
     }
@@ -286,9 +286,8 @@ struct occTableProducer {
         if (track.hasTPC()) {
           nTrack_TPC++;
           if (track.eta() <= 0.0) {
-            nTrackTPC_A++;
-          } // includes tracks at eta zero as well.
-          else {
+            nTrackTPC_A++; // includes tracks at eta zero as well.
+          } else {
             nTrackTPC_C++;
           }
         } // Flag to check if track has a TPC match
@@ -301,9 +300,8 @@ struct occTableProducer {
         if (track.hasITS() && track.hasTPC()) {
           nTrackITS_TPC++;
           if (track.eta() <= 0.0) {
-            nTrackITS_TPC_A++;
-          } // includes tracks at eta zero as well.
-          else {
+            nTrackITS_TPC_A++; // includes tracks at eta zero as well.
+          } else {
             nTrackITS_TPC_C++;
           }
         }
@@ -620,8 +618,8 @@ struct occTableProducer {
         TMath::Mean(vecRobustOcc_NtrackDet_Unfm_80.size(), vecRobustOcc_NtrackDet_Unfm_80.data()));
     }
 
-    if ((ikey + 1) != int(SortedTFIDList.size())) {
-      LOG(error) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes " << (ikey + 1) << " :: " << SortedTFIDList.size();
+    if ( static_cast<int>(ikey + 1) != int(SortedTFIDList.size())) {
+      LOG(error) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes " << static_cast<int>(ikey + 1) << " :: " << SortedTFIDList.size();
       return;
     }
 
@@ -635,13 +633,10 @@ struct occTableProducer {
         occIDX = -1;
       } else if (pos >= 0) {
         occIDX = BinarySearchVector(TFidThis, keyList, 0, keyList.size() - 1);
-      }
-
-      else {
+      } else {
         LOG(error) << "DEBUG :: ERROR :: For BC, occIDX = -2 (BC pos = -2 when searched) :";
         occIDX = -2;
       }
-
       GenOccIndexTable(bc.globalIndex(), occIDX, TFidThis, bcInTF);
     }
   } // Process function ends
@@ -693,11 +688,10 @@ struct trackMeanOccTableProducer {
 
       // if (Key > Table.iteratorAt(mid).trackId()) {
       if (Key > midElement) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
-        high = mid - 1;
-      } // If Key is smaller, ignore right half, update the high
+        low = mid + 1; // If Key is greater, ignore left  half, update the low
+      } else {
+        high = mid - 1; // If Key is smaller, ignore right half, update the high
+      }
     }
     return -1; // Element is not present
   }
@@ -738,14 +732,14 @@ struct trackMeanOccTableProducer {
     if (bcBegin <= bcEnd) {
       binStart = bcBegin;
       binEnd = bcEnd;
-      x1 = float(binStart);
-      x2 = float(binEnd);
+      x1 = static_cast<float>(binStart);
+      x2 = static_cast<float>(binEnd);
     } //
     else {
       binStart = bcEnd;
       binEnd = bcBegin;
-      x1 = float(binEnd);
-      x2 = float(binStart);
+      x1 = static_cast<float>(binEnd);
+      x2 = static_cast<float>(binStart);
     } //
 
     if (x2 == x1) {
@@ -890,8 +884,7 @@ struct trackMeanOccTableProducer {
           } else {
             LOG(error) << "DEBUG :: ERROR :: Not an ambiguous track either ::";
           }
-        } // track doesn't have collision
-        else {
+        } else {
           CollisionId_posError++;
         }
       } else {
