@@ -683,7 +683,7 @@ struct trackMeanOccTableProducer {
       if (Key == midElement) {
         return mid;
       }
-      
+
       if (Key > midElement) {
         low = mid + 1; // If Key is greater, ignore left  half, update the low
       } else {
