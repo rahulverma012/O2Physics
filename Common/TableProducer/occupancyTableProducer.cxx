@@ -618,7 +618,7 @@ struct occTableProducer {
         TMath::Mean(vecRobustOcc_NtrackDet_Unfm_80.size(), vecRobustOcc_NtrackDet_Unfm_80.data()));
     }
 
-    if (static_cast<int>(ikey + 1) != int(SortedTFIDList.size())) {
+    if (static_cast<int>(ikey + 1) != static_cast<int>(SortedTFIDList.size())) {
       LOG(error) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes " << static_cast<int>(ikey + 1) << " :: " << SortedTFIDList.size();
       return;
     }
@@ -716,7 +716,7 @@ struct trackMeanOccTableProducer {
     for (int i = binStart; i <= binEnd; i++) {
       sumOfBins += OccVector[i];
     }
-    float meanOccupancy = sumOfBins / double(binEnd - binStart + 1);
+    float meanOccupancy = sumOfBins / static_cast<double>(binEnd - binStart + 1);
     return meanOccupancy;
   }
 
@@ -734,8 +734,7 @@ struct trackMeanOccTableProducer {
       binEnd = bcEnd;
       x1 = static_cast<float>(binStart);
       x2 = static_cast<float>(binEnd);
-    } //
-    else {
+    } else {
       binStart = bcEnd;
       binEnd = bcBegin;
       x1 = static_cast<float>(binEnd);
@@ -906,10 +905,9 @@ struct trackMeanOccTableProducer {
       doAmbgUpdate = false;
       if (hasCollision) {
         if (LastTrackHadCollision) {
-          if (collision.globalIndex() == oldCollisionIndex) {
+          if (collision.globalIndex() == oldCollisionIndex) { // if collisions are same
             doCollisionUpdate = false;
-          } // if collisions are same
-          else {
+          } else {
             doCollisionUpdate = true;
           } // if collisions are different
         } else {
