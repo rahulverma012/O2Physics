@@ -9,8 +9,13 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 ///
-/// \brief  TPC PID - Calibration
+/// \brief  Occupancy Table Producer : TPC PID - Calibration
+///         Occupancy calculater using tracks which have entry for collision and trackQA tables
+///         Ambg tracks were not used
 /// \author Rahul Verma (rahul.verma@iitb.ac.in) :: Marian I Ivanov (marian.ivanov@cern.ch)
+
+#include <vector>
+#include <algorithm>
 
 #include "Framework/runDataProcessing.h"
 #include "Framework/AnalysisTask.h"
@@ -26,20 +31,18 @@
 
 #include "OccupancyTables.h"
 
-#include <typeinfo>
-
 #include "Framework/AnalysisDataModel.h"
 #include "Framework/HistogramRegistry.h"
 #include "CCDB/BasicCCDBManager.h"
 #include "DataFormatsFT0/Digit.h"
 #include "DataFormatsParameters/GRPLHCIFData.h"
-// #include "MetadataHelper.h"
 
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
 int32_t nBCsPerOrbit = o2::constants::lhc::LHCMaxBunches;
+const int nBCinTF_grp80 = 1425;
 
 struct occTableProducer {
 
@@ -57,80 +60,14 @@ struct occTableProducer {
 
   void init(InitContext const&)
   {
-    LOGF(info, "Starting init");
-
-    // Getting Info from CCDB, to be implemented
-    //  auto& mgr = o2::ccdb::BasicCCDBManager::instance();
-    //  // http://ccdb-test.cern.ch:8080/browse/Users/r/raverma?report=true
-    //  mgr.setURL("http://ccdb-test.cern.ch:8080");
-    //  mgr.setCaching(true);
-    //  auto myVect = mgr.get<TVectorT<float>>("Users/r/raverma/");
-    //  if( !myVect){
-    //    LOG(info)<<"ERROR ::CCDB OBJECT Not found";
-    //    return;
-    //  }
-
-    recoEvent.add("h_nBCsPerTF", "h_nBCsPerTF", {HistType::kTH1F, {{100, 114040, 114060}}}); // 114048
-    recoEvent.add("h_nBCinTF", "h_nBCinTF", {HistType::kTH1F, {{1000, 0, 1000000}}});
+    // Getting Info from CCDB, to be implemented Later
+    recoEvent.add("h_nBCinTF", "h_nBCinTF(to check nBCinTF)", {HistType::kTH1F, {{100, 114040, 114060}}}); // 114048
+    recoEvent.add("h_bcInTF", "h_bcInTF", {HistType::kTH1F, {{2000, 0, 200000}}});
     recoEvent.add("h_RO_T0V0Prim_Unfm_80", "h_RO_T0V0Prim_Unfm_80:median contributors", {HistType::kTH1F, {{12 * 2, -1, 11}}});
     recoEvent.add("h_RO_FDDT0V0Prim_Unfm_80", "h_RO_FDDT0V0Prim_Unfm_80:median contributors", {HistType::kTH1F, {{12 * 2, -1, 11}}});
     recoEvent.add("h_RO_NtrackDet_Unfm_80", "h_RO_NtrackDetITS/TPC/TRD/TOF_80:median contributors", {HistType::kTH1F, {{12 * 2, -1, 11}}});
 
-    LOG(info) << "Printing Event Info ";
     recoEvent.print();
-    LOG(info) << "Finishing Init ";
-  }
-
-  template <typename T, typename U>
-  int BinarySearchTable(T Key, U Table, int low, int high)
-  {
-    while (low <= high) {
-      int mid = low + (high - low) / 2;
-      if (Key == Table.iteratorAt(mid).trackId()) {
-        return mid;
-      }
-
-      if (Key > Table.iteratorAt(mid).trackId()) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
-        high = mid - 1;
-      } // If Key is smaller, ignore right half, update the high
-    }
-    return -1; // Element is not present
-  }
-
-  template <typename T, typename U>
-  int FindInTable(T key, U Table)
-  {
-    return BinarySearchTable(key, Table, 0, Table.size() - 1);
-  }
-
-  void FillNewListFromOldList(std::vector<int64_t>& NewList, std::vector<int64_t> OldList)
-  {
-    for (uint ii = 0; ii < OldList.size(); ii++) {
-      bool RepeatEntry = false;
-      for (uint jj = 0; jj < NewList.size(); jj++) {
-        if (OldList[ii] == NewList[jj]) {
-          RepeatEntry = true;
-        }
-      }
-      if (!RepeatEntry) {
-        NewList.push_back(OldList[ii]);
-      }
-    }
-  }
-
-  void InsertionSortVector(std::vector<int64_t>& UnsortedVector)
-  {
-    for (uint i = 1; i < UnsortedVector.size(); i++) {
-      int currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
-      int j;                                  //(j+1) is the correct position of current element
-      for (j = i - 1; j >= 0 && (UnsortedVector[j] > currentElement); j--) {
-        UnsortedVector[j + 1] = UnsortedVector[j];
-      }
-      UnsortedVector[j + 1] = currentElement;
-    }
   }
 
   template <typename T>
@@ -138,72 +75,23 @@ struct occTableProducer {
   {
     for (uint i = 1; i < vec.size(); i++) {
       if (vec[i] < vec[i - 1]) {
-        LOG(info) << "DEBUG :: Vector unsorted at Position = " << i;
+        LOG(debug) << "DEBUG :: Vector unsorted at Position = " << i;
         return false;
       }
     }
     return true;
   }
 
-  // template <typename int64_t>
-  int BinarySearchVector(int64_t Key, std::vector<int64_t> List, int low, int high)
+  void GetNormalisedVector(const std::vector<float>& OriginalVec, std::vector<float>& NormVec, const float& scaleFactor)
   {
-    while (low <= high) {
-      int mid = low + (high - low) / 2;
-      if (Key == List[mid]) {
-        return mid;
-      }
-
-      if (Key > List[mid]) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
-        high = mid - 1;
-      } // If Key is smaller, ignore right half, update the high
-    }
-    return -1; // Element is not present
-  }
-
-  template <typename T>
-  void InsertionSortVectorOfVector(std::vector<std::vector<T>>& UnsortedVector)
-  {
-    for (uint i = 1; i < UnsortedVector.size(); i++) {
-      std::vector<T> currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
-      int j;                                             //(j+1) is the correct position of current element
-      for (j = i - 1; j >= 0 && (UnsortedVector[j][0] > currentElement[0]); j--) {
-        UnsortedVector[j + 1] = UnsortedVector[j];
-      }
-      UnsortedVector[j + 1] = currentElement;
-    }
-  }
-
-  // // template<typename T>
-  std::vector<std::vector<float>> GetNormalisedVectors(const std::vector<std::vector<float>>& vectors)
-  {
-    double mean0, meanI, scaleFactor; // scaleFactor = mean[n]/mean[0]
-
-    std::vector<std::vector<float>> normVectors;
-
-    int i = -1;
-    mean0 = TMath::Mean(vectors[0].size(), vectors[0].data());
-    for (const auto& vec : vectors) {
-      i++;
-      meanI = TMath::Mean(vec.size(), vec.data());
-      scaleFactor = mean0 / meanI;
-
-      std::vector<float> normVec;
-      for (auto val : vec) {
-        normVec.push_back(val * scaleFactor);
-      }
-      normVectors.push_back(normVec);
-    }
-    return normVectors;
+    NormVec.resize(OriginalVec.size());
+    std::transform(OriginalVec.begin(), OriginalVec.end(), NormVec.begin(), [scaleFactor](float x) { return x * scaleFactor; });
   }
 
   void GetMedianOccVect(std::vector<float>& medianVector, std::vector<std::vector<int>>& medianPosVec, const std::vector<std::vector<float>>& vectors)
   {
-    const int n = vectors.size();       // no of vectors
-    const int size = vectors[0].size(); // size of each vector
+    const int n = vectors.size();   // no of vectors/arrays
+    const int size = nBCinTF_grp80; // size of each vector
 
     for (int i = 0; i < size; i++) {
       std::vector<std::vector<double>> data;
@@ -213,7 +101,9 @@ struct occTableProducer {
         iEntry++;
       }
       // Now sort the vector;
-      InsertionSortVectorOfVector(data);
+      std::sort(data.begin(), data.end(), [](const std::vector<double>& a, const std::vector<double>& b) {
+        return a[0] < b[0]; // Compare the first elements
+      });
 
       double median;
       std::vector<int> medianPos;
@@ -230,6 +120,24 @@ struct occTableProducer {
       medianVector.push_back(median);
       medianPosVec.push_back(medianPos);
     }
+  }
+
+  int BinarySearchVector(int64_t Key, std::vector<int64_t> List, int low, int high)
+  {
+    while (low <= high) {
+      int mid = low + (high - low) / 2;
+      if (Key == List[mid]) {
+        return mid;
+      }
+
+      if (Key > List[mid]) {
+        low = mid + 1;
+      } // If Key is greater, ignore left  half, update the low
+      else {
+        high = mid - 1;
+      } // If Key is smaller, ignore right half, update the high
+    }
+    return -1; // Element is not present
   }
 
   template <typename T>
@@ -253,21 +161,16 @@ struct occTableProducer {
   }
 
   using myCollisions = soa::Join<aod::Collisions, aod::Mults>;
-
-  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra, //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
-                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass,
-                             aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe,
-                             aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
+  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra>;
 
   Preslice<myTracks> TracksPerCollisionPreslice = o2::aod::track::collisionId;
 
   // Process the Data
-  int dfCount = 0;
+  // int dfCount = 0;
   void process(o2::aod::BCsWithTimestamps const& BCs, myCollisions const& collisions, myTracks const& tracks, aod::TracksQA const& tracksQA, o2::aod::Origins const& Origins)
   {
-    dfCount++;
-    // if(dfCount > 10) {return;}
-    LOG(info) << "DEBUG :: df_" << dfCount << " :: DF_" << Origins.iteratorAt(0).dataframeID() << " :: collisions.size() = " << collisions.size() << " :: tracks.size() = " << tracks.size() << " :: tracksQA.size() = " << tracksQA.size() << " :: BCs.size() = " << BCs.size();
+    // dfCount++;
+    // LOG(info) << "DEBUG :: df_" << dfCount << " :: DF_" << Origins.iteratorAt(0).dataframeID() << " :: collisions.size() = " << collisions.size() << " :: tracks.size() = " << tracks.size() << " :: tracksQA.size() = " << tracksQA.size() << " :: BCs.size() = " << BCs.size();
 
     if (collisions.size() == 0) {
       for (const auto& BC : BCs) {                            // uint i = 0; i < BCs.size() ; i++){
@@ -309,8 +212,6 @@ struct occTableProducer {
 
     auto runDuration = ccdb->getRunDuration(run, true);
     int64_t tsSOR = runDuration.first;
-    // auto grplhcif = ccdb->getForTimeStamp<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF", tsSOR);
-    // bcPatternB = grplhcif->getBunchFilling().getBCPattern();
     auto ctpx = ccdb->getForTimeStamp<std::vector<Long64_t>>("CTP/Calib/OrbitReset", tsSOR);
     int64_t tsOrbitReset = (*ctpx)[0];
     uint32_t nOrbitsPerTF = run < 534133 ? 128 : 32;
@@ -332,14 +233,11 @@ struct occTableProducer {
 
       bc = collision.bc_as<aod::BCsWithTimestamps>();
       run = bc.runNumber();
-      // auto timestamp = bc.timestamp()
       if (run != lastRun) {
         // lastRun = run;
         time = bc.timestamp();
         runDuration = ccdb->getRunDuration(run, true);
         tsSOR = runDuration.first;
-        // auto grplhcif = ccdb->getForTimeStamp<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF", tsSOR);
-        // bcPatternB = grplhcif->getBunchFilling().getBCPattern();
         ctpx = ccdb->getForTimeStamp<std::vector<Long64_t>>("CTP/Calib/OrbitReset", tsSOR);
         tsOrbitReset = (*ctpx)[0];
         nOrbitsPerTF = run < 534133 ? 128 : 32;
@@ -352,11 +250,14 @@ struct occTableProducer {
         TFidThis = (bc.globalBC() - bcSOR) / nBCsPerTF;
         bcInTF = (bc.globalBC() - bcSOR) % nBCsPerTF;
 
-        recoEvent.fill(HIST("h_nBCsPerTF"), nBCsPerTF);
-        recoEvent.fill(HIST("h_nBCinTF"), bcInTF);
-      }
+        recoEvent.fill(HIST("h_nBCinTF"), nBCsPerTF);
+        recoEvent.fill(HIST("h_bcInTF"), bcInTF);
 
-      // int nTrackWithQA = 0;
+        if (nBCsPerTF > nBCinTF) {
+          LOG(error) << "DEBUG :: FATAL ERROR :: nBCsPerTF > nBCinTF i.e " << nBCsPerTF << " > " << nBCinTF << " will cause crash in further process";
+          return;
+        }
+      }
 
       TFIDList.push_back(TFidThis);
       BC_TF_Map[TFidThis].push_back(bc.globalIndex());
@@ -527,26 +428,22 @@ struct occTableProducer {
     }
     // collision Loop is over
 
-    std::vector<int64_t> SortedTFIDList;
-    FillNewListFromOldList(SortedTFIDList, TFIDList);
-    int check_i = 0;
-    LOG(info) << "DEBUG :: df_" << dfCount << " :: #TFList.size() = " << SortedTFIDList.size() << " :: collisions.size() = " << TFIDList.size();
-    for (auto x : SortedTFIDList) {
-      LOG(info) << "DEBUG :: df_" << dfCount << " :: TFID :: " << check_i << " :: " << x;
-      check_i++;
-    }
+    std::vector<int64_t> SortedTFIDList = TFIDList;
+    std::sort(SortedTFIDList.begin(), SortedTFIDList.end());
+    auto last = std::unique(SortedTFIDList.begin(), SortedTFIDList.end());
+    SortedTFIDList.erase(last, SortedTFIDList.end());
 
     int totalSize = 0;
     for (auto x : SortedTFIDList) {
       totalSize += BC_TF_Map[x].size();
       // check if the BCs are already sorted or not
       if (!vectorAscendingSortCheck(BC_TF_Map[x])) {
-        LOG(info) << "DEBUG :: ERROR :: BCs are not sorted";
+        LOG(debug) << "DEBUG :: ERROR :: BCs are not sorted";
       }
     }
 
     if (totalSize != collisions.size()) {
-      LOG(info) << "DEBUG :: ERROR :: df_" << dfCount << " :: filled TF list and collision size mismatch ::  filledTF_Size = " << totalSize << " :: " << collisions.size() << " = collisions.size()";
+      LOG(debug) << "DEBUG :: ERROR :: filled TF list and collision size mismatch ::  filledTF_Size = " << totalSize << " :: " << collisions.size() << " = collisions.size()";
     }
 
     // Fill the Producer
@@ -558,7 +455,7 @@ struct occTableProducer {
       keyList.push_back(key);
     }
     // Sort the keyList; //keys are not in ascending order while filling, but TFs are in ascending order
-    InsertionSortVector(keyList);
+    std::sort(keyList.begin(), keyList.end());
     int keyCounter = -1;
     // Write the table
     for (const auto& key : keyList) {
@@ -582,29 +479,81 @@ struct occTableProducer {
       const std::vector<float>& vecOcc_NTrackITS_TPC_A_Unfm_80 = occ_NTrackITS_TPC_A_Unfm_80[key];
       const std::vector<float>& vecOcc_NTrackITS_TPC_C_Unfm_80 = occ_NTrackITS_TPC_C_Unfm_80[key];
 
+      float meanOcc_Prim_Unfm_80 = TMath::Mean(vecOcc_Prim_Unfm_80.size(), vecOcc_Prim_Unfm_80.data());
+      float meanOcc_FV0A_Unfm_80 = TMath::Mean(vecOcc_FV0A_Unfm_80.size(), vecOcc_FV0A_Unfm_80.data());
+      float meanOcc_FV0C_Unfm_80 = TMath::Mean(vecOcc_FV0C_Unfm_80.size(), vecOcc_FV0C_Unfm_80.data());
+      float meanOcc_FT0A_Unfm_80 = TMath::Mean(vecOcc_FT0A_Unfm_80.size(), vecOcc_FT0A_Unfm_80.data());
+      float meanOcc_FT0C_Unfm_80 = TMath::Mean(vecOcc_FT0C_Unfm_80.size(), vecOcc_FT0C_Unfm_80.data());
+      float meanOcc_FDDA_Unfm_80 = TMath::Mean(vecOcc_FDDA_Unfm_80.size(), vecOcc_FDDA_Unfm_80.data());
+      float meanOcc_FDDC_Unfm_80 = TMath::Mean(vecOcc_FDDC_Unfm_80.size(), vecOcc_FDDC_Unfm_80.data());
+      float meanOcc_NTrack_PVC_Unfm_80 = TMath::Mean(vecOcc_NTrack_PVC_Unfm_80.size(), vecOcc_NTrack_PVC_Unfm_80.data());
+      float meanOcc_NTrack_ITS_Unfm_80 = TMath::Mean(vecOcc_NTrack_ITS_Unfm_80.size(), vecOcc_NTrack_ITS_Unfm_80.data());
+      float meanOcc_NTrack_TPC_Unfm_80 = TMath::Mean(vecOcc_NTrack_TPC_Unfm_80.size(), vecOcc_NTrack_TPC_Unfm_80.data());
+      float meanOcc_NTrack_TRD_Unfm_80 = TMath::Mean(vecOcc_NTrack_TRD_Unfm_80.size(), vecOcc_NTrack_TRD_Unfm_80.data());
+      float meanOcc_NTrack_TOF_Unfm_80 = TMath::Mean(vecOcc_NTrack_TOF_Unfm_80.size(), vecOcc_NTrack_TOF_Unfm_80.data());
+      float meanOcc_NTrackSize_Unfm_80 = TMath::Mean(vecOcc_NTrackSize_Unfm_80.size(), vecOcc_NTrackSize_Unfm_80.data());
+      float meanOcc_NTrackTPC_A_Unfm_80 = TMath::Mean(vecOcc_NTrackTPC_A_Unfm_80.size(), vecOcc_NTrackTPC_A_Unfm_80.data());
+      float meanOcc_NTrackTPC_C_Unfm_80 = TMath::Mean(vecOcc_NTrackTPC_C_Unfm_80.size(), vecOcc_NTrackTPC_C_Unfm_80.data());
+      float meanOcc_NTrackITS_TPC_Unfm_80 = TMath::Mean(vecOcc_NTrackITS_TPC_Unfm_80.size(), vecOcc_NTrackITS_TPC_Unfm_80.data());
+      float meanOcc_NTrackITS_TPC_A_Unfm_80 = TMath::Mean(vecOcc_NTrackITS_TPC_A_Unfm_80.size(), vecOcc_NTrackITS_TPC_A_Unfm_80.data());
+      float meanOcc_NTrackITS_TPC_C_Unfm_80 = TMath::Mean(vecOcc_NTrackITS_TPC_C_Unfm_80.size(), vecOcc_NTrackITS_TPC_C_Unfm_80.data());
+
       // Get and Store the normalised vectors
-      //  std::vector<std::vector<float>> vecList =
-      std::vector<std::vector<float>> normVectors = GetNormalisedVectors({vecOcc_Prim_Unfm_80, vecOcc_FV0A_Unfm_80, vecOcc_FV0C_Unfm_80, vecOcc_FT0A_Unfm_80, vecOcc_FT0C_Unfm_80, vecOcc_FDDA_Unfm_80, vecOcc_FDDC_Unfm_80, vecOcc_NTrack_PVC_Unfm_80, vecOcc_NTrack_ITS_Unfm_80, vecOcc_NTrack_TPC_Unfm_80, vecOcc_NTrack_TRD_Unfm_80, vecOcc_NTrack_TOF_Unfm_80, vecOcc_NTrackSize_Unfm_80, vecOcc_NTrackTPC_A_Unfm_80, vecOcc_NTrackTPC_C_Unfm_80, vecOcc_NTrackITS_TPC_Unfm_80, vecOcc_NTrackITS_TPC_A_Unfm_80, vecOcc_NTrackITS_TPC_C_Unfm_80});
+      std::vector<float> vecOccNorm_Prim_Unfm_80;
+      GetNormalisedVector(vecOcc_Prim_Unfm_80, vecOccNorm_Prim_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_Prim_Unfm_80);
+      std::vector<float> vecOccNorm_FV0A_Unfm_80;
+      GetNormalisedVector(vecOcc_FV0A_Unfm_80, vecOccNorm_FV0A_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FV0A_Unfm_80);
+      std::vector<float> vecOccNorm_FV0C_Unfm_80;
+      GetNormalisedVector(vecOcc_FV0C_Unfm_80, vecOccNorm_FV0C_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FV0C_Unfm_80);
+      std::vector<float> vecOccNorm_FT0A_Unfm_80;
+      GetNormalisedVector(vecOcc_FT0A_Unfm_80, vecOccNorm_FT0A_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FT0A_Unfm_80);
+      std::vector<float> vecOccNorm_FT0C_Unfm_80;
+      GetNormalisedVector(vecOcc_FT0C_Unfm_80, vecOccNorm_FT0C_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FT0C_Unfm_80);
+      std::vector<float> vecOccNorm_FDDA_Unfm_80;
+      GetNormalisedVector(vecOcc_FDDA_Unfm_80, vecOccNorm_FDDA_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FDDA_Unfm_80);
+      std::vector<float> vecOccNorm_FDDC_Unfm_80;
+      GetNormalisedVector(vecOcc_FDDC_Unfm_80, vecOccNorm_FDDC_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_FDDC_Unfm_80);
+      std::vector<float> vecOccNorm_NTrack_PVC_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrack_PVC_Unfm_80, vecOccNorm_NTrack_PVC_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrack_PVC_Unfm_80);
+      std::vector<float> vecOccNorm_NTrack_ITS_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrack_ITS_Unfm_80, vecOccNorm_NTrack_ITS_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrack_ITS_Unfm_80);
+      std::vector<float> vecOccNorm_NTrack_TPC_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrack_TPC_Unfm_80, vecOccNorm_NTrack_TPC_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrack_TPC_Unfm_80);
+      std::vector<float> vecOccNorm_NTrack_TRD_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrack_TRD_Unfm_80, vecOccNorm_NTrack_TRD_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrack_TRD_Unfm_80);
+      std::vector<float> vecOccNorm_NTrack_TOF_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrack_TOF_Unfm_80, vecOccNorm_NTrack_TOF_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrack_TOF_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackSize_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackSize_Unfm_80, vecOccNorm_NTrackSize_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackSize_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackTPC_A_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackTPC_A_Unfm_80, vecOccNorm_NTrackTPC_A_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackTPC_A_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackTPC_C_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackTPC_C_Unfm_80, vecOccNorm_NTrackTPC_C_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackTPC_C_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackITS_TPC_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackITS_TPC_Unfm_80, vecOccNorm_NTrackITS_TPC_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackITS_TPC_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackITS_TPC_A_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackITS_TPC_A_Unfm_80, vecOccNorm_NTrackITS_TPC_A_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackITS_TPC_A_Unfm_80);
+      std::vector<float> vecOccNorm_NTrackITS_TPC_C_Unfm_80;
+      GetNormalisedVector(vecOcc_NTrackITS_TPC_C_Unfm_80, vecOccNorm_NTrackITS_TPC_C_Unfm_80, meanOcc_Prim_Unfm_80 / meanOcc_NTrackITS_TPC_C_Unfm_80);
 
       // Find Robust estimators
-
       // T0A, T0C, V0A, Prim
       std::vector<float> vecRobustOcc_T0V0Prim_Unfm_80;
       std::vector<std::vector<int>> vecRobustOcc_T0V0Prim_Unfm_80_medianPosVec;
       GetMedianOccVect(vecRobustOcc_T0V0Prim_Unfm_80, vecRobustOcc_T0V0Prim_Unfm_80_medianPosVec,
-                       {vecOcc_Prim_Unfm_80, vecOcc_FV0A_Unfm_80, vecOcc_FT0A_Unfm_80, vecOcc_FT0C_Unfm_80});
+                       {vecOccNorm_Prim_Unfm_80, vecOccNorm_FV0A_Unfm_80, vecOccNorm_FT0A_Unfm_80, vecOccNorm_FT0C_Unfm_80});
 
       // T0A, T0C, V0A, FDD, Prim
       std::vector<float> vecRobustOcc_FDDT0V0Prim_Unfm_80;
       std::vector<std::vector<int>> vecRobustOcc_FDDT0V0Prim_Unfm_80_medianPosVec;
       GetMedianOccVect(vecRobustOcc_FDDT0V0Prim_Unfm_80, vecRobustOcc_FDDT0V0Prim_Unfm_80_medianPosVec,
-                       {vecOcc_Prim_Unfm_80, vecOcc_FV0A_Unfm_80, vecOcc_FT0A_Unfm_80, vecOcc_FT0C_Unfm_80, vecOcc_FDDA_Unfm_80, vecOcc_FDDC_Unfm_80});
+                       {vecOccNorm_Prim_Unfm_80, vecOccNorm_FV0A_Unfm_80, vecOccNorm_FT0A_Unfm_80, vecOccNorm_FT0C_Unfm_80, vecOccNorm_FDDA_Unfm_80, vecOccNorm_FDDC_Unfm_80});
 
       // NTrackDet
       std::vector<float> vecRobustOcc_NtrackDet_Unfm_80;
       std::vector<std::vector<int>> vecRobustOcc_NtrackDet_Unfm_80_medianPosVec;
       GetMedianOccVect(vecRobustOcc_NtrackDet_Unfm_80, vecRobustOcc_NtrackDet_Unfm_80_medianPosVec,
-                       {vecOcc_NTrack_ITS_Unfm_80, vecOcc_NTrack_TPC_Unfm_80, vecOcc_NTrack_TRD_Unfm_80, vecOcc_NTrack_TOF_Unfm_80});
+                       {vecOccNorm_NTrack_ITS_Unfm_80, vecOccNorm_NTrack_TPC_Unfm_80, vecOccNorm_NTrack_TRD_Unfm_80, vecOccNorm_NTrack_TOF_Unfm_80});
 
       for (const auto& vec : vecRobustOcc_T0V0Prim_Unfm_80_medianPosVec) {
         for (const auto& val : vec) {
@@ -623,25 +572,6 @@ struct occTableProducer {
           recoEvent.fill(HIST("h_RO_NtrackDet_Unfm_80"), val);
         }
       }
-
-      const std::vector<float>& vecOccNorm_Prim_Unfm_80 = normVectors[0];
-      const std::vector<float>& vecOccNorm_FV0A_Unfm_80 = normVectors[1];
-      const std::vector<float>& vecOccNorm_FV0C_Unfm_80 = normVectors[2];
-      const std::vector<float>& vecOccNorm_FT0A_Unfm_80 = normVectors[3];
-      const std::vector<float>& vecOccNorm_FT0C_Unfm_80 = normVectors[4];
-      const std::vector<float>& vecOccNorm_FDDA_Unfm_80 = normVectors[5];
-      const std::vector<float>& vecOccNorm_FDDC_Unfm_80 = normVectors[6];
-      const std::vector<float>& vecOccNorm_NTrack_PVC_Unfm_80 = normVectors[7];
-      const std::vector<float>& vecOccNorm_NTrack_ITS_Unfm_80 = normVectors[8];
-      const std::vector<float>& vecOccNorm_NTrack_TPC_Unfm_80 = normVectors[9];
-      const std::vector<float>& vecOccNorm_NTrack_TRD_Unfm_80 = normVectors[10];
-      const std::vector<float>& vecOccNorm_NTrack_TOF_Unfm_80 = normVectors[11];
-      const std::vector<float>& vecOccNorm_NTrackSize_Unfm_80 = normVectors[12];
-      const std::vector<float>& vecOccNorm_NTrackTPC_A_Unfm_80 = normVectors[13];
-      const std::vector<float>& vecOccNorm_NTrackTPC_C_Unfm_80 = normVectors[14];
-      const std::vector<float>& vecOccNorm_NTrackITS_TPC_Unfm_80 = normVectors[15];
-      const std::vector<float>& vecOccNorm_NTrackITS_TPC_A_Unfm_80 = normVectors[16];
-      const std::vector<float>& vecOccNorm_NTrackITS_TPC_C_Unfm_80 = normVectors[17];
 
       keyCounter++;
       GenOccTable(
@@ -691,15 +621,13 @@ struct occTableProducer {
     }
 
     if ((ikey + 1) != int(SortedTFIDList.size())) {
-      LOG(info) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes";
+      LOG(error) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes " << (ikey + 1) << " :: " << SortedTFIDList.size();
+      return;
     }
 
     // Create a BC index table.
     for (auto const& bc : BCs) {
-      // Find TFid of this BC
-      // Find BCinTF of this BC
       GetTimingInfo(bc, time, TFidThis, bcInTF);
-
       // check if this BC was used
       int pos = BinarySearchVector(bc.globalIndex(), BC_TF_Map[TFidThis], 0, BC_TF_Map[TFidThis].size() - 1);
       int64_t occIDX = -1;
@@ -710,14 +638,12 @@ struct occTableProducer {
       }
 
       else {
-        LOG(info) << "DEBUG :: ERROR :: For BC, occIDX = -2 (BC pos = -2 when searched) :";
+        LOG(error) << "DEBUG :: ERROR :: For BC, occIDX = -2 (BC pos = -2 when searched) :";
         occIDX = -2;
       }
-      GenOccIndexTable(
-        bc.globalIndex(), occIDX, TFidThis, bcInTF);
-    }
 
-    // LOG(info)<<"DEBUG ::";
+      GenOccIndexTable(bc.globalIndex(), occIDX, TFidThis, bcInTF);
+    }
   } // Process function ends
 };
 
@@ -727,123 +653,13 @@ struct trackMeanOccTableProducer {
   Service<o2::ccdb::BasicCCDBManager> ccdb;
 
   // Configurables
-  //  Event Selection
-  //  Configurable<float> cutZvertex{"cutZvertex", 10.0f, "Accepted z-vertex range (cm)"};
-
   Configurable<int> customOrbitOffset{"customOrbitOffset", 0, "customOrbitOffset for MC"};
 
   void init(InitContext const&)
   {
-    LOGF(info, "Starting init");
-
-    //
-    // LOG(info) <<"Printing Event Info ";recoEvent.print();
-    LOG(info) << "Finishing Init ";
+    // CCDB related part to be added later
   }
 
-  template <typename T, typename U>
-  int BinarySearchTable(T Key, U Table, int low, int high)
-  {
-    while (low <= high) {
-      int mid = low + (high - low) / 2;
-      if (Key == Table.iteratorAt(mid).trackId()) {
-        return mid;
-      }
-
-      if (Key > Table.iteratorAt(mid).trackId()) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
-        high = mid - 1;
-      } // If Key is smaller, ignore right half, update the high
-    }
-    return -1; // Element is not present
-  }
-
-  // o2::aod::ambiguous::TrackId
-
-  template <typename T, typename U>
-  int FindInTable(T key, U Table)
-  {
-    return BinarySearchTable(key, Table, 0, Table.size() - 1);
-  }
-
-  using myCollisions = soa::Join<aod::Collisions, aod::Mults>;
-  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra, //>; //, aod::TracksQA>;//, aod::TracksDCA, aod::TrackSelection
-                             aod::TOFSignal, aod::pidTOFbeta, aod::pidTOFmass,
-                             aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTPCFullDe,
-                             aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl, aod::pidTOFFullDe>;
-
-  // For manual sliceBy
-  Preslice<myTracks> TracksPerCollisionPreslice = o2::aod::track::collisionId;
-  Preslice<aod::TracksQA> trackQA_Preslice = o2::aod::trackqa::trackId;
-  // Preslice<myTracks>  Tracks_PreSlice = o2::aod::track::globalIndex;
-  // Preslice<myTracks>  Tracks_PreSlice = o2::soa::globalIndex;
-
-  // Use Partition after definition of filtered Tracks
-  SliceCache cache;
-  Partition<myTracks> posTracks = aod::track::signed1Pt > 0.f; // track.sign() is dynamic column so use signed1Pt
-  Partition<myTracks> negTracks = aod::track::signed1Pt < 0.f;
-
-  void FillNewListFromOldList(std::vector<int64_t>& NewList, std::vector<int64_t> OldList)
-  {
-    for (uint ii = 0; ii < OldList.size(); ii++) {
-      bool RepeatEntry = false;
-      for (uint jj = 0; jj < NewList.size(); jj++) {
-        if (OldList[ii] == NewList[jj]) {
-          RepeatEntry = true;
-        }
-      }
-      if (!RepeatEntry) {
-        NewList.push_back(OldList[ii]);
-      }
-    }
-  }
-
-  void InsertionSortVector(std::vector<int64_t>& UnsortedVector)
-  {
-    for (uint i = 1; i < UnsortedVector.size(); i++) {
-      int currentElement = UnsortedVector[i]; // Element to be Inserted at correct position
-      int j;                                  //(j+1) is the correct position of current element
-      for (j = i - 1; j >= 0 && (UnsortedVector[j] > currentElement); j--) {
-        UnsortedVector[j + 1] = UnsortedVector[j];
-      }
-      UnsortedVector[j + 1] = currentElement;
-    }
-  }
-
-  template <typename T>
-  bool vectorAscendingSortCheck(const T& vec)
-  {
-    for (int64_t i = 1; i < vec.size(); i++) {
-      if (vec[i] < vec[i - 1]) {
-        LOG(info) << "DEBUG :: Vector unsorted at Position = " << i;
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // template <typename int64_t>
-  int BinarySearchVector(int64_t Key, std::vector<int64_t> List, int low, int high)
-  {
-    while (low <= high) {
-      int mid = low + (high - low) / 2;
-      if (Key == List[mid]) {
-        return mid;
-      }
-
-      if (Key > List[mid]) {
-        low = mid + 1;
-      } // If Key is greater, ignore left  half, update the low
-      else {
-        high = mid - 1;
-      } // If Key is smaller, ignore right half, update the high
-    }
-    return -1; // Element is not present
-  }
-
-  // Preslice
   template <typename T>
   void GetTimingInfo(const T& bc, uint64_t& time, int64_t& TFidThis, int& bcInTF)
   {
@@ -862,6 +678,34 @@ struct trackMeanOccTableProducer {
 
     TFidThis = (bc.globalBC() - bcSOR) / nBCsPerTF;
     bcInTF = (bc.globalBC() - bcSOR) % nBCsPerTF;
+  }
+
+  template <typename T, typename U>
+  int BinarySearchTable(T Key, U Table, int low, int high)
+  {
+    while (low <= high) {
+      int mid = low + (high - low) / 2;
+      auto midElement = Table.iteratorAt(mid).trackId();
+      // if (Key == Table.iteratorAt(mid).trackId()) {
+      if (Key == midElement) {
+        return mid;
+      }
+
+      // if (Key > Table.iteratorAt(mid).trackId()) {
+      if (Key > midElement) {
+        low = mid + 1;
+      } // If Key is greater, ignore left  half, update the low
+      else {
+        high = mid - 1;
+      } // If Key is smaller, ignore right half, update the high
+    }
+    return -1; // Element is not present
+  }
+
+  template <typename T, typename U>
+  int FindInTable(T key, U Table)
+  {
+    return BinarySearchTable(key, Table, 0, Table.size() - 1);
   }
 
   float getMeanOccupancy(int bcBegin, int bcEnd, const std::vector<float>& OccVector)
@@ -926,19 +770,22 @@ struct trackMeanOccTableProducer {
     return meanOccupancy;
   }
 
-  // Process the Data
-  int dfCount = 0;
+  using myCollisions = soa::Join<aod::Collisions, aod::Mults>;
+  using myTracks = soa::Join<aod::Tracks, o2::aod::TracksCov, aod::TracksExtra>;
   using myBCTable = soa::Join<aod::BCsWithTimestamps, aod::OccIndexTable>;
-  void process( // processTrackOccTable( //aod::BCsWithTimestamps const& BCs
-    myBCTable const& BCs, myCollisions const& collisions, myTracks const& tracks, aod::TracksQA const& tracksQA, o2::aod::Origins const& Origins, o2::aod::AmbiguousTracks const& ambgTracks, aod::Occs const& Occs, aod::OccIndexTable const& OccIndices)
+
+  // Process the Data
+  // int dfCount = 0;
+  void process(myBCTable const& BCs, myCollisions const& collisions, myTracks const& tracks,
+               aod::TracksQA const& tracksQA, o2::aod::AmbiguousTracks const& ambgTracks, o2::aod::Origins const& Origins,
+               aod::Occs const& Occs, aod::OccIndexTable const& OccIndices)
   {
-    dfCount++;
+    // dfCount++;
     // if(dfCount > 10) {return;}
-    LOG(info) << "DEBUG :: df_" << dfCount << " :: DF_" << Origins.iteratorAt(0).dataframeID() << " :: collisions.size() = " << collisions.size() << " :: tracks.size() = " << tracks.size() << " :: tracksQA.size() = " << tracksQA.size()
-              << " :: myBCTable.size() = " << BCs.size()
-              << " :: Occs.size() = " << Occs.size()
-              << " :: OccIndices() = " << OccIndices.size();
-    // return;
+    // LOG(info) << "DEBUG :: df_" << dfCount << " :: DF_" << Origins.iteratorAt(0).dataframeID() << " :: collisions.size() = " << collisions.size() << " :: tracks.size() = " << tracks.size() << " :: tracksQA.size() = " << tracksQA.size()
+    //           << " :: myBCTable.size() = " << BCs.size()
+    //           << " :: Occs.size() = " << Occs.size()
+    //           << " :: OccIndices() = " << OccIndices.size();
     if (collisions.size() == 0) {
       return;
     }
@@ -949,8 +796,6 @@ struct trackMeanOccTableProducer {
 
     auto runDuration = ccdb->getRunDuration(run, true);
     int64_t tsSOR = runDuration.first;
-    // auto grplhcif = ccdb->getForTimeStamp<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF", tsSOR);
-    // bcPatternB = grplhcif->getBunchFilling().getBCPattern();
     auto ctpx = ccdb->getForTimeStamp<std::vector<Long64_t>>("CTP/Calib/OrbitReset", tsSOR);
     int64_t tsOrbitReset = (*ctpx)[0];
     uint32_t nOrbitsPerTF = run < 534133 ? 128 : 32;
@@ -964,25 +809,25 @@ struct trackMeanOccTableProducer {
     int bcInTF = (bc.globalBC() - bcSOR) % nBCsPerTF;
     //
 
-    std::vector<float> Occ_Prim_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_Prim_Unfm_80 ();
-    std::vector<float> Occ_FV0A_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FV0A_Unfm_80 ();
-    std::vector<float> Occ_FV0C_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FV0C_Unfm_80 ();
-    std::vector<float> Occ_FT0A_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FT0A_Unfm_80 ();
-    std::vector<float> Occ_FT0C_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FT0C_Unfm_80 ();
-    std::vector<float> Occ_FDDA_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FDDA_Unfm_80 ();
-    std::vector<float> Occ_FDDC_Unfm_80; // = Occs.iteratorAt(bc.occIndex()).occ_FDDC_Unfm_80 ();
+    std::vector<float> Occ_Prim_Unfm_80;
+    std::vector<float> Occ_FV0A_Unfm_80;
+    std::vector<float> Occ_FV0C_Unfm_80;
+    std::vector<float> Occ_FT0A_Unfm_80;
+    std::vector<float> Occ_FT0C_Unfm_80;
+    std::vector<float> Occ_FDDA_Unfm_80;
+    std::vector<float> Occ_FDDC_Unfm_80;
 
-    std::vector<float> Occ_NTrack_PVC_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrack_PVC_Unfm_80   ();
-    std::vector<float> Occ_NTrack_ITS_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrack_ITS_Unfm_80   ();
-    std::vector<float> Occ_NTrack_TPC_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrack_TPC_Unfm_80   ();
-    std::vector<float> Occ_NTrack_TRD_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrack_TRD_Unfm_80   ();
-    std::vector<float> Occ_NTrack_TOF_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrack_TOF_Unfm_80   ();
-    std::vector<float> Occ_NTrackSize_Unfm_80;      //= Occs.iteratorAt(bc.occIndex()).occ_NTrackSize_Unfm_80   ();
-    std::vector<float> Occ_NTrackTPC_A_Unfm_80;     //= Occs.iteratorAt(bc.occIndex()).occ_NTrackTPC_A_Unfm_80  ();
-    std::vector<float> Occ_NTrackTPC_C_Unfm_80;     //= Occs.iteratorAt(bc.occIndex()).occ_NTrackTPC_C_Unfm_80  ();
-    std::vector<float> Occ_NTrackITS_TPC_Unfm_80;   //= Occs.iteratorAt(bc.occIndex()).occ_NTrackITS_TPC_Unfm_80();
-    std::vector<float> Occ_NTrackITS_TPC_A_Unfm_80; //= Occs.iteratorAt(bc.occIndex()).occ_NTrackITS_TPC_A_Unfm_80();
-    std::vector<float> Occ_NTrackITS_TPC_C_Unfm_80; //= Occs.iteratorAt(bc.occIndex()).occ_NTrackITS_TPC_C_Unfm_80();
+    std::vector<float> Occ_NTrack_PVC_Unfm_80;
+    std::vector<float> Occ_NTrack_ITS_Unfm_80;
+    std::vector<float> Occ_NTrack_TPC_Unfm_80;
+    std::vector<float> Occ_NTrack_TRD_Unfm_80;
+    std::vector<float> Occ_NTrack_TOF_Unfm_80;
+    std::vector<float> Occ_NTrackSize_Unfm_80;
+    std::vector<float> Occ_NTrackTPC_A_Unfm_80;
+    std::vector<float> Occ_NTrackTPC_C_Unfm_80;
+    std::vector<float> Occ_NTrackITS_TPC_Unfm_80;
+    std::vector<float> Occ_NTrackITS_TPC_A_Unfm_80;
+    std::vector<float> Occ_NTrackITS_TPC_C_Unfm_80;
 
     std::vector<float> OccRobust_T0V0Prim_Unfm_80;
     std::vector<float> OccRobust_FDDT0V0Prim_Unfm_80;
@@ -1002,43 +847,39 @@ struct trackMeanOccTableProducer {
     bool doAmbgUpdate = false;
 
     double Rbegin = 90., Rend = 245.;
-    double Zbegin; //= collision.posZ() + track.tgl()*Rbegin;
-    double Zend;   //= collision.posZ() + track.tgl()*Rend;
+    double Zbegin; // collision.posZ() + track.tgl()*Rbegin;
+    double Zend;   // collision.posZ() + track.tgl()*Rend;
     double vdrift = 2.64;
 
-    double dTbegin; //= ((250.- TMath::Abs(Zbegin))/vdrift)/0.025;//bin
-    double dTend;   //= ((250.- TMath::Abs(Zend))/vdrift)/0.025;  //bin
+    double dTbegin; // ((250.- TMath::Abs(Zbegin))/vdrift)/0.025;//bin
+    double dTend;   // ((250.- TMath::Abs(Zend))/vdrift)/0.025;  //bin
 
-    // double tGlobalBC ;//= bc.globalBC();
-    double bcBegin; //= tGlobalBC + dTbegin;
-    double bcEnd;   //= tGlobalBC + dTend  ;
+    double bcBegin; // tGlobalBC + dTbegin;
+    double bcEnd;   // tGlobalBC + dTend  ;
 
     int BinBCbegin;
     int BinBCend;
-
-    int64_t occIDX = -2000000000;
 
     for (const auto& trackQA : tracksQA) {
       // auto track = trackQA.track_as<myTracks>;  // dereferncing not working // only option is either use iterator way or Table slicing
 
       auto const& track = tracks.iteratorAt(trackQA.trackId()); // Find the track in track table
       if (track.globalIndex() != trackQA.trackId()) {
-        LOG(info) << "DEBUG :: ERROR :: Track and TrackQA Mismatch";
+        LOG(error) << "DEBUG :: ERROR :: Track and TrackQA Mismatch";
       }
 
       auto const& collision = collisions.iteratorAt(track.collisionId()); // Find the collision in collision table
       if (track.collisionId() != collision.globalIndex()) {
-        LOG(info) << "DEBUG :: ERROR :: track collId and collID Mismatch";
+        LOG(error) << "DEBUG :: ERROR :: track collId and collID Mismatch";
       }
 
       // Checking out of the range errors
       if (trackQA.trackId() < 0 || tracks.size() <= trackQA.trackId()) {
-        LOG(info) << "DEBUG :: ERROR :: trackQA has index out of scope :: trackQA.trackId() = " << trackQA.trackId() << " :: track.collisionId() = " << track.collisionId() << " :: track.signed1Pt() = " << track.signed1Pt();
+        LOG(error) << "DEBUG :: ERROR :: trackQA has index out of scope :: trackQA.trackId() = " << trackQA.trackId() << " :: track.collisionId() = " << track.collisionId() << " :: track.signed1Pt() = " << track.signed1Pt();
       }
       hasCollision = false;
       isAmbgTrack = false;
       if (track.collisionId() < 0 || collisions.size() <= track.collisionId()) {
-        // LOG(info)<<"DEBUG :: ERROR :: track   has index out of scope :: trackQA.trackId() = "<<trackQA.trackId()<<" :: track.collisionId() = "<<track.collisionId()<<" :: track.signed1Pt() = "<<track.signed1Pt();
         if (track.collisionId() < 0) {
           CollisionId_negError++;
           // check if it is an ambiguous track
@@ -1046,9 +887,8 @@ struct trackMeanOccTableProducer {
           if (ambgPos >= 0 && (ambgTracks.iteratorAt(ambgPos).trackId() == track.globalIndex())) {
             nAmbgTracks++;
             isAmbgTrack = true;
-            // LOG(info)<<"DEBUG :: Track is an ambiguous Track :: ambgId = "<<ambgTracks.iteratorAt(ambgPos).trackId()<<" :: trackId = "<<track.globalIndex();
           } else {
-            LOG(info) << "DEBUG :: ERROR :: Not an ambiguous track either ::";
+            LOG(error) << "DEBUG :: ERROR :: Not an ambiguous track either ::";
           }
         } // track doesn't have collision
         else {
@@ -1060,10 +900,10 @@ struct trackMeanOccTableProducer {
       }
 
       if (!hasCollision && !isAmbgTrack) {
-        LOG(info) << "DEBUG :: ERROR :: A track with no collsiion and is not Ambiguous";
+        LOG(error) << "DEBUG :: ERROR :: A track with no collsiion and is not Ambiguous";
       }
       if (hasCollision && isAmbgTrack) {
-        LOG(info) << "DEBUG :: ERROR :: A track has collision and is also ambiguous";
+        LOG(error) << "DEBUG :: ERROR :: A track has collision and is also ambiguous";
       }
 
       if (hasCollision) {
@@ -1111,30 +951,30 @@ struct trackMeanOccTableProducer {
 
       if (TFidThis != oldTFid) {
         oldTFid = TFidThis;
-        occIDX = bc.occId();
-        Occ_Prim_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_Prim_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_Prim_Unfm_80().end());
-        Occ_FV0A_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FV0A_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FV0A_Unfm_80().end());
-        Occ_FV0C_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FV0C_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FV0C_Unfm_80().end());
-        Occ_FT0A_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FT0A_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FT0A_Unfm_80().end());
-        Occ_FT0C_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FT0C_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FT0C_Unfm_80().end());
-        Occ_FDDA_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FDDA_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FDDA_Unfm_80().end());
-        Occ_FDDC_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_FDDC_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_FDDC_Unfm_80().end());
+        auto OccList = Occs.iteratorAt(bc.occId());
+        Occ_Prim_Unfm_80 = std::vector<float>(OccList.occ_Prim_Unfm_80().begin(), OccList.occ_Prim_Unfm_80().end());
+        Occ_FV0A_Unfm_80 = std::vector<float>(OccList.occ_FV0A_Unfm_80().begin(), OccList.occ_FV0A_Unfm_80().end());
+        Occ_FV0C_Unfm_80 = std::vector<float>(OccList.occ_FV0C_Unfm_80().begin(), OccList.occ_FV0C_Unfm_80().end());
+        Occ_FT0A_Unfm_80 = std::vector<float>(OccList.occ_FT0A_Unfm_80().begin(), OccList.occ_FT0A_Unfm_80().end());
+        Occ_FT0C_Unfm_80 = std::vector<float>(OccList.occ_FT0C_Unfm_80().begin(), OccList.occ_FT0C_Unfm_80().end());
+        Occ_FDDA_Unfm_80 = std::vector<float>(OccList.occ_FDDA_Unfm_80().begin(), OccList.occ_FDDA_Unfm_80().end());
+        Occ_FDDC_Unfm_80 = std::vector<float>(OccList.occ_FDDC_Unfm_80().begin(), OccList.occ_FDDC_Unfm_80().end());
 
-        Occ_NTrack_PVC_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrack_PVC_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrack_PVC_Unfm_80().end());
-        Occ_NTrack_ITS_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrack_ITS_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrack_ITS_Unfm_80().end());
-        Occ_NTrack_TPC_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrack_TPC_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrack_TPC_Unfm_80().end());
-        Occ_NTrack_TRD_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrack_TRD_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrack_TRD_Unfm_80().end());
-        Occ_NTrack_TOF_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrack_TOF_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrack_TOF_Unfm_80().end());
-        Occ_NTrackSize_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackSize_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackSize_Unfm_80().end());
-        Occ_NTrackTPC_A_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackTPC_A_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackTPC_A_Unfm_80().end());
-        Occ_NTrackTPC_C_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackTPC_C_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackTPC_C_Unfm_80().end());
-        Occ_NTrackITS_TPC_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_Unfm_80().end());
-        Occ_NTrackITS_TPC_A_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_A_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_A_Unfm_80().end());
-        Occ_NTrackITS_TPC_C_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_C_Unfm_80().begin(), Occs.iteratorAt(occIDX).occ_NTrackITS_TPC_C_Unfm_80().end());
+        Occ_NTrack_PVC_Unfm_80 = std::vector<float>(OccList.occ_NTrack_PVC_Unfm_80().begin(), OccList.occ_NTrack_PVC_Unfm_80().end());
+        Occ_NTrack_ITS_Unfm_80 = std::vector<float>(OccList.occ_NTrack_ITS_Unfm_80().begin(), OccList.occ_NTrack_ITS_Unfm_80().end());
+        Occ_NTrack_TPC_Unfm_80 = std::vector<float>(OccList.occ_NTrack_TPC_Unfm_80().begin(), OccList.occ_NTrack_TPC_Unfm_80().end());
+        Occ_NTrack_TRD_Unfm_80 = std::vector<float>(OccList.occ_NTrack_TRD_Unfm_80().begin(), OccList.occ_NTrack_TRD_Unfm_80().end());
+        Occ_NTrack_TOF_Unfm_80 = std::vector<float>(OccList.occ_NTrack_TOF_Unfm_80().begin(), OccList.occ_NTrack_TOF_Unfm_80().end());
+        Occ_NTrackSize_Unfm_80 = std::vector<float>(OccList.occ_NTrackSize_Unfm_80().begin(), OccList.occ_NTrackSize_Unfm_80().end());
+        Occ_NTrackTPC_A_Unfm_80 = std::vector<float>(OccList.occ_NTrackTPC_A_Unfm_80().begin(), OccList.occ_NTrackTPC_A_Unfm_80().end());
+        Occ_NTrackTPC_C_Unfm_80 = std::vector<float>(OccList.occ_NTrackTPC_C_Unfm_80().begin(), OccList.occ_NTrackTPC_C_Unfm_80().end());
+        Occ_NTrackITS_TPC_Unfm_80 = std::vector<float>(OccList.occ_NTrackITS_TPC_Unfm_80().begin(), OccList.occ_NTrackITS_TPC_Unfm_80().end());
+        Occ_NTrackITS_TPC_A_Unfm_80 = std::vector<float>(OccList.occ_NTrackITS_TPC_A_Unfm_80().begin(), OccList.occ_NTrackITS_TPC_A_Unfm_80().end());
+        Occ_NTrackITS_TPC_C_Unfm_80 = std::vector<float>(OccList.occ_NTrackITS_TPC_C_Unfm_80().begin(), OccList.occ_NTrackITS_TPC_C_Unfm_80().end());
 
-        OccRobust_T0V0Prim_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occRobust_T0V0Prim_Unfm_80().begin(), Occs.iteratorAt(occIDX).occRobust_T0V0Prim_Unfm_80().end());
-        OccRobust_FDDT0V0Prim_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occRobust_FDDT0V0Prim_Unfm_80().begin(), Occs.iteratorAt(occIDX).occRobust_FDDT0V0Prim_Unfm_80().end());
-        OccRobust_NtrackDet_Unfm_80 = std::vector<float>(Occs.iteratorAt(occIDX).occRobust_NtrackDet_Unfm_80().begin(), Occs.iteratorAt(occIDX).occRobust_NtrackDet_Unfm_80().end());
+        OccRobust_T0V0Prim_Unfm_80 = std::vector<float>(OccList.occRobust_T0V0Prim_Unfm_80().begin(), OccList.occRobust_T0V0Prim_Unfm_80().end());
+        OccRobust_FDDT0V0Prim_Unfm_80 = std::vector<float>(OccList.occRobust_FDDT0V0Prim_Unfm_80().begin(), OccList.occRobust_FDDT0V0Prim_Unfm_80().end());
+        OccRobust_NtrackDet_Unfm_80 = std::vector<float>(OccList.occRobust_NtrackDet_Unfm_80().begin(), OccList.occRobust_NtrackDet_Unfm_80().end());
       }
 
       // Timebc = TGlobalBC+ΔTdrift
@@ -1147,6 +987,19 @@ struct trackMeanOccTableProducer {
       Zend = collision.posZ() + track.tgl() * Rend;     // in cm
       vdrift = 2.64;                                    // cm/μs
 
+      // clip the result at 250
+      if (Zbegin > 250) {
+        Zbegin = 250;
+      } else if (Zbegin < -250) {
+        Zbegin = -250;
+      }
+
+      if (Zend > 250) {
+        Zend = 250;
+      } else if (Zend < -250) {
+        Zend = -250;
+      }
+
       dTbegin = ((250. - TMath::Abs(Zbegin)) / vdrift) / 0.025;
       dTend = ((250. - TMath::Abs(Zend)) / vdrift) / 0.025;
 
@@ -1158,11 +1011,6 @@ struct trackMeanOccTableProducer {
 
       meanOccTable(
         track.globalIndex(),
-        track.collisionId(),
-        occIDX,
-        bc.globalIndex(),
-        TFidThis,
-        bcInTF,
         getMeanOccupancy(BinBCbegin, BinBCend, Occ_Prim_Unfm_80),
         getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0A_Unfm_80),
         getMeanOccupancy(BinBCbegin, BinBCend, Occ_FV0C_Unfm_80),
@@ -1206,8 +1054,6 @@ struct trackMeanOccTableProducer {
         getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_FDDT0V0Prim_Unfm_80),
         getWeightedMeanOccupancy(BinBCbegin, BinBCend, OccRobust_NtrackDet_Unfm_80));
     } // end of trackQA loop
-
-    // LOG(info)<<"DEBUG ::";
   } // Process function ends
   // PROCESS_SWITCH(trackMeanOccTableProducer, processTrackOccTable, "Calculate Mean Occupancy for tracks having entry for trackQA & collisions", true);
 };
@@ -1215,5 +1061,6 @@ struct trackMeanOccTableProducer {
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{
-    adaptAnalysisTask<occTableProducer>(cfgc), adaptAnalysisTask<trackMeanOccTableProducer>(cfgc)};
+    adaptAnalysisTask<occTableProducer>(cfgc),
+    adaptAnalysisTask<trackMeanOccTableProducer>(cfgc)};
 }
