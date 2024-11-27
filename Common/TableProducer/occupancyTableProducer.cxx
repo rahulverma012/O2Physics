@@ -29,7 +29,7 @@
 
 #include "PWGLF/DataModel/LFStrangenessTables.h"
 
-#include "OccupancyTables.h"
+#include "Common/DataModel/OccupancyTables.h"
 
 #include "Framework/AnalysisDataModel.h"
 #include "Framework/HistogramRegistry.h"
