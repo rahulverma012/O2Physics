@@ -618,7 +618,7 @@ struct occTableProducer {
         TMath::Mean(vecRobustOcc_NtrackDet_Unfm_80.size(), vecRobustOcc_NtrackDet_Unfm_80.data()));
     }
 
-    if ( static_cast<int>(ikey + 1) != int(SortedTFIDList.size())) {
+    if (static_cast<int>(ikey + 1) != int(SortedTFIDList.size())) {
       LOG(error) << "DEBUG :: ERROR :: #keys and SortedTFIdList have different sizes " << static_cast<int>(ikey + 1) << " :: " << SortedTFIDList.size();
       return;
     }
