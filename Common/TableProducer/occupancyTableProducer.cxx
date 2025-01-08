@@ -703,7 +703,7 @@ struct OccupancyTableProducer {
       auto it = std::find(bcTFMap[idx].begin(), bcTFMap[idx].end(), bc.globalIndex()); // will find the iterator where object is placed.
       if (it != bcTFMap[idx].end()) {
         occIDX = idx; // Element is in the vector
-      } else { // Element is not in the vector
+      } else {        // Element is not in the vector
         occIDX = -1;
       }
 
