@@ -14,6 +14,9 @@
 #include <iostream>
 #include <memory>
 #include <fstream>
+#include <list>
+#include <vector>
+#include <algorithm>
 #include "Framework/Logger.h"
 using namespace std;
 
@@ -137,7 +140,7 @@ void HistogramManager::AddHistogram(const char* histClass, const char* hname, co
   }
   // check whether this histogram name was used before
   if (hList->FindObject(hname)) {
-    LOG(warn) << "HistogramManager::AddHistogram(): Histogram " << hname << " already exists";
+    LOG(warn) << "HistogramManager::AddHistogram(): Histogram " << hname << " already exists in class " << histClass;
     return;
   }
 
@@ -559,6 +562,13 @@ void HistogramManager::AddHistogram(const char* histClass, const char* hname, co
 
   if (varW > kNothing) {
     fUsedVars[varW] = kTRUE;
+  }
+
+  for (int i = 0; i < nDimensions; i++) {
+    if (xmax[i] <= xmin[i]) {
+      LOG(warn) << "HistogramManager::AddHistogram(): Histogram " << hname << " has wrong axes ranges for dimension " << i
+                << ", (xmin/xmax): " << xmin[i] << " / " << xmax[i];
+    }
   }
 
   // encode needed variable identifiers in a vector and push it to the std::list corresponding to the current histogram list
