@@ -56,62 +56,6 @@
 #include <TPDGCode.h>
 #include <TF1.h>
 
-namespace o2::aod
-{
-
-namespace gen_ebyecolltable
-{
-DECLARE_SOA_COLUMN(CentralityGen, centralityGen, float);
-DECLARE_SOA_COLUMN(NetProtNoGen, netProtNoGen, float);   //! net proton no. in an event
-DECLARE_SOA_COLUMN(ProtNoGen, protNoGen, float);         //! proton no. in an event
-DECLARE_SOA_COLUMN(AntiProtNoGen, antiProtNoGen, float); //! antiproton no. in an event
-} // namespace gen_ebyecolltable
-
-DECLARE_SOA_TABLE(ProtGenCollEbyeTables, "AOD", "PROTGENCOLLEBYETABLE",
-                  gen_ebyecolltable::CentralityGen,
-                  gen_ebyecolltable::NetProtNoGen,
-                  gen_ebyecolltable::ProtNoGen,
-                  gen_ebyecolltable::AntiProtNoGen);
-using ProtGenCollEbyeTable = ProtGenCollEbyeTables::iterator;
-
-namespace rec_ebyecolltable
-{
-DECLARE_SOA_COLUMN(CentralityRec, centralityRec, float);
-DECLARE_SOA_COLUMN(NetProtNoRec, netProtNoRec, float);   //! net proton no. in an event
-DECLARE_SOA_COLUMN(ProtNoRec, protNoRec, float);         //! proton no. in an event
-DECLARE_SOA_COLUMN(AntiProtNoRec, antiProtNoRec, float); //! antiproton no. in an event
-} // namespace rec_ebyecolltable
-
-DECLARE_SOA_TABLE(ProtRecCollEbyeTables, "AOD", "PROTRECCOLLEBYETABLE",
-                  rec_ebyecolltable::CentralityRec,
-                  rec_ebyecolltable::NetProtNoRec,
-                  rec_ebyecolltable::ProtNoRec,
-                  rec_ebyecolltable::AntiProtNoRec);
-using ProtRecCollEbyeTable = ProtRecCollEbyeTables::iterator;
-
-DECLARE_SOA_TABLE(RecCollTables, "AOD", "RECCOLLTABLE",
-                  o2::soa::Index<>,
-                  rec_ebyecolltable::CentralityRec);
-using RecCollTable = RecCollTables::iterator;
-
-namespace rec_ebyetracktable
-{
-DECLARE_SOA_INDEX_COLUMN(RecCollTable, recCollTable);
-DECLARE_SOA_COLUMN(Pt, pt, float);
-DECLARE_SOA_COLUMN(Eta, eta, float);
-DECLARE_SOA_COLUMN(Charge, charge, int);
-} // namespace rec_ebyetracktable
-
-DECLARE_SOA_TABLE(ProtRecCompleteEbyeTables, "AOD", "PROTRECCOMPLETEEBYETABLE",
-                  o2::soa::Index<>,
-                  rec_ebyetracktable::RecCollTableId,
-                  rec_ebyetracktable::Pt,
-                  rec_ebyetracktable::Eta,
-                  rec_ebyetracktable::Charge);
-using ProtRecCompleteEbyeTable = ProtRecCompleteEbyeTables::iterator;
-
-} // namespace o2::aod
-
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
@@ -151,7 +95,10 @@ struct NetprotonCumulantsMc {
 
   Configurable<bool> cfgLoadEff{"cfgLoadEff", true, "Load efficiency from file"};
   Configurable<bool> cfgEvSelkNoSameBunchPileup{"cfgEvSelkNoSameBunchPileup", true, "Pileup removal"};
-
+  Configurable<bool> cfgUseGoodITSLayerAllCut{"cfgUseGoodITSLayerAllCut", true, "Remove time interval with dead ITS zone"};
+  Configurable<bool> cfgIfRejectElectron{"cfgIfRejectElectron", true, "Remove electrons"};
+  Configurable<bool> cfgIfMandatoryTOF{"cfgIfMandatoryTOF", true, "Mandatory TOF requirement to remove pileup"};
+  Configurable<bool> cfgEvSelkIsVertexTOFmatched{"cfgEvSelkIsVertexTOFmatched", true, "If matched with TOF, for pileup"};
   ConfigurableAxis cfgCentralityBins{"cfgCentralityBins", {90, 0., 90.}, "Centrality/Multiplicity percentile bining"};
 
   // Connect to ccdb
@@ -170,7 +117,7 @@ struct NetprotonCumulantsMc {
 
   // Filter command for rec (data)***********
   Filter collisionFilter = nabs(aod::collision::posZ) < cfgCutVertex;
-  Filter trackFilter = (nabs(aod::track::eta) < 0.8f) && (aod::track::pt > cfgCutPtLower) && (aod::track::pt < 5.0f) && ((requireGlobalTrackInFilter()) || (aod::track::isGlobalTrackSDD == (uint8_t) true)) && (aod::track::tpcChi2NCl < cfgCutTpcChi2NCl) && (aod::track::itsChi2NCl < cfgCutItsChi2NCl) && (aod::track::dcaZ < cfgCutDCAz) && (aod::track::dcaXY < cfgCutDCAxy);
+  Filter trackFilter = (nabs(aod::track::eta) < cfgCutEta) && (aod::track::pt > cfgCutPtLower) && (aod::track::pt < 5.0f) && ((requireGlobalTrackInFilter()) || (aod::track::isGlobalTrackSDD == (uint8_t) true)) && (aod::track::tpcChi2NCl < cfgCutTpcChi2NCl) && (aod::track::itsChi2NCl < cfgCutItsChi2NCl) && (aod::track::dcaZ < cfgCutDCAz) && (aod::track::dcaXY < cfgCutDCAxy);
 
   // filtering collisions and tracks for real data***********
   using AodCollisions = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::CentFV0As, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFDDMs>>;
@@ -913,6 +860,16 @@ struct NetprotonCumulantsMc {
       return false;
   }
 
+  // electron rejection function
+  template <typename T>
+  bool isElectron(const T& candidate) // Victor's BF analysis
+  {
+    if (candidate.tpcNSigmaEl() > -3.0f && candidate.tpcNSigmaEl() < 5.0f && std::abs(candidate.tpcNSigmaPi()) > 3.0f && std::abs(candidate.tpcNSigmaKa()) > 3.0f && std::abs(candidate.tpcNSigmaPr()) > 3.0f) {
+      return true;
+    }
+    return false;
+  }
+
   template <typename T>
   bool selectionPIDnew(const T& candidate) // Victor's BF analysis
   {
@@ -959,10 +916,6 @@ struct NetprotonCumulantsMc {
     } else {
       // Find the pt bin index based on the track's pt value
       int binIndex = -1;
-      // Get the array from the Configurable
-      // auto ptBins = (std::vector<float>)cfgPtBins;
-      // auto effProt = (std::vector<float>)cfgProtonEff;
-      // auto effAntiprot = (std::vector<float>)cfgAntiprotonEff;
 
       for (int i = 0; i < 16; ++i) {
         if (candidate.pt() >= cfgPtBins.value[i] && candidate.pt() < cfgPtBins.value[i + 1]) {
@@ -981,8 +934,6 @@ struct NetprotonCumulantsMc {
       return 0.0;
     }
   }
-
-  Produces<aod::ProtGenCollEbyeTables> genEbyeCollisions; //! MC Gen table creation
 
   void processMCGen(aod::McCollision const& mcCollision, aod::McParticles const& mcParticles, const soa::SmallGroups<EventCandidatesMC>& collisions)
   {
@@ -1010,6 +961,16 @@ struct NetprotonCumulantsMc {
       if (!collision.sel8() || std::abs(collision.mcCollision().posZ()) > cfgCutVertex) {
         continue;
       }
+      if (cfgUseGoodITSLayerAllCut && !(collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll))) {
+        continue;
+      }
+      if (cfgEvSelkNoSameBunchPileup && !(collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup))) {
+        continue;
+      }
+      if (cfgEvSelkIsVertexTOFmatched && !(collision.selection_bit(o2::aod::evsel::kIsVertexTOFmatched))) {
+        continue;
+      }
+
       cent = collision.centFT0M();
 
       selectedEvents[nevts++] = collision.mcCollision_as<aod::McCollisions>().globalIndex();
@@ -1030,7 +991,7 @@ struct NetprotonCumulantsMc {
 
     for (const auto& mcParticle : mcParticles) {
       if (mcParticle.isPhysicalPrimary()) {
-        if ((mcParticle.pt() > cfgCutPtLower) && (mcParticle.pt() < 5.0f) && (std::abs(mcParticle.eta()) < 0.8f)) {
+        if ((mcParticle.pt() > cfgCutPtLower) && (mcParticle.pt() < 5.0f) && (std::abs(mcParticle.eta()) < cfgCutEta)) {
           histos.fill(HIST("hgenPtAll"), mcParticle.pt());
           histos.fill(HIST("hgenEtaAll"), mcParticle.eta());
           histos.fill(HIST("hgenPhiAll"), mcParticle.phi());
@@ -1066,7 +1027,6 @@ struct NetprotonCumulantsMc {
     histos.fill(HIST("hgenProfileTotalProton"), cent, (nProt + nAntiprot));
     histos.fill(HIST("hgenProfileProton"), cent, nProt);
     histos.fill(HIST("hgenProfileAntiproton"), cent, nAntiprot);
-    genEbyeCollisions(cent, netProt, nProt, nAntiprot);
 
     // Profiles for generated level cumulants
     //-------------------------------------------------------------------------------------------
@@ -1100,25 +1060,30 @@ struct NetprotonCumulantsMc {
   }
   PROCESS_SWITCH(NetprotonCumulantsMc, processMCGen, "Process Generated", true);
 
-  Produces<aod::ProtRecCollEbyeTables> recEbyeCollisions;             //! MC Rec table creation
-  Produces<aod::RecCollTables> recCollisions;                         //! MC Rec table creation
-  Produces<aod::ProtRecCompleteEbyeTables> recEbyeCompleteCollisions; //! MC Rec table creation with tracks
-
   void processMCRec(MyMCRecCollision const& collision, MyMCTracks const& tracks, aod::McCollisions const&, aod::McParticles const&)
   {
-    // auto tracksWithITSPid = soa::Attach<MyMCTracks, aod::pidits::ITSNSigmaEl, aod::pidits::ITSNSigmaPi, aod::pidits::ITSNSigmaKa, aod::pidits::ITSNSigmaPr>(tracks);
+    if (!collision.has_mcCollision()) {
+      return;
+    }
 
     if (!collision.sel8()) {
       return;
     }
-    if (!collision.has_mcCollision()) {
+    if (cfgUseGoodITSLayerAllCut && !(collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll))) {
       return;
     }
+    if (cfgEvSelkNoSameBunchPileup && !(collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup))) {
+      return;
+    }
+    if (cfgEvSelkIsVertexTOFmatched && !(collision.selection_bit(o2::aod::evsel::kIsVertexTOFmatched))) {
+      return;
+      ;
+    }
+
     auto cent = collision.centFT0M();
     histos.fill(HIST("hCentrec"), cent);
     histos.fill(HIST("hMC"), 5.5);
     histos.fill(HIST("hZvtx_after_sel"), collision.posZ());
-    recCollisions(cent);
 
     float nProt = 0.0;
     float nAntiprot = 0.0;
@@ -1141,7 +1106,7 @@ struct NetprotonCumulantsMc {
       }
 
       auto particle = track.mcParticle();
-      if ((particle.pt() < cfgCutPtLower) || (particle.pt() > 5.0f) || (std::abs(particle.eta()) > 0.8f)) {
+      if ((particle.pt() < cfgCutPtLower) || (particle.pt() > 5.0f) || (std::abs(particle.eta()) > cfgCutEta)) {
         continue;
       }
       if (!(track.itsNCls() > cfgITScluster) || !(track.tpcNClsFound() >= cfgTPCcluster) || !(track.tpcNClsCrossedRows() >= cfgTPCnCrossedRows)) {
@@ -1156,6 +1121,19 @@ struct NetprotonCumulantsMc {
         histos.fill(HIST("hrecDcaXYAll"), track.dcaXY());
         histos.fill(HIST("hrecDcaZAll"), track.dcaZ());
 
+        // rejecting electron
+        if (cfgIfRejectElectron && isElectron(track)) {
+          continue;
+        }
+        // use ITS pid as well
+        if (cfgUseItsPid && (std::abs(itsResponse.nSigmaITS<o2::track::PID::Proton>(track)) > 3.0)) {
+          continue;
+        }
+        // required tracks with TOF mandatory to avoid pileup
+        if (cfgIfMandatoryTOF && !track.hasTOF()) {
+          continue;
+        }
+
         bool trackSelected = false;
         if (cfgPIDchoice == 0)
           trackSelected = selectionPIDoldTOFveto(track);
@@ -1164,13 +1142,7 @@ struct NetprotonCumulantsMc {
         if (cfgPIDchoice == 2)
           trackSelected = selectionPIDold(track);
 
-        if (cfgUseItsPid) {
-          if (std::abs(itsResponse.nSigmaITS<o2::track::PID::Proton>(track)) > 3.0)
-            continue;
-        }
-
         if (trackSelected) {
-          recEbyeCompleteCollisions(recCollisions.lastIndex(), particle.pt(), particle.eta(), track.sign());
           // filling nSigma distribution
           histos.fill(HIST("h2DnsigmaTpcVsPt"), track.pt(), track.tpcNSigmaPr());
           histos.fill(HIST("h2DnsigmaTofVsPt"), track.pt(), track.tofNSigmaPr());
@@ -1234,7 +1206,6 @@ struct NetprotonCumulantsMc {
     histos.fill(HIST("hCorrProfileTotalProton"), cent, (powerEffProt[1] + powerEffAntiprot[1]));
     histos.fill(HIST("hCorrProfileProton"), cent, powerEffProt[1]);
     histos.fill(HIST("hCorrProfileAntiproton"), cent, powerEffAntiprot[1]);
-    recEbyeCollisions(cent, netProt, nProt, nAntiprot);
 
     // Calculating q_{r,s} as required
     for (int i = 1; i < 7; i++) {
@@ -2033,23 +2004,27 @@ struct NetprotonCumulantsMc {
 
   void processDataRec(AodCollisions::iterator const& coll, aod::BCsWithTimestamps const&, AodTracks const& inputTracks)
   {
-    // auto inputTracksWithPid = soa::Attach<AodTracks, aod::pidits::ITSNSigmaEl, aod::pidits::ITSNSigmaPi, aod::pidits::ITSNSigmaKa, aod::pidits::ITSNSigmaPr>(inputTracks);
-
     if (!coll.sel8()) {
       return;
     }
-
-    if (cfgEvSelkNoSameBunchPileup && !coll.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
+    if (cfgUseGoodITSLayerAllCut && !(coll.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll))) {
+      return;
+    }
+    if (cfgEvSelkNoSameBunchPileup && !(coll.selection_bit(o2::aod::evsel::kNoSameBunchPileup))) {
       // rejects collisions which are associated with the same "found-by-T0" bunch crossing
       // https://indico.cern.ch/event/1396220/#1-event-selection-with-its-rof
       return;
+    }
+
+    if (cfgEvSelkIsVertexTOFmatched && !(coll.selection_bit(o2::aod::evsel::kIsVertexTOFmatched))) {
+      return;
+      ;
     }
 
     histos.fill(HIST("hZvtx_after_sel"), coll.posZ());
     // variables
     auto cent = coll.centFT0M();
     histos.fill(HIST("hCentrec"), cent);
-    recCollisions(cent);
 
     float nProt = 0.0;
     float nAntiprot = 0.0;
@@ -2066,7 +2041,7 @@ struct NetprotonCumulantsMc {
       {
         continue;
       }
-      if ((track.pt() < cfgCutPtLower) || (track.pt() > 5.0f) || (std::abs(track.eta()) > 0.8f)) {
+      if ((track.pt() < cfgCutPtLower) || (track.pt() > 5.0f) || (std::abs(track.eta()) > cfgCutEta)) {
         continue;
       }
       if (!(track.itsNCls() > cfgITScluster) || !(track.tpcNClsFound() >= cfgTPCcluster) || !(track.tpcNClsCrossedRows() >= cfgTPCnCrossedRows)) {
@@ -2079,6 +2054,19 @@ struct NetprotonCumulantsMc {
       histos.fill(HIST("hrecDcaXYAll"), track.dcaXY());
       histos.fill(HIST("hrecDcaZAll"), track.dcaZ());
 
+      // rejecting electron
+      if (cfgIfRejectElectron && isElectron(track)) {
+        continue;
+      }
+      // use ITS pid as well
+      if (cfgUseItsPid && (std::abs(itsResponse.nSigmaITS<o2::track::PID::Proton>(track)) > 3.0)) {
+        continue;
+      }
+      // required tracks with TOF mandatory to avoid pileup
+      if (cfgIfMandatoryTOF && !track.hasTOF()) {
+        continue;
+      }
+
       bool trackSelected = false;
       if (cfgPIDchoice == 0)
         trackSelected = selectionPIDoldTOFveto(track);
@@ -2087,13 +2075,7 @@ struct NetprotonCumulantsMc {
       if (cfgPIDchoice == 2)
         trackSelected = selectionPIDold(track);
 
-      if (cfgUseItsPid) {
-        if (std::abs(itsResponse.nSigmaITS<o2::track::PID::Proton>(track)) > 3.0)
-          continue;
-      }
-
       if (trackSelected) {
-        recEbyeCompleteCollisions(recCollisions.lastIndex(), track.pt(), track.eta(), track.sign());
         // filling nSigma distribution
         histos.fill(HIST("h2DnsigmaTpcVsPt"), track.pt(), track.tpcNSigmaPr());
         histos.fill(HIST("h2DnsigmaTofVsPt"), track.pt(), track.tofNSigmaPr());
@@ -2150,7 +2132,6 @@ struct NetprotonCumulantsMc {
     histos.fill(HIST("hCorrProfileTotalProton"), cent, (powerEffProt[1] + powerEffAntiprot[1]));
     histos.fill(HIST("hCorrProfileProton"), cent, powerEffProt[1]);
     histos.fill(HIST("hCorrProfileAntiproton"), cent, powerEffAntiprot[1]);
-    recEbyeCollisions(cent, netProt, nProt, nAntiprot);
 
     // Calculating q_{r,s} as required
     for (int i = 1; i < 7; i++) {
