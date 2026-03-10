@@ -20,8 +20,10 @@
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/Core/HfMlResponseLcToPKPi.h"
 #include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
+#include "PWGHF/DataModel/TrackIndexSkimmingTables.h"
 
 #include "Common/Core/TrackSelectorPID.h"
 #include "Common/DataModel/PIDResponseCombined.h"
@@ -107,7 +109,6 @@ struct HfCandidateSelectorLc {
   Configurable<int64_t> timestampCCDB{"timestampCCDB", -1, "timestamp of the ONNX file for ML model used to query in CCDB"};
   Configurable<bool> loadModelsFromCCDB{"loadModelsFromCCDB", false, "Flag to enable or disable the loading of models from CCDB"};
 
-  HfHelper hfHelper;
   o2::analysis::HfMlResponseLcToPKPi<float, aod::hf_cand::VertexerType::DCAFitter> hfMlResponseDCA;
   o2::analysis::HfMlResponseLcToPKPi<float, aod::hf_cand::VertexerType::KfParticle> hfMlResponseKF;
   std::vector<float> outputMlLcToPKPi;
@@ -132,13 +133,13 @@ struct HfCandidateSelectorLc {
       LOGP(fatal, "One and only one process function must be enabled at a time.");
     }
 
-    selectorPion.setRangePtTpc(ptPidTpcMin, ptPidTpcMax);
-    selectorPion.setRangeNSigmaTpc(-nSigmaTpcMax, nSigmaTpcMax);
-    selectorPion.setRangeNSigmaTpcCondTof(-nSigmaTpcCombinedMax, nSigmaTpcCombinedMax);
-    selectorPion.setRangePtTof(ptPidTofMin, ptPidTofMax);
-    selectorPion.setRangeNSigmaTof(-nSigmaTofMax, nSigmaTofMax);
-    selectorPion.setRangeNSigmaTofCondTpc(-nSigmaTofCombinedMax, nSigmaTofCombinedMax);
-    selectorPion.setRangePtBayes(ptPidBayesMin, ptPidBayesMax);
+    selectorPion.setRangePtTpc(static_cast<float>(ptPidTpcMin), static_cast<float>(ptPidTpcMax));
+    selectorPion.setRangeNSigmaTpc(-static_cast<float>(nSigmaTpcMax), static_cast<float>(nSigmaTpcMax));
+    selectorPion.setRangeNSigmaTpcCondTof(-static_cast<float>(nSigmaTpcCombinedMax), static_cast<float>(nSigmaTpcCombinedMax));
+    selectorPion.setRangePtTof(static_cast<float>(ptPidTofMin), static_cast<float>(ptPidTofMax));
+    selectorPion.setRangeNSigmaTof(-static_cast<float>(nSigmaTofMax), static_cast<float>(nSigmaTofMax));
+    selectorPion.setRangeNSigmaTofCondTpc(-static_cast<float>(nSigmaTofCombinedMax), static_cast<float>(nSigmaTofCombinedMax));
+    selectorPion.setRangePtBayes(static_cast<float>(ptPidBayesMin), static_cast<float>(ptPidBayesMax));
     selectorKaon = selectorPion;
     selectorProton = selectorPion;
 
@@ -305,11 +306,11 @@ struct HfCandidateSelectorLc {
       float massLc{0.f}, massKPi{0.f};
       if constexpr (ReconstructionType == aod::hf_cand::VertexerType::DCAFitter) {
         if (trackProton.globalIndex() == candidate.prong0Id()) {
-          massLc = hfHelper.invMassLcToPKPi(candidate);
-          massKPi = hfHelper.invMassKPiPairLcToPKPi(candidate);
+          massLc = HfHelper::invMassLcToPKPi(candidate);
+          massKPi = HfHelper::invMassKPiPairLcToPKPi(candidate);
         } else {
-          massLc = hfHelper.invMassLcToPiKP(candidate);
-          massKPi = hfHelper.invMassKPiPairLcToPiKP(candidate);
+          massLc = HfHelper::invMassLcToPiKP(candidate);
+          massKPi = HfHelper::invMassKPiPairLcToPiKP(candidate);
         }
       } else if constexpr (ReconstructionType == aod::hf_cand::VertexerType::KfParticle) {
         if (trackProton.globalIndex() == candidate.prong0Id()) {
@@ -517,11 +518,11 @@ struct HfCandidateSelectorLc {
 
       if (usePid) {
         // track-level PID selection
-        TrackSelectorPID::Status pidTrackPos1Proton;
-        TrackSelectorPID::Status pidTrackPos2Proton;
-        TrackSelectorPID::Status pidTrackPos1Pion;
-        TrackSelectorPID::Status pidTrackPos2Pion;
-        TrackSelectorPID::Status pidTrackNegKaon;
+        TrackSelectorPID::Status pidTrackPos1Proton{};
+        TrackSelectorPID::Status pidTrackPos2Proton{};
+        TrackSelectorPID::Status pidTrackPos1Pion{};
+        TrackSelectorPID::Status pidTrackPos2Pion{};
+        TrackSelectorPID::Status pidTrackNegKaon{};
         if (usePidTpcAndTof) {
           pidTrackPos1Proton = selectorProton.statusTpcAndTof(trackPos1, candidate.nSigTpcPr0(), candidate.nSigTofPr0());
           pidTrackPos2Proton = selectorProton.statusTpcAndTof(trackPos2, candidate.nSigTpcPr2(), candidate.nSigTofPr2());

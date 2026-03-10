@@ -523,7 +523,7 @@ bool onlyInOneSide = false;         ///< select only tracks that don't cross the
 extern TpcExcludeTrack tpcExcluder; ///< the TPC excluder object instance
 
 /* selection criteria from PWGMM */
-static constexpr int kTrackTypePWGMM = 4;
+static constexpr int TrackTypePWGMM = 4;
 // default quality criteria for tracks with ITS contribution
 static constexpr o2::aod::track::TrackSelectionFlags::flagtype TrackSelectionITS =
   o2::aod::track::TrackSelectionFlags::kITSNCls | o2::aod::track::TrackSelectionFlags::kITSChi2NDF |
@@ -769,6 +769,11 @@ struct DptDptTrackSelection {
     }
     if (tune.mUseIt) {
       for (auto const& filter : trackFilters) {
+        if (tune.mUseITSclusters) {
+          filter->stdTrackSelection->ResetITSRequirements();
+          filter->stdTrackSelection->SetRequireHitsInITSLayers(1, {0, 1, 2});
+          filter->stdTrackSelection->SetMinNClustersITS(tune.mITSclusters);
+        }
         if (tune.mUseTPCclusters) {
           filter->stdTrackSelection->SetMinNClustersTPC(tune.mTPCclusters);
         }
@@ -804,6 +809,23 @@ struct DptDptTrackSelection {
   bool requirePvContributor = false;
 };
 
+SystemType fSystem = SystemNoSystem;
+MultRunType fLhcRun = MultRunRUN1RUN2;
+DataType fDataType = kData;
+CentMultEstimatorType fCentMultEstimator = CentMultV0M;
+OccupancyEstimationType fOccupancyEstimation = OccupancyNOOCC; /* the occupancy estimator to use */
+
+float fMinOccupancy = 0.0f; /* the minimum allowed occupancy */
+float fMaxOccupancy = 1e6f; /* the maximum allowed occupancy */
+
+/* adaptations for the pp nightly checks */
+analysis::CheckRangeCfg traceDCAOutliers;
+bool traceOutOfSpeciesParticles = false;
+int recoIdMethod = 0;
+float particleMaxDCAxy = 999.9f;
+float particleMaxDCAZ = 999.9f;
+bool traceCollId0 = false;
+
 inline TList* getCCDBInput(auto& ccdb, const char* ccdbpath, const char* ccdbdate, bool periodInPath = false, const std::string& suffix = "")
 {
   std::tm cfgtm = {};
@@ -821,13 +843,20 @@ inline TList* getCCDBInput(auto& ccdb, const char* ccdbpath, const char* ccdbdat
     return tmpStr;
   };
 
-  std::string actualPeriod = cleanPeriod(metadataInfo.get("LPMProductionTag"));
+  std::string actualPeriod;
+  if (fDataType != kOnTheFly) {
+    actualPeriod = cleanPeriod(metadataInfo.get("LPMProductionTag"));
+  } else {
+    actualPeriod = suffix;
+  }
   std::string actualPath = ccdbpath;
   if (periodInPath) {
     actualPath = actualPath + "/" + actualPeriod;
   }
-  if (suffix.length() > 0) {
-    actualPeriod = actualPeriod + "_" + suffix;
+  if (fDataType != kOnTheFly) {
+    if (suffix.length() > 0) {
+      actualPeriod = actualPeriod + "_" + suffix;
+    }
   }
 
   TList* lst = nullptr;
@@ -840,23 +869,6 @@ inline TList* getCCDBInput(auto& ccdb, const char* ccdbpath, const char* ccdbdat
   }
   return lst;
 }
-
-SystemType fSystem = SystemNoSystem;
-MultRunType fLhcRun = MultRunRUN1RUN2;
-DataType fDataType = kData;
-CentMultEstimatorType fCentMultEstimator = CentMultV0M;
-OccupancyEstimationType fOccupancyEstimation = OccupancyNOOCC; /* the occupancy estimator to use */
-
-float fMinOccupancy = 0.0f; /* the minimum allowed occupancy */
-float fMaxOccupancy = 1e6f; /* the maximum allowed occupancy */
-
-/* adaptations for the pp nightly checks */
-analysis::CheckRangeCfg traceDCAOutliers;
-bool traceOutOfSpeciesParticles = false;
-int recoIdMethod = 0;
-float particleMaxDCAxy = 999.9f;
-float particleMaxDCAZ = 999.9f;
-bool traceCollId0 = false;
 
 inline std::bitset<32> getTriggerSelection(std::string_view const& triggstr)
 {
@@ -891,27 +903,31 @@ inline std::bitset<32> getTriggerSelection(std::string_view const& triggstr)
 
 inline SystemType getSystemType(auto const& periodsForSysType)
 {
-  auto period = metadataInfo.get("LPMProductionTag");
-  auto anchoredPeriod = metadataInfo.get("AnchorProduction");
-  bool checkAnchor = anchoredPeriod.length() > 0;
+  if (fDataType != kOnTheFly) {
+    auto period = metadataInfo.get("LPMProductionTag");
+    auto anchoredPeriod = metadataInfo.get("AnchorProduction");
+    bool checkAnchor = anchoredPeriod.length() > 0;
 
-  for (SystemType sT = SystemNoSystem; sT < SystemNoOfSystems; ++sT) {
-    const std::string& periods = periodsForSysType[static_cast<int>(sT)][0];
-    auto contains = [periods](auto const& period) {
-      if (periods.find(period) != std::string::npos) {
-        return true;
-      }
-      return false;
-    };
-    if (periods.length() > 0) {
-      if (contains(period) || (checkAnchor && contains(anchoredPeriod))) {
-        LOGF(info, "DptDptCorrelations::getSystemType(). Assigned system type %s for period %s", systemExternalNamesMap.at(static_cast<int>(sT)).data(), period.c_str());
-        return sT;
+    for (SystemType sT = SystemNoSystem; sT < SystemNoOfSystems; ++sT) {
+      const std::string& periods = periodsForSysType[static_cast<int>(sT)][0];
+      auto contains = [periods](auto const& period) {
+        if (periods.find(period) != std::string::npos) {
+          return true;
+        }
+        return false;
+      };
+      if (periods.length() > 0) {
+        if (contains(period) || (checkAnchor && contains(anchoredPeriod))) {
+          LOGF(info, "DptDptCorrelations::getSystemType(). Assigned system type %s for period %s", systemExternalNamesMap.at(static_cast<int>(sT)).data(), period.c_str());
+          return sT;
+        }
       }
     }
+    LOGF(fatal, "DptDptCorrelations::getSystemType(). No system type for period: %s", period.c_str());
+    return SystemPbPb;
+  } else {
+    return SystemNeNeRun3;
   }
-  LOGF(fatal, "DptDptCorrelations::getSystemType(). No system type for period: %s", period.c_str());
-  return SystemPbPb;
 }
 
 /// \brief Type of data according to the configuration string
@@ -928,7 +944,7 @@ inline DataType getDataType(std::string const& datastr)
     return kMC;
   } else if (datastr == "FastMC") {
     return kFastMC;
-  } else if (datastr == "OnTheFlyMC") {
+  } else if (datastr.starts_with("OnTheFlyMC")) {
     return kOnTheFly;
   } else {
     LOGF(fatal, "DptDptCorrelations::getDataType(). Wrong type of dat: %d", datastr.c_str());
@@ -1136,8 +1152,8 @@ inline bool triggerSelection<aod::McCollision>(aod::McCollision const&)
 //////////////////////////////////////////////////////////////////////////////////
 /// Multiplicity extraction
 //////////////////////////////////////////////////////////////////////////////////
-static constexpr float kValidPercentileLowLimit = 0.0f;
-static constexpr float kValidPercentileUpLimit = 100.0f;
+static constexpr float ValidPercentileLowLimit = 0.0f;
+static constexpr float ValidPercentileUpLimit = 100.0f;
 
 /// \brief Extract the collision multiplicity from the event selection information
 template <typename CollisionObject>
@@ -1224,7 +1240,7 @@ template <typename CollisionObject>
 inline bool centralitySelectionMult(CollisionObject collision, float& centmult)
 {
   float mult = getCentMultPercentile(collision);
-  if (mult < kValidPercentileUpLimit && kValidPercentileLowLimit < mult) {
+  if (mult < ValidPercentileUpLimit && ValidPercentileLowLimit < mult) {
     centmult = mult;
     collisionFlags.set(CollSelCENTRALITYBIT);
     return true;
@@ -1303,7 +1319,7 @@ inline bool centralitySelection<soa::Join<aod::CollisionsEvSelRun2Cent, aod::McC
 template <>
 inline bool centralitySelection<aod::McCollision>(aod::McCollision const&, float& centmult)
 {
-  if (centmult < kValidPercentileUpLimit && kValidPercentileLowLimit < centmult) {
+  if (centmult < ValidPercentileUpLimit && ValidPercentileLowLimit < centmult) {
     return true;
   } else {
     return false;
@@ -1493,14 +1509,14 @@ struct TpcExcludeTrack {
   }
   explicit TpcExcludeTrack(TpcExclusionMethod m)
   {
-    static constexpr float kDefaultPhiBinShift = 0.5f;
-    static constexpr int kDefaultNoOfPhiBins = 72;
+    static constexpr float DefaultPhiBinShift = 0.5f;
+    static constexpr int DefaultNoOfPhiBins = 72;
     switch (m) {
       case kNOEXCLUSION:
         method = m;
         break;
       case kSTATIC:
-        if (phibinshift == kDefaultPhiBinShift && phibins == kDefaultNoOfPhiBins) {
+        if (phibinshift == DefaultPhiBinShift && phibins == DefaultNoOfPhiBins) {
           method = m;
         } else {
           LOGF(fatal, "Static TPC exclusion method with bin shift: %.2f and number of bins %d. Please fix it", phibinshift, phibins);
@@ -1529,8 +1545,8 @@ struct TpcExcludeTrack {
   template <typename TrackObject>
   bool exclude(TrackObject const& track)
   {
-    constexpr int kNoOfTpcSectors = 18;
-    constexpr float kTpcPhiSectorWidth = (constants::math::TwoPI) / kNoOfTpcSectors;
+    constexpr int NoOfTpcSectors = 18;
+    constexpr float TpcPhiSectorWidth = (constants::math::TwoPI) / NoOfTpcSectors;
 
     switch (method) {
       case kNOEXCLUSION: {
@@ -1546,7 +1562,7 @@ struct TpcExcludeTrack {
         }
       } break;
       case kDYNAMIC: {
-        float phiInTpcSector = std::fmod(track.phi(), kTpcPhiSectorWidth);
+        float phiInTpcSector = std::fmod(track.phi(), TpcPhiSectorWidth);
         if (track.sign() > 0) {
           return (phiInTpcSector < positiveUpCut->Eval(track.pt())) && (positiveLowCut->Eval(track.pt()) < phiInTpcSector);
         } else {
@@ -1580,7 +1596,7 @@ inline bool matchTrackType(TrackObject const& track)
 {
   using namespace o2::aod::track;
 
-  if (tracktype == kTrackTypePWGMM) {
+  if (tracktype == TrackTypePWGMM) {
     // under tests MM track selection
     // see: https://indico.cern.ch/event/1383788/contributions/5816953/attachments/2805905/4896281/TrackSel_GlobalTracks_vs_MMTrackSel.pdf
     // it should be equivalent to this
@@ -1672,8 +1688,8 @@ void exploreMothers(ParticleObject& particle, MCCollisionObject& collision)
 
 inline float getCharge(float pdgCharge)
 {
-  static constexpr int kNoOfBasicChargesPerUnitCharge = 3;
-  float charge = (pdgCharge / kNoOfBasicChargesPerUnitCharge >= 1) ? 1.0 : ((pdgCharge / kNoOfBasicChargesPerUnitCharge <= -1) ? -1.0 : 0);
+  static constexpr int NoOfBasicChargesPerUnitCharge = 3;
+  float charge = (pdgCharge / NoOfBasicChargesPerUnitCharge >= 1) ? 1.0 : ((pdgCharge / NoOfBasicChargesPerUnitCharge <= -1) ? -1.0 : 0);
   return charge;
 }
 

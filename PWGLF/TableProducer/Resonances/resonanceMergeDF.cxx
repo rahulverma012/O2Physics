@@ -26,31 +26,32 @@
 /// \author Bong-Hwi Lim <bong-hwi.lim@cern.ch>
 ///         Nasir Mehdi Malik <nasir.mehdi.malik@cern.ch>
 ///         Min-jae Kim <minjae.kim@cern.ch>
-#include <vector>
+#include "PWGLF/DataModel/LFResonanceTables.h"
+#include "PWGLF/DataModel/LFStrangenessTables.h"
+#include "PWGLF/Utils/collisionCuts.h"
 
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/Core/TrackSelection.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/Core/RecoDecay.h"
-#include "Common/Core/trackUtilities.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/Qvectors.h"
 #include "Common/Core/EventPlaneHelper.h"
-#include "Framework/ASoAHelpers.h"
+#include "Common/Core/RecoDecay.h"
+#include "Common/Core/TrackSelection.h"
+#include "Common/Core/trackUtilities.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/Qvectors.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include "CCDB/BasicCCDBManager.h"
+#include "DataFormatsParameters/GRPMagField.h"
+#include "DataFormatsParameters/GRPObject.h"
 #include "DetectorsBase/Propagator.h"
+#include "Framework/ASoAHelpers.h"
 #include "Framework/AnalysisDataModel.h"
 #include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
 #include "Framework/O2DatabasePDGPlugin.h"
-#include "PWGLF/DataModel/LFStrangenessTables.h"
-#include "PWGLF/DataModel/LFResonanceTables.h"
-#include "PWGLF/Utils/collisionCuts.h"
+#include "Framework/runDataProcessing.h"
 #include "ReconstructionDataFormats/Track.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "CCDB/BasicCCDBManager.h"
+
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -62,6 +63,7 @@ using namespace o2::soa;
 struct ResonanceMergeDF {
   //  SliceCache cache;
   Configurable<int> nDF{"nDF", 1, "no of combination of collision"};
+  Configurable<bool> isLoggingEnabled{"isLoggingEnabled", 0, "print log"};
   Configurable<bool> cpidCut{"cpidCut", 0, "pid cut"};
   Configurable<bool> crejtpc{"crejtpc", 0, "reject electron pion"};
   Configurable<bool> crejtof{"crejtof", 0, "reject electron pion tof"};
@@ -174,7 +176,8 @@ struct ResonanceMergeDF {
     vecOfVecOfTuples.push_back(innerVector);
     innerVector.clear();
     df++;
-    LOGF(info, "collisions: df = %i", df);
+    if (isLoggingEnabled)
+      LOGF(info, "collisions: df = %i", df);
     if (df < nCollisions)
       return;
     df = 0;

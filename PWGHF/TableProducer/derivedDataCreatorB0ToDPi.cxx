@@ -17,6 +17,7 @@
 
 #include "PWGHF/Core/DecayChannels.h"
 #include "PWGHF/Core/HfHelper.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 #include "PWGHF/DataModel/DerivedTables.h"
@@ -91,7 +92,6 @@ struct HfDerivedDataCreatorB0ToDPi {
   Configurable<float> downSampleBkgFactor{"downSampleBkgFactor", 1., "Fraction of background candidates to keep for ML trainings"};
   Configurable<float> ptMaxForDownSample{"ptMaxForDownSample", 10., "Maximum pt for the application of the downsampling factor"};
 
-  HfHelper hfHelper;
   SliceCache cache;
   static constexpr double Mass{o2::constants::physics::MassB0};
 
@@ -107,7 +107,7 @@ struct HfDerivedDataCreatorB0ToDPi {
   using THfCandDaughtersMl = soa::Join<aod::HfCand3ProngWPidPiKa, aod::HfMlDplusToPiKPi>;
 
   Filter filterSelectCandidates = (aod::hf_sel_candidate_b0::isSelB0ToDPi & static_cast<int>(BIT(aod::SelectionStep::RecoMl - 1))) != 0;
-  Filter filterMcGenMatching = nabs(aod::hf_cand_b0::flagMcMatchGen) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
+  Filter filterMcGenMatching = nabs(aod::hf_cand_mc_flag::flagMcMatchGen) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
 
   Preslice<SelectedCandidates> candidatesPerCollision = aod::hf_cand::collisionId;
   Preslice<SelectedCandidatesMc> candidatesMcPerCollision = aod::hf_cand::collisionId;
@@ -121,10 +121,10 @@ struct HfDerivedDataCreatorB0ToDPi {
   Partition<SelectedCandidatesMl> candidatesMlAll = aod::hf_sel_candidate_b0::isSelB0ToDPi >= 0;
   Partition<SelectedCandidatesMcMl> candidatesMcMlAll = aod::hf_sel_candidate_b0::isSelB0ToDPi >= 0;
   // partitions for signal and background
-  Partition<SelectedCandidatesMc> candidatesMcSig = nabs(aod::hf_cand_b0::flagMcMatchRec) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
-  Partition<SelectedCandidatesMc> candidatesMcBkg = nabs(aod::hf_cand_b0::flagMcMatchRec) != static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
-  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = nabs(aod::hf_cand_b0::flagMcMatchRec) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
-  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = nabs(aod::hf_cand_b0::flagMcMatchRec) != static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
+  Partition<SelectedCandidatesMc> candidatesMcSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
+  Partition<SelectedCandidatesMc> candidatesMcBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
+  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
+  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(DecayChannelMain::B0ToDminusPi);
 
   void init(InitContext const&)
   {
@@ -206,7 +206,7 @@ struct HfDerivedDataCreatorB0ToDPi {
         candidate.pyProng1(),
         candidate.pzProng1(),
         candidate.errorImpactParameter1(),
-        hfHelper.cosThetaStarB0(candidate),
+        HfHelper::cosThetaStarB0(candidate),
         ct);
     }
     if (fillCandidateSel) {
@@ -310,9 +310,9 @@ struct HfDerivedDataCreatorB0ToDPi {
         }
         auto prongCharm = candidate.template prong0_as<CandCharmType>();
         auto prongBachelor = candidate.template prong1_as<TracksWPid>();
-        double const ct = hfHelper.ctB0(candidate);
-        double const y = hfHelper.yB0(candidate);
-        float const massB0ToDPi = hfHelper.invMassB0ToDPi(candidate);
+        double const ct = HfHelper::ctB0(candidate);
+        double const y = HfHelper::yB0(candidate);
+        float const massB0ToDPi = HfHelper::invMassB0ToDPi(candidate);
         float mlScoreB0ToDPi{-1.f};
         std::vector<float> mlScoresDplus;
         std::copy(prongCharm.mlProbDplusToPiKPi().begin(), prongCharm.mlProbDplusToPiKPi().end(), std::back_inserter(mlScoresDplus));

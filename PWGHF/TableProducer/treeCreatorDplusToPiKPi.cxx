@@ -19,6 +19,7 @@
 #include "PWGHF/Core/CentralityEstimation.h"
 #include "PWGHF/Core/DecayChannels.h"
 #include "PWGHF/Core/HfHelper.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 
@@ -146,9 +147,9 @@ DECLARE_SOA_TABLE(HfCandDpLites, "AOD", "HFCANDDPLITE",
                   full::Y,
                   full::Centrality,
                   collision::NumContrib,
-                  hf_cand_3prong::FlagMcMatchRec,
-                  hf_cand_3prong::OriginMcRec,
-                  hf_cand_3prong::FlagMcDecayChanRec)
+                  hf_cand_mc_flag::FlagMcMatchRec,
+                  hf_cand_mc_flag::OriginMcRec,
+                  hf_cand_mc_flag::FlagMcDecayChanRec)
 
 DECLARE_SOA_TABLE(HfCandDpFulls, "AOD", "HFCANDDPFULL",
                   collision::NumContrib,
@@ -227,9 +228,9 @@ DECLARE_SOA_TABLE(HfCandDpFulls, "AOD", "HFCANDDPFULL",
                   full::Y,
                   full::E,
                   full::Centrality,
-                  hf_cand_3prong::FlagMcMatchRec,
-                  hf_cand_3prong::OriginMcRec,
-                  hf_cand_3prong::FlagMcDecayChanRec);
+                  hf_cand_mc_flag::FlagMcMatchRec,
+                  hf_cand_mc_flag::OriginMcRec,
+                  hf_cand_mc_flag::FlagMcDecayChanRec);
 
 DECLARE_SOA_TABLE(HfCandDpFullEvs, "AOD", "HFCANDDPFULLEV",
                   collision::NumContrib,
@@ -244,9 +245,9 @@ DECLARE_SOA_TABLE(HfCandDpFullPs, "AOD", "HFCANDDPFULLP",
                   full::Eta,
                   full::Phi,
                   full::Y,
-                  hf_cand_3prong::FlagMcMatchGen,
-                  hf_cand_3prong::FlagMcDecayChanGen,
-                  hf_cand_3prong::OriginMcGen);
+                  hf_cand_mc_flag::FlagMcMatchGen,
+                  hf_cand_mc_flag::FlagMcDecayChanGen,
+                  hf_cand_mc_flag::OriginMcGen);
 } // namespace o2::aod
 
 /// Writes the full information in an output TTree
@@ -268,8 +269,6 @@ struct HfTreeCreatorDplusToPiKPi {
   Configurable<std::vector<int>> classMlIndexes{"classMlIndexes", {0, 2}, "Indexes of ML bkg and non-prompt scores."};
   Configurable<int> centEstimator{"centEstimator", 0, "Centrality estimation (None: 0, FT0C: 2, FT0M: 3)"};
 
-  HfHelper hfHelper;
-
   using SelectedCandidatesMc = soa::Filtered<soa::Join<aod::HfCand3ProngWPidPiKa, aod::HfCand3ProngMcRec, aod::HfSelDplusToPiKPi>>;
   using MatchedGenCandidatesMc = soa::Filtered<soa::Join<aod::McParticles, aod::HfCand3ProngMcGen>>;
   using SelectedCandidatesMcWithMl = soa::Filtered<soa::Join<aod::HfCand3ProngWPidPiKa, aod::HfCand3ProngMcRec, aod::HfSelDplusToPiKPi, aod::HfMlDplusToPiKPi>>;
@@ -278,11 +277,11 @@ struct HfTreeCreatorDplusToPiKPi {
   using CollisionsCent = soa::Join<aod::Collisions, aod::CentFT0Cs, aod::CentFT0Ms>;
 
   Filter filterSelectCandidates = aod::hf_sel_candidate_dplus::isSelDplusToPiKPi >= selectionFlagDplus;
-  Filter filterMcGenMatching = (nabs(o2::aod::hf_cand_3prong::flagMcMatchGen) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_3prong::flagMcMatchGen) != 0));
+  Filter filterMcGenMatching = (nabs(o2::aod::hf_cand_mc_flag::flagMcMatchGen) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_mc_flag::flagMcMatchGen) != 0));
 
-  Partition<SelectedCandidatesMc> reconstructedCandSig = (nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_3prong::flagMcMatchRec) != 0));
-  Partition<SelectedCandidatesMc> reconstructedCandBkg = nabs(aod::hf_cand_3prong::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi);
-  Partition<SelectedCandidatesMcWithMl> reconstructedCandSigMl = (nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_3prong::flagMcMatchRec) != 0));
+  Partition<SelectedCandidatesMc> reconstructedCandSig = (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_mc_flag::flagMcMatchRec) != 0));
+  Partition<SelectedCandidatesMc> reconstructedCandBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi);
+  Partition<SelectedCandidatesMcWithMl> reconstructedCandSigMl = (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKPi)) || (fillCorrBkgs && (nabs(o2::aod::hf_cand_mc_flag::flagMcMatchRec) != 0));
 
   void init(InitContext const&)
   {
@@ -363,14 +362,14 @@ struct HfTreeCreatorDplusToPiKPi {
         candidate.tpcTofNSigmaPi2(),
         candidate.tpcTofNSigmaKa2(),
         candidate.isSelDplusToPiKPi(),
-        hfHelper.invMassDplusToPiKPi(candidate),
+        HfHelper::invMassDplusToPiKPi(candidate),
         candidate.pt(),
         candidate.cpa(),
         candidate.cpaXY(),
         candidate.maxNormalisedDeltaIP(),
         candidate.eta(),
         candidate.phi(),
-        hfHelper.yDplus(candidate),
+        HfHelper::yDplus(candidate),
         cent,
         coll.numContrib(),
         flagMc,
@@ -442,17 +441,17 @@ struct HfTreeCreatorDplusToPiKPi {
         candidate.tpcTofNSigmaPi2(),
         candidate.tpcTofNSigmaKa2(),
         candidate.isSelDplusToPiKPi(),
-        hfHelper.invMassDplusToPiKPi(candidate),
+        HfHelper::invMassDplusToPiKPi(candidate),
         candidate.pt(),
         candidate.p(),
         candidate.cpa(),
         candidate.cpaXY(),
         candidate.maxNormalisedDeltaIP(),
-        hfHelper.ctDplus(candidate),
+        HfHelper::ctDplus(candidate),
         candidate.eta(),
         candidate.phi(),
-        hfHelper.yDplus(candidate),
-        hfHelper.eDplus(candidate),
+        HfHelper::yDplus(candidate),
+        HfHelper::eDplus(candidate),
         cent,
         flagMc,
         originMc,

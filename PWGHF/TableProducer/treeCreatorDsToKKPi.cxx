@@ -20,6 +20,7 @@
 #include "PWGHF/Core/CentralityEstimation.h"
 #include "PWGHF/Core/DecayChannels.h"
 #include "PWGHF/Core/HfHelper.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 
@@ -145,10 +146,10 @@ DECLARE_SOA_TABLE(HfCandDsLites, "AOD", "HFCANDDSLITE",
                   hf_cand::Chi2PCA,
                   full::Centrality,
                   collision::NumContrib,
-                  hf_cand_3prong::FlagMcMatchRec,
-                  hf_cand_3prong::OriginMcRec,
-                  hf_cand_3prong::FlagMcDecayChanRec,
-                  hf_cand_3prong::IsCandidateSwapped,
+                  hf_cand_mc_flag::FlagMcMatchRec,
+                  hf_cand_mc_flag::OriginMcRec,
+                  hf_cand_mc_flag::FlagMcDecayChanRec,
+                  hf_cand_mc_flag::IsCandidateSwapped,
                   full::Sign);
 
 DECLARE_SOA_TABLE(HfCandDsFulls, "AOD", "HFCANDDSFULL",
@@ -218,10 +219,10 @@ DECLARE_SOA_TABLE(HfCandDsFulls, "AOD", "HFCANDDSFULL",
                   full::AbsCos3PiK,
                   hf_cand::Chi2PCA,
                   full::Centrality,
-                  hf_cand_3prong::FlagMcMatchRec,
-                  hf_cand_3prong::OriginMcRec,
-                  hf_cand_3prong::FlagMcDecayChanRec,
-                  hf_cand_3prong::IsCandidateSwapped,
+                  hf_cand_mc_flag::FlagMcMatchRec,
+                  hf_cand_mc_flag::OriginMcRec,
+                  hf_cand_mc_flag::FlagMcDecayChanRec,
+                  hf_cand_mc_flag::IsCandidateSwapped,
                   full::Sign);
 
 DECLARE_SOA_TABLE(HfCandDsFullEvs, "AOD", "HFCANDDSFULLEV",
@@ -240,8 +241,8 @@ DECLARE_SOA_TABLE(HfCandDsFullPs, "AOD", "HFCANDDSFULLP",
                   full::Eta,
                   full::Phi,
                   full::Y,
-                  hf_cand_3prong::FlagMcMatchRec,
-                  hf_cand_3prong::OriginMcGen);
+                  hf_cand_mc_flag::FlagMcMatchRec,
+                  hf_cand_mc_flag::OriginMcGen);
 } // namespace o2::aod
 
 enum Mother : int8_t {
@@ -277,8 +278,6 @@ struct HfTreeCreatorDsToKKPi {
   Configurable<float> downSampleBkgFactor{"downSampleBkgFactor", 1., "Fraction of background candidates to keep for ML trainings"};
   Configurable<float> ptMaxForDownSample{"ptMaxForDownSample", 10., "Maximum pt for the application of the downsampling factor"};
 
-  HfHelper hfHelper;
-
   using CandDsData = soa::Filtered<soa::Join<aod::HfCand3ProngWPidPiKa, aod::HfSelDsToKKPi>>;
   using CandDsMcReco = soa::Filtered<soa::Join<aod::HfCand3ProngWPidPiKa, aod::HfSelDsToKKPi, aod::HfCand3ProngMcRec>>;
   using CandDsMcGen = soa::Filtered<soa::Join<aod::McParticles, aod::HfCand3ProngMcGen>>;
@@ -290,18 +289,18 @@ struct HfTreeCreatorDsToKKPi {
 
   Filter filterSelectCandidates = aod::hf_sel_candidate_ds::isSelDsToKKPi >= selectionFlagDs || aod::hf_sel_candidate_ds::isSelDsToPiKK >= selectionFlagDs;
   Filter filterMcGenMatching =
-    nabs(o2::aod::hf_cand_3prong::flagMcMatchGen) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) &&
-    (aod::hf_cand_3prong::flagMcDecayChanGen == channelsResonant[Mother::Ds][decayChannel] ||
-     (fillDplusMc && aod::hf_cand_3prong::flagMcDecayChanGen == channelsResonant[Mother::Dplus][decayChannel])); // Do not store Dplus MC if fillDplusMc is false
+    nabs(o2::aod::hf_cand_mc_flag::flagMcMatchGen) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) &&
+    (aod::hf_cand_mc_flag::flagMcDecayChanGen == channelsResonant[Mother::Ds][decayChannel] ||
+     (fillDplusMc && aod::hf_cand_mc_flag::flagMcDecayChanGen == channelsResonant[Mother::Dplus][decayChannel])); // Do not store Dplus MC if fillDplusMc is false
 
   Partition<CandDsData> selectedDsToKKPiCand = aod::hf_sel_candidate_ds::isSelDsToKKPi >= selectionFlagDs;
   Partition<CandDsData> selectedDsToPiKKCand = aod::hf_sel_candidate_ds::isSelDsToPiKK >= selectionFlagDs;
 
-  Partition<CandDsMcReco> reconstructedCandSig = (nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && aod::hf_cand_3prong::flagMcDecayChanRec == channelsResonant[Mother::Ds][decayChannel]) || (fillDplusMc && nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_3prong::flagMcDecayChanRec == channelsResonant[Mother::Dplus][decayChannel]); // Do not store Dplus MC if fillDplusMc is false
-  Partition<CandDsMcReco> reconstructedCandBkg = (nabs(aod::hf_cand_3prong::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && nabs(aod::hf_cand_3prong::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK)) ||
-                                                 (nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && aod::hf_cand_3prong::flagMcDecayChanRec != channelsResonant[Mother::Ds][decayChannel]) ||
-                                                 (nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_3prong::flagMcDecayChanRec != channelsResonant[Mother::Dplus][decayChannel]) ||
-                                                 (!fillDplusMc && nabs(aod::hf_cand_3prong::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_3prong::flagMcDecayChanRec == channelsResonant[Mother::Dplus][decayChannel]);
+  Partition<CandDsMcReco> reconstructedCandSig = (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && aod::hf_cand_mc_flag::flagMcDecayChanRec == channelsResonant[Mother::Ds][decayChannel]) || (fillDplusMc && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_mc_flag::flagMcDecayChanRec == channelsResonant[Mother::Dplus][decayChannel]); // Do not store Dplus MC if fillDplusMc is false
+  Partition<CandDsMcReco> reconstructedCandBkg = (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK)) ||
+                                                 (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DsToPiKK) && aod::hf_cand_mc_flag::flagMcDecayChanRec != channelsResonant[Mother::Ds][decayChannel]) ||
+                                                 (nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_mc_flag::flagMcDecayChanRec != channelsResonant[Mother::Dplus][decayChannel]) ||
+                                                 (!fillDplusMc && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(hf_decay::hf_cand_3prong::DecayChannelMain::DplusToPiKK) && aod::hf_cand_mc_flag::flagMcDecayChanRec == channelsResonant[Mother::Dplus][decayChannel]);
 
   void init(InitContext const&)
   {
@@ -335,13 +334,13 @@ struct HfTreeCreatorDsToKKPi {
     float deltaMassPhiKK = 0;
     float absCos3PiKDs = 0;
     if constexpr (MassHypo == 0) {
-      invMassDs = hfHelper.invMassDsToKKPi(candidate);
-      deltaMassPhiKK = hfHelper.deltaMassPhiDsToKKPi(candidate);
-      absCos3PiKDs = hfHelper.absCos3PiKDsToKKPi(candidate);
+      invMassDs = HfHelper::invMassDsToKKPi(candidate);
+      deltaMassPhiKK = HfHelper::deltaMassPhiDsToKKPi(candidate);
+      absCos3PiKDs = HfHelper::absCos3PiKDsToKKPi(candidate);
     } else if constexpr (MassHypo == 1) {
-      invMassDs = hfHelper.invMassDsToPiKK(candidate);
-      deltaMassPhiKK = hfHelper.deltaMassPhiDsToPiKK(candidate);
-      absCos3PiKDs = hfHelper.absCos3PiKDsToPiKK(candidate);
+      invMassDs = HfHelper::invMassDsToPiKK(candidate);
+      deltaMassPhiKK = HfHelper::deltaMassPhiDsToPiKK(candidate);
+      absCos3PiKDs = HfHelper::absCos3PiKDsToPiKK(candidate);
     }
 
     int8_t flagMc{0};
@@ -357,11 +356,11 @@ struct HfTreeCreatorDsToKKPi {
       channelMc = candidate.flagMcDecayChanRec();
       isSwapped = candidate.isCandidateSwapped();
       if (fillDplusMc && candidate.flagMcDecayChanRec() == channelsResonant[Mother::Dplus][decayChannel]) {
-        eCand = hfHelper.eDplus(candidate);
-        ctCand = hfHelper.ctDplus(candidate);
+        eCand = HfHelper::eDplus(candidate);
+        ctCand = HfHelper::ctDplus(candidate);
       } else {
-        eCand = hfHelper.eDs(candidate);
-        ctCand = hfHelper.ctDs(candidate);
+        eCand = HfHelper::eDs(candidate);
+        ctCand = HfHelper::ctDs(candidate);
       }
     }
 

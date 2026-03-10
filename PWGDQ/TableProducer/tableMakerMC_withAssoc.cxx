@@ -32,8 +32,10 @@
 #include "Common/DataModel/CollisionAssociationTables.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/FwdTrackReAlignTables.h"
+#include "Common/DataModel/McCollisionExtra.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CCDB/BasicCCDBManager.h"
@@ -68,6 +70,7 @@ using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 using namespace o2::aod;
+using namespace o2::aod::rctsel;
 
 // Declare Joins used in the various process functions
 using MyBarrelTracks = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection,
@@ -98,6 +101,7 @@ using MyEventsWithMultsAndRapidityGapFilter = soa::Join<aod::Collisions, aod::Ev
 using MyEventsWithCent = soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs, aod::CentFT0As, aod::CentFT0Ms, aod::McCollisionLabels>;
 using MyEventsWithCentAndMults = soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs, aod::CentFT0As, aod::CentFT0Ms, aod::Mults, aod::MultsExtra, aod::McCollisionLabels>;
 using MFTTrackLabeled = soa::Join<o2::aod::MFTTracks, aod::McMFTTrackLabels>;
+using MyEventsMcWithMults = soa::Join<aod::McCollisions, aod::McCollsExtra, aod::MultMCExtras_001>;
 
 // Declare bit maps containing information on the table joins content (used as argument in templated functions)
 constexpr static uint32_t gkEventFillMap = VarManager::ObjTypes::BC | VarManager::ObjTypes::Collision;
@@ -105,7 +109,8 @@ constexpr static uint32_t gkEventFillMapWithMults = VarManager::ObjTypes::BC | V
 // constexpr static uint32_t gkEventFillMapWithCent = VarManager::ObjTypes::BC | VarManager::ObjTypes::Collision | VarManager::ObjTypes::CollisionCent;
 constexpr static uint32_t gkEventFillMapWithCentAndMults = VarManager::ObjTypes::BC | VarManager::ObjTypes::Collision | VarManager::ObjTypes::CollisionCent | VarManager::CollisionMult | VarManager::CollisionMultExtra;
 constexpr static uint32_t gkEventFillMapWithMultsRapidityGapFilter = VarManager::ObjTypes::BC | VarManager::ObjTypes::Collision | VarManager::ObjTypes::CollisionMult | VarManager::ObjTypes::CollisionMultExtra | VarManager::ObjTypes::RapidityGapFilter;
-// constexpr static uint32_t gkEventMCFillMap = VarManager::ObjTypes::CollisionMC;
+constexpr static uint32_t gkEventMcFillMap = VarManager::ObjTypes::CollisionMC;
+constexpr static uint32_t gkEventMcFillMapWithCent = VarManager::ObjTypes::CollisionMC | VarManager::ObjTypes::CollisionCent;
 // constexpr static uint32_t gkTrackFillMap = VarManager::ObjTypes::Track | VarManager::ObjTypes::TrackExtra | VarManager::ObjTypes::TrackDCA | VarManager::ObjTypes::TrackSelection | VarManager::ObjTypes::TrackPID;
 constexpr static uint32_t gkTrackFillMapWithCov = VarManager::ObjTypes::Track | VarManager::ObjTypes::TrackExtra | VarManager::ObjTypes::TrackDCA | VarManager::ObjTypes::TrackSelection | VarManager::ObjTypes::TrackCov | VarManager::ObjTypes::TrackPID;
 // constexpr static uint32_t gkTrackFillMapWithDalitzBits = gkTrackFillMap | VarManager::ObjTypes::DalitzBits;
@@ -138,6 +143,7 @@ struct TableMakerMC {
   Produces<ReducedEventsMultPV> multPV;
   Produces<ReducedEventsMultAll> multAll;
   Produces<ReducedMCEventLabels> eventMClabels;
+  Produces<ReducedEventsMergingTable> mergingTable;
 
   Produces<ReducedTracksBarrelInfo> trackBarrelInfo;
   Produces<ReducedTracks> trackBasic;
@@ -174,6 +180,12 @@ struct TableMakerMC {
     Configurable<std::string> fConfigMuonCutsJSON{"cfgMuonCutsJSON", "", "Additional list of muon cuts in JSON format"};
   } fConfigCuts;
 
+  // RCT selection
+  struct : ConfigurableGroup {
+    Configurable<bool> fConfigUseRCT{"cfgUseRCT", false, "Enable event selection with RCT flags"};
+    Configurable<std::string> fConfigRCTLabel{"cfgRCTLabel", "CBT", "RCT flag labels : CBT, CBT_hadronPID, CBT_electronPID, CBT_calo, CBT_muon, CBT_muon_glo"};
+  } fConfigRCT;
+
   // MC signals to be skimmed
   Configurable<std::string> fConfigMCSignals{"cfgMCsignals", "", "Comma separated list of MC signals"};
   Configurable<std::string> fConfigMCSignalsJSON{"cfgMCsignalsJSON", "", "Additional list of MC signals via JSON"};
@@ -203,6 +215,9 @@ struct TableMakerMC {
     Configurable<std::string> fConfigCcdbUrl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
     Configurable<std::string> fGeoPath{"geoPath", "GLO/Config/GeometryAligned", "Path of the geometry file"};
     Configurable<std::string> fGrpMagPath{"grpmagPath", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object"};
+    Configurable<std::string> fZShiftPath{"zShiftPath", "Users/m/mcoquet/ZShift", "CCDB path for z shift to apply to forward tracks"};
+    Configurable<bool> fUseRemoteZShift{"cfgUseRemoteZShift", false, "Enable getting Zshift from ccdb"};
+    Configurable<float> fManualZShift{"cfgManualZShift", 0.f, "Manual value for the Zshift for muons."};
     Configurable<std::string> fGrpMagPathRun2{"grpmagPathRun2", "GLO/GRP/GRP", "CCDB path of the GRPObject (Usage for Run 2)"};
     Configurable<int64_t> timestampCCDB{"timestampCCDB", -1, "timestamp of the ONNX file for ML model used to query in CCDB"};
   } fConfigCCDB;
@@ -255,6 +270,39 @@ struct TableMakerMC {
   std::vector<double> binsPtMl;
   std::array<double, 1> cutValues;
   std::vector<int> cutDirMl;
+
+  // RCT flag checker
+  RCTFlagsChecker rctChecker{"CBT"};
+
+  // variables to store quantities needed for tagging collision merging candidates
+  struct {
+    std::map<int32_t, float> bimodalityCoeffDCAz;               // Bimodality coefficient of the DCAz distribution of tracks associated to a collision
+    std::map<int32_t, float> bimodalityCoeffDCAzBinned;         // Bimodality coefficient of the DCAz distribution of tracks associated to a collision, binned
+    std::map<int32_t, float> bimodalityCoeffDCAzBinnedTrimmed1; // Bimodality coefficient of the DCAz distribution of tracks associated to a collision, binned and trimmed 1
+    std::map<int32_t, float> bimodalityCoeffDCAzBinnedTrimmed2; // Bimodality coefficient of the DCAz distribution of tracks associated to a collision, binned and trimmed 2
+    std::map<int32_t, float> bimodalityCoeffDCAzBinnedTrimmed3; // Bimodality coefficient of the DCAz distribution of tracks associated to a collision, binned and trimmed 3
+    std::map<int32_t, float> meanDCAz;
+    std::map<int32_t, float> meanDCAzBinnedTrimmed1;
+    std::map<int32_t, float> meanDCAzBinnedTrimmed2;
+    std::map<int32_t, float> meanDCAzBinnedTrimmed3;
+    std::map<int32_t, float> rmsDCAz;
+    std::map<int32_t, float> rmsDCAzBinnedTrimmed1;
+    std::map<int32_t, float> rmsDCAzBinnedTrimmed2;
+    std::map<int32_t, float> rmsDCAzBinnedTrimmed3;
+    std::map<int32_t, float> skewnessDCAz;
+    std::map<int32_t, float> kurtosisDCAz;
+    std::map<int32_t, float> fraction100umDCAz; // fraction of tracks with |DCAz|>100um
+    std::map<int32_t, float> fraction200umDCAz; // fraction of tracks with |DCAz|>200um
+    std::map<int32_t, float> fraction500umDCAz; // fraction of tracks with |DCAz|>500um
+    std::map<int32_t, float> fraction1mmDCAz;   // fraction of tracks with |DCAz|>1mm
+    std::map<int32_t, float> fraction2mmDCAz;   // fraction of tracks with |DCAz|>2mm
+    std::map<int32_t, float> fraction5mmDCAz;   // fraction of tracks with |DCAz|>5mm
+    std::map<int32_t, float> fraction10mmDCAz;  // fraction of tracks with |DCAz|>10mm
+    std::map<int32_t, int> nPeaksDCAz;          // number of peaks in the DCAz distribution of tracks associated to a collision
+    std::map<int32_t, int> nPeaksDCAzTrimmed1;  // number of peaks in the binned DCAz distribution (trimmed 1)
+    std::map<int32_t, int> nPeaksDCAzTrimmed2;  // number of peaks in the binned DCAz distribution (trimmed 2)
+    std::map<int32_t, int> nPeaksDCAzTrimmed3;  // number of peaks in the binned DCAz distribution (trimmed 3)
+  } fCollMergingTag;
 
   void init(o2::framework::InitContext& context)
   {
@@ -393,6 +441,10 @@ struct TableMakerMC {
       matchingMlResponse.cacheInputFeaturesIndices(fConfigVariousOptions.fInputFeatures.value);
       matchingMlResponse.init();
     }
+
+    if (fConfigRCT.fConfigUseRCT.value) {
+      rctChecker.init(fConfigRCT.fConfigRCTLabel);
+    }
   }
 
   void DefineCuts()
@@ -451,7 +503,9 @@ struct TableMakerMC {
   Preslice<aod::FwdTrackAssoc> fwdtrackIndicesPerCollision = aod::track_association::collisionId;
   Preslice<aod::MFTTrackAssoc> mfttrackIndicesPerCollision = aod::track_association::collisionId;
 
-  void skimMCCollisions(aod::McCollisions const& mcCollisions)
+  Preslice<MyBarrelTracksWithCov> presliceBarrelTracksWithCov = aod::track_association::collisionId;
+
+  void skimMCCollisions(MyEventsMcWithMults const& mcCollisions)
   {
     // skim MC collisions
     // NOTE: So far, all MC collisions are skimmed. In case there will be filtering based on MC collisions,
@@ -461,16 +515,17 @@ struct TableMakerMC {
     // Loop over MC collisions
     for (auto& mcCollision : mcCollisions) {
       // Get MC collision information into the VarManager
-      VarManager::FillEvent<VarManager::ObjTypes::CollisionMC>(mcCollision);
+      VarManager::FillEvent<gkEventMcFillMapWithCent>(mcCollision);
       // Fill histograms
       fHistMan->FillHistClass("Event_MCTruth", VarManager::fgValues);
       // Create the skimmed table entry for this collision
       eventMC(mcCollision.generatorsID(), mcCollision.posX(), mcCollision.posY(), mcCollision.posZ(),
-              mcCollision.t(), mcCollision.weight(), mcCollision.impactParameter());
+              mcCollision.t(), mcCollision.weight(), mcCollision.impactParameter(), mcCollision.bestCollisionCentFT0C(),
+              mcCollision.multMCNParticlesEta05(), mcCollision.multMCNParticlesEta08(), mcCollision.multMCNParticlesEta10());
     }
   }
 
-  void skimMCParticles(aod::McParticles const& mcTracks, aod::McCollisions const&)
+  void skimMCParticles(aod::McParticles const& mcTracks, MyEventsMcWithMults const&)
   {
     // Select MC particles which fulfill at least one of the user specified MC signals
     // In this function we just fill a map with the labels of selected particles, not creating the tables themselves.
@@ -547,7 +602,8 @@ struct TableMakerMC {
         // fill histograms for each of the signals, if found
         if (fConfigHistOutput.fConfigQA) {
           VarManager::FillTrackMC(mcTracks, mctrack);
-          VarManager::FillEvent<VarManager::ObjTypes::CollisionMC>(mctrack.mcCollision());
+          auto mcCollision = mctrack.template mcCollision_as<MyEventsMcWithMults>();
+          VarManager::FillEvent<gkEventMcFillMapWithCent>(mcCollision);
           int j = 0;
           for (auto signal = fMCSignals.begin(); signal != fMCSignals.end(); signal++, j++) {
             if (mcflags & (static_cast<uint16_t>(1) << j)) {
@@ -557,6 +613,72 @@ struct TableMakerMC {
         }
       }
     } // end loop over mc stack
+  }
+
+  template <typename TEvents, typename TTracks>
+  void computeCollMergingTag(TEvents const& collisions, TTracks const& tracks, Preslice<TTracks>& preslice)
+  {
+    // this function uses the standard track - collision association to compute several quantities which could be related to collision merging
+    // clear the maps for this time frame
+    fCollMergingTag.bimodalityCoeffDCAz.clear();
+    fCollMergingTag.bimodalityCoeffDCAzBinned.clear();
+    fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed1.clear();
+    fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed2.clear();
+    fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed3.clear();
+    fCollMergingTag.meanDCAz.clear();
+    fCollMergingTag.meanDCAzBinnedTrimmed1.clear();
+    fCollMergingTag.meanDCAzBinnedTrimmed2.clear();
+    fCollMergingTag.meanDCAzBinnedTrimmed3.clear();
+    fCollMergingTag.rmsDCAz.clear();
+    fCollMergingTag.rmsDCAzBinnedTrimmed1.clear();
+    fCollMergingTag.rmsDCAzBinnedTrimmed2.clear();
+    fCollMergingTag.rmsDCAzBinnedTrimmed3.clear();
+    fCollMergingTag.skewnessDCAz.clear();
+    fCollMergingTag.kurtosisDCAz.clear();
+    fCollMergingTag.fraction100umDCAz.clear();
+    fCollMergingTag.fraction200umDCAz.clear();
+    fCollMergingTag.fraction500umDCAz.clear();
+    fCollMergingTag.fraction1mmDCAz.clear();
+    fCollMergingTag.fraction2mmDCAz.clear();
+    fCollMergingTag.fraction5mmDCAz.clear();
+    fCollMergingTag.fraction10mmDCAz.clear();
+    fCollMergingTag.nPeaksDCAz.clear();
+    fCollMergingTag.nPeaksDCAzTrimmed1.clear();
+    fCollMergingTag.nPeaksDCAzTrimmed2.clear();
+    fCollMergingTag.nPeaksDCAzTrimmed3.clear();
+
+    for (const auto& collision : collisions) {
+      // make a slice for this collision and compute the DCAz based event quantities
+      auto thisCollTracks = tracks.sliceBy(preslice, collision.globalIndex());
+      VarManager::FillEventTracks(thisCollTracks); // fill the VarManager arrays with the information of the tracks associated to this collision, needed for the cuts and histograms
+      // add the computed variables to the maps with the collision index as key
+      fCollMergingTag.bimodalityCoeffDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzBimodalityCoefficient];
+      fCollMergingTag.bimodalityCoeffDCAzBinned[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzBimodalityCoefficientBinned];
+      fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed1[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzBimodalityCoefficientBinnedTrimmed1];
+      fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed2[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzBimodalityCoefficientBinnedTrimmed2];
+      fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed3[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzBimodalityCoefficientBinnedTrimmed3];
+      fCollMergingTag.meanDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzMean];
+      fCollMergingTag.meanDCAzBinnedTrimmed1[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzMeanBinnedTrimmed1];
+      fCollMergingTag.meanDCAzBinnedTrimmed2[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzMeanBinnedTrimmed2];
+      fCollMergingTag.meanDCAzBinnedTrimmed3[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzMeanBinnedTrimmed3];
+      fCollMergingTag.rmsDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzRMS];
+      fCollMergingTag.rmsDCAzBinnedTrimmed1[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzRMSBinnedTrimmed1];
+      fCollMergingTag.rmsDCAzBinnedTrimmed2[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzRMSBinnedTrimmed2];
+      fCollMergingTag.rmsDCAzBinnedTrimmed3[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzRMSBinnedTrimmed3];
+      fCollMergingTag.skewnessDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzSkewness];
+      fCollMergingTag.kurtosisDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzKurtosis];
+      fCollMergingTag.fraction100umDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove100um];
+      fCollMergingTag.fraction200umDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove200um];
+      fCollMergingTag.fraction500umDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove500um];
+      fCollMergingTag.fraction1mmDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove1mm];
+      fCollMergingTag.fraction2mmDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove2mm];
+      fCollMergingTag.fraction5mmDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove5mm];
+      fCollMergingTag.fraction10mmDCAz[collision.globalIndex()] = VarManager::fgValues[VarManager::kDCAzFracAbove10mm];
+      fCollMergingTag.nPeaksDCAz[collision.globalIndex()] = static_cast<int>(VarManager::fgValues[VarManager::kDCAzNPeaks]);
+      fCollMergingTag.nPeaksDCAzTrimmed1[collision.globalIndex()] = static_cast<int>(VarManager::fgValues[VarManager::kDCAzNPeaksTrimmed1]);
+      fCollMergingTag.nPeaksDCAzTrimmed2[collision.globalIndex()] = static_cast<int>(VarManager::fgValues[VarManager::kDCAzNPeaksTrimmed2]);
+      fCollMergingTag.nPeaksDCAzTrimmed3[collision.globalIndex()] = static_cast<int>(VarManager::fgValues[VarManager::kDCAzNPeaksTrimmed3]);
+    }
   }
 
   template <uint32_t TEventFillMap, typename TEvents>
@@ -592,13 +714,6 @@ struct TableMakerMC {
       }
       (reinterpret_cast<TH2I*>(fStatsList->At(0)))->Fill(1.0, static_cast<float>(o2::aod::evsel::kNsel));
 
-      // apply the event filter
-      if constexpr ((TEventFillMap & VarManager::ObjTypes::RapidityGapFilter) > 0) {
-        if (!collision.eventFilter()) {
-          continue;
-        }
-      }
-
       auto bc = collision.template bc_as<BCsWithTimestamps>();
       // store the selection decisions
       uint64_t tag = static_cast<uint64_t>(0);
@@ -618,7 +733,8 @@ struct TableMakerMC {
       VarManager::FillBC(bc);
       VarManager::FillEvent<TEventFillMap>(collision); // extract event information and place it in the fValues array
       if (collision.has_mcCollision()) {
-        VarManager::FillEvent<VarManager::ObjTypes::CollisionMC>(collision.mcCollision());
+        auto mcCollision = collision.template mcCollision_as<MyEventsMcWithMults>();
+        VarManager::FillEvent<gkEventMcFillMapWithCent>(mcCollision);
       }
       if (fDoDetailedQA) {
         fHistMan->FillHistClass("Event_BeforeCuts", VarManager::fgValues);
@@ -633,7 +749,7 @@ struct TableMakerMC {
       (reinterpret_cast<TH2I*>(fStatsList->At(0)))->Fill(2.0, static_cast<float>(o2::aod::evsel::kNsel));
 
       // Apply the user specified event selection
-      if (!fEventCut->IsSelected(VarManager::fgValues)) {
+      if (!fEventCut->IsSelected(VarManager::fgValues) || (fConfigRCT.fConfigUseRCT.value && !(rctChecker(collision)))) {
         continue;
       }
 
@@ -657,20 +773,11 @@ struct TableMakerMC {
         multZNC = collision.multZNC();
         multTracklets = collision.multTracklets();
         multTracksPV = collision.multNTracksPV();
-        if constexpr ((TEventFillMap & VarManager::ObjTypes::RapidityGapFilter) > 0) {
-          // Use the FIT signals from the nearest BC with FIT amplitude above threshold
-          multFV0A = collision.newBcMultFV0A();
-          multFT0A = collision.newBcMultFT0A();
-          multFT0C = collision.newBcMultFT0C();
-          multFDDA = collision.newBcMultFDDA();
-          multFDDC = collision.newBcMultFDDC();
-        } else {
-          multFV0A = collision.multFV0A();
-          multFT0A = collision.multFT0A();
-          multFT0C = collision.multFT0C();
-          multFDDA = collision.multFDDA();
-          multFDDC = collision.multFDDC();
-        }
+        multFV0A = collision.multFV0A();
+        multFT0A = collision.multFT0A();
+        multFT0C = collision.multFT0C();
+        multFDDA = collision.multFDDA();
+        multFDDC = collision.multFDDC();
       }
       if constexpr ((TEventFillMap & VarManager::ObjTypes::CollisionCent) > 0) {
         centFT0C = collision.centFT0C();
@@ -689,6 +796,17 @@ struct TableMakerMC {
         multAll(collision.multAllTracksTPCOnly(), collision.multAllTracksITSTPC(),
                 0, 0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0);
       }
+
+      mergingTable(fCollMergingTag.bimodalityCoeffDCAz[collision.globalIndex()], fCollMergingTag.bimodalityCoeffDCAzBinned[collision.globalIndex()],
+                   fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed1[collision.globalIndex()], fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed2[collision.globalIndex()], fCollMergingTag.bimodalityCoeffDCAzBinnedTrimmed3[collision.globalIndex()],
+                   fCollMergingTag.meanDCAz[collision.globalIndex()], fCollMergingTag.meanDCAzBinnedTrimmed1[collision.globalIndex()], fCollMergingTag.meanDCAzBinnedTrimmed2[collision.globalIndex()], fCollMergingTag.meanDCAzBinnedTrimmed3[collision.globalIndex()],
+                   fCollMergingTag.rmsDCAz[collision.globalIndex()], fCollMergingTag.rmsDCAzBinnedTrimmed1[collision.globalIndex()], fCollMergingTag.rmsDCAzBinnedTrimmed2[collision.globalIndex()], fCollMergingTag.rmsDCAzBinnedTrimmed3[collision.globalIndex()],
+                   fCollMergingTag.skewnessDCAz[collision.globalIndex()], fCollMergingTag.kurtosisDCAz[collision.globalIndex()],
+                   fCollMergingTag.fraction100umDCAz[collision.globalIndex()], fCollMergingTag.fraction200umDCAz[collision.globalIndex()],
+                   fCollMergingTag.fraction500umDCAz[collision.globalIndex()], fCollMergingTag.fraction1mmDCAz[collision.globalIndex()],
+                   fCollMergingTag.fraction2mmDCAz[collision.globalIndex()], fCollMergingTag.fraction5mmDCAz[collision.globalIndex()],
+                   fCollMergingTag.fraction10mmDCAz[collision.globalIndex()], fCollMergingTag.nPeaksDCAz[collision.globalIndex()], fCollMergingTag.nPeaksDCAzTrimmed1[collision.globalIndex()],
+                   fCollMergingTag.nPeaksDCAzTrimmed2[collision.globalIndex()], fCollMergingTag.nPeaksDCAzTrimmed3[collision.globalIndex()]);
 
       // add an element for this collision into the map
       fCollIndexMap[collision.globalIndex()] = event.lastIndex();
@@ -1172,12 +1290,12 @@ struct TableMakerMC {
     } // end loop over selected muons
   } // end skimMuons
 
-  template <uint32_t TEventFillMap, uint32_t TTrackFillMap, uint32_t TMuonFillMap, uint32_t TMFTFillMap, typename TEvents, typename TTracks,
-            typename TMuons, typename TMFTTracks, typename TTrackAssoc, typename TFwdTrackAssoc, typename TMFTTrackAssoc, typename TMFTCov>
+  template <uint32_t TEventFillMap, uint32_t TTrackFillMap, uint32_t TMuonFillMap, uint32_t TMFTFillMap, uint32_t TEventMcFillMap, typename TEvents, typename TTracks,
+            typename TMuons, typename TMFTTracks, typename TTrackAssoc, typename TFwdTrackAssoc, typename TMFTTrackAssoc, typename TMFTCov, typename MyEventsMcWithMults>
   void fullSkimming(TEvents const& collisions, BCsWithTimestamps const& bcs,
                     TTracks const& tracksBarrel, TMuons const& muons, TMFTTracks const& mftTracks,
                     TTrackAssoc const& trackAssocs, TFwdTrackAssoc const& fwdTrackAssocs, TMFTTrackAssoc const& mftAssocs,
-                    aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles, TMFTCov const& mftCovs)
+                    MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles, TMFTCov const& mftCovs)
   {
     // Check whether the run changed and update CCDB if it did
     if (bcs.size() > 0 && fCurrentRun != bcs.begin().runNumber()) {
@@ -1191,6 +1309,16 @@ struct TableMakerMC {
         if (fGrpMag != nullptr) {
           o2::base::Propagator::initFieldFromGRP(fGrpMag);
           VarManager::SetMagneticField(fGrpMag->getNominalL3Field());
+        }
+        if (fConfigCCDB.fUseRemoteZShift) {
+          auto* fZShift = fCCDB->getForTimeStamp<std::vector<float>>(fConfigCCDB.fZShiftPath, bcs.begin().timestamp());
+          if (fZShift != nullptr && !fZShift->empty()) {
+            VarManager::SetZShift((*fZShift)[0]);
+          } else {
+            LOG(fatal) << "Could not retrieve Z-shift value from CCDB";
+          }
+        } else {
+          VarManager::SetZShift(fConfigCCDB.fManualZShift.value);
         }
         if (fConfigVariousOptions.fPropMuon) {
           VarManager::SetupMuonMagField();
@@ -1209,10 +1337,6 @@ struct TableMakerMC {
     eventMC.reserve(mcCollisions.size());
     skimMCCollisions(mcCollisions);
 
-    // select MC particles to be written using the specified MC signals
-    // NOTE: tables are not written at this point, only label maps are being created
-    skimMCParticles(mcParticles, mcCollisions);
-
     // skim collisions
     event.reserve(collisions.size());
     eventExtended.reserve(collisions.size());
@@ -1223,6 +1347,12 @@ struct TableMakerMC {
     if (fCollIndexMap.size() == 0) {
       return;
     }
+
+    // select MC particles to be written using the specified MC signals
+    // NOTE: tables are not written at this point, only label maps are being created
+    //       Only skim MC particles when the MC collision is reconstructed
+    //       Because in the first five DFs of each run, the MC collisions are not reconstructed
+    skimMCParticles(mcParticles, mcCollisions);
 
     // Clear index map and reserve memory for barrel tables
     if constexpr (static_cast<bool>(TTrackFillMap)) {
@@ -1344,7 +1474,8 @@ struct TableMakerMC {
       }
 
       // NOTE: Here we assume that MC collisions are not filtered, so there is no new vs old index map for translation
-      trackMC(mctrack.mcCollision().globalIndex(), mctrack.pdgCode(), mctrack.statusCode(), mctrack.flags(),
+      auto mcCollision = mctrack.template mcCollision_as<MyEventsMcWithMults>();
+      trackMC(mcCollision.globalIndex(), mctrack.pdgCode(), mctrack.statusCode(), mctrack.flags(),
               mothers, daughterRange,
               mctrack.weight(), mctrack.pt(), mctrack.eta(), mctrack.phi(), mctrack.e(),
               mctrack.vx(), mctrack.vy(), mctrack.vz(), mctrack.vt(), mcflags);
@@ -1443,86 +1574,104 @@ struct TableMakerMC {
   void processPP(MyEventsWithMults const& collisions, aod::BCsWithTimestamps const& bcs,
                  MyBarrelTracksWithCov const& tracksBarrel, MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                  aod::TrackAssoc const& trackAssocs, aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                 aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                 MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithMults, gkTrackFillMapWithCov, gkMuonFillMapWithCov, gkMFTFillMap>(collisions, bcs, tracksBarrel, tracksMuon, mftTracks, trackAssocs, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithMults, gkTrackFillMapWithCov, gkMuonFillMapWithCov, gkMFTFillMap, gkEventMcFillMap>(collisions, bcs, tracksBarrel, tracksMuon, mftTracks, trackAssocs, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   void processPPBarrelOnly(MyEventsWithMults const& collisions, aod::BCsWithTimestamps const& bcs,
                            MyBarrelTracksWithCov const& tracksBarrel, aod::TrackAssoc const& trackAssocs,
-                           aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                           MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithMults, gkTrackFillMapWithCov, 0u, 0u>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithMults, gkTrackFillMapWithCov, 0u, 0u, gkEventMcFillMap>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
   }
 
   void processPPMuonOnlyBasic(MyEvents const& collisions, aod::BCsWithTimestamps const& bcs,
                               MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                               aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                              aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                              MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMap, 0u, gkMuonFillMapWithCov, gkMFTFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMap, 0u, gkMuonFillMapWithCov, gkMFTFillMap, gkEventMcFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   void processPPMuonOnly(MyEventsWithMults const& collisions, aod::BCsWithTimestamps const& bcs,
                          MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                          aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                         aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                         MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonFillMapWithCov, gkMFTFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonFillMapWithCov, gkMFTFillMap, gkEventMcFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   void processPPMuonRefit(MyEventsWithMults const& collisions, aod::BCsWithTimestamps const& bcs,
                           MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                           aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                          aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles, aod::MFTTracksCov const& mftCovs)
+                          MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles, aod::MFTTracksCov const& mftCovs)
   {
-    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonFillMapWithCov, gkMFTCovFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, mftCovs);
+    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonFillMapWithCov, gkMFTCovFillMap, gkEventMcFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, mftCovs);
   }
 
   void processPPRealignedMuonOnly(MyEventsWithMults const& collisions, aod::BCsWithTimestamps const& bcs,
                                   MyMuonsRealignWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                                   aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                                  aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                                  MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonRealignFillMapWithCov, gkMFTFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithMults, 0u, gkMuonRealignFillMapWithCov, gkMFTFillMap, gkEventMcFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   void processPbPb(MyEventsWithCentAndMults const& collisions, aod::BCsWithTimestamps const& bcs,
                    MyBarrelTracksWithCov const& tracksBarrel, MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                    aod::TrackAssoc const& trackAssocs, aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                   aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                   MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithCentAndMults, gkTrackFillMapWithCov, gkMuonFillMapWithCov, gkMFTFillMap>(collisions, bcs, tracksBarrel, tracksMuon, mftTracks, trackAssocs, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithCentAndMults, gkTrackFillMapWithCov, gkMuonFillMapWithCov, gkMFTFillMap, gkEventMcFillMapWithCent>(collisions, bcs, tracksBarrel, tracksMuon, mftTracks, trackAssocs, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   void processPbPbBarrelOnly(MyEventsWithCentAndMults const& collisions, aod::BCsWithTimestamps const& bcs,
                              MyBarrelTracksWithCov const& tracksBarrel, aod::TrackAssoc const& trackAssocs,
-                             aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                             MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithCentAndMults, gkTrackFillMapWithCov, 0u, 0u>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
+    computeCollMergingTag(collisions, tracksBarrel, presliceBarrelTracksWithCov);
+    fullSkimming<gkEventFillMapWithCentAndMults, gkTrackFillMapWithCov, 0u, 0u, gkEventMcFillMapWithCent>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
   }
 
   void processPbPbWithFilterBarrelOnly(MyEventsWithMultsAndRapidityGapFilter const& collisions, aod::BCsWithTimestamps const& bcs,
                                        MyBarrelTracksWithCov const& tracksBarrel, aod::TrackAssoc const& trackAssocs,
-                                       aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                                       MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithMultsRapidityGapFilter, gkTrackFillMapWithCov, 0u, 0u>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
+    computeCollMergingTag(collisions, tracksBarrel, presliceBarrelTracksWithCov);
+    fullSkimming<gkEventFillMapWithMultsRapidityGapFilter, gkTrackFillMapWithCov, 0u, 0u, gkEventMcFillMapWithCent>(collisions, bcs, tracksBarrel, nullptr, nullptr, trackAssocs, nullptr, nullptr, mcCollisions, mcParticles, nullptr);
   }
 
   void processPbPbMuonOnly(MyEventsWithCentAndMults const& collisions, aod::BCsWithTimestamps const& bcs,
                            MyMuonsWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                            aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                           aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                           MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithCentAndMults, 0u, gkMuonFillMapWithCov, gkMFTFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithCentAndMults, 0u, gkMuonFillMapWithCov, gkMFTFillMap, gkEventMcFillMapWithCent>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    /*LOGP(info, "---------------------------");
+    for (auto& mcCollision : mcCollisions) {
+      LOGP(info, "Gen. FT0C centrality = {}", mcCollision.bestCollisionCentFT0C());
+      //LOGP(info, "Gen. FT0C centrality = {}", mcCollision.posZ());
+    }
+    for (const auto& collision : collisions) {
+      if (collision.has_mcCollision()) {
+        LOGP(info, "*************************");
+        auto mcCollision = collision.template mcCollision_as<MyEventsMcWithMults>();
+        //LOGP(info, "Gen. FT0C centrality = {}", collision.mcCollision().posZ());
+        LOGP(info, "Gen. FT0C centrality = {}", mcCollision.bestCollisionCentFT0C());
+        LOGP(info, "Rec. FT0C centrality = {}", collision.centFT0C());
+        LOGP(info, "*************************");
+      }
+    }
+    LOGP(info, "---------------------------");*/
   }
 
   void processPbPbRealignedMuonOnly(MyEventsWithCentAndMults const& collisions, aod::BCsWithTimestamps const& bcs,
                                     MyMuonsRealignWithCov const& tracksMuon, MFTTrackLabeled const& mftTracks,
                                     aod::FwdTrackAssoc const& fwdTrackAssocs, aod::MFTTrackAssoc const& mftAssocs,
-                                    aod::McCollisions const& mcCollisions, aod::McParticles const& mcParticles)
+                                    MyEventsMcWithMults const& mcCollisions, aod::McParticles const& mcParticles)
   {
-    fullSkimming<gkEventFillMapWithCentAndMults, 0u, gkMuonRealignFillMapWithCov, gkMFTFillMap>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
+    fullSkimming<gkEventFillMapWithCentAndMults, 0u, gkMuonRealignFillMapWithCov, gkMFTFillMap, gkEventMcFillMapWithCent>(collisions, bcs, nullptr, tracksMuon, mftTracks, nullptr, fwdTrackAssocs, mftAssocs, mcCollisions, mcParticles, nullptr);
   }
 
   // Process the BCs and store stats for luminosity retrieval -----------------------------------------------------------------------------------

@@ -16,7 +16,9 @@
 ///         Paul Buehler, <paul.buehler@oeaw.ac.at>, Vienna
 
 #include "PWGHF/Core/CentralityEstimation.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
+#include "PWGHF/DataModel/TrackIndexSkimmingTables.h"
 #include "PWGHF/Utils/utilsBfieldCCDB.h"
 #include "PWGHF/Utils/utilsEvSelHf.h"
 #include "PWGHF/Utils/utilsTrkCandHf.h"
@@ -24,6 +26,7 @@
 #include "PWGLF/DataModel/mcCentrality.h"
 
 #include "Common/Core/RecoDecay.h"
+#include "Common/Core/ZorroSummary.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
@@ -89,15 +92,11 @@ struct HfCandidateCreatorCascade {
 
   HfEventSelection hfEvSel;        // event selection and monitoring
   o2::vertexing::DCAFitterN<2> df; // 2-prong vertex fitter
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
   o2::base::MatLayerCylSet* lut{};
   o2::base::Propagator::MatCorrType matCorr = o2::base::Propagator::MatCorrType::USEMatCorrLUT;
 
   int runNumber{0};
-  double massP{0.};
-  double massK0s{0.};
-  double massPi{0.};
-  double massLc{0.};
   double mass2K0sP{0.};
   double bz = 0.;
 
@@ -105,6 +104,7 @@ struct HfCandidateCreatorCascade {
 
   std::shared_ptr<TH1> hCandidates;
   HistogramRegistry registry{"registry"};
+  OutputObj<ZorroSummary> zorroSummary{"zorroSummary"};
 
   void init(InitContext const&)
   {
@@ -137,12 +137,7 @@ struct HfCandidateCreatorCascade {
     hCandidates = registry.add<TH1>("hCandidates", "candidates counter", {HistType::kTH1D, {axisCands}});
 
     // init HF event selection helper
-    hfEvSel.init(registry);
-
-    massP = MassProton;
-    massK0s = MassK0Short;
-    massPi = MassPiPlus;
-    massLc = MassLambdaCPlus;
+    hfEvSel.init(registry, &zorroSummary);
 
     // df.setBz(bz);
     df.setPropagateToPCA(propagateToPCA);
@@ -192,10 +187,10 @@ struct HfCandidateCreatorCascade {
       }
 
       int posGlobalIndex = -1, negGlobalIndex = -1;
-      float v0X, v0Y, v0Z, v0px, v0py, v0pz;
-      float v0PosPx, v0PosPy, v0PosPz, v0NegPx, v0NegPy, v0NegPz;
-      float dcaV0dau, dcaPosToPV, dcaNegToPV, v0cosPA;
-      std::array<float, 21> covV = {0.};
+      float v0X{}, v0Y{}, v0Z{}, v0px{}, v0py{}, v0pz{};
+      float v0PosPx{}, v0PosPy{}, v0PosPz{}, v0NegPx{}, v0NegPy{}, v0NegPz{};
+      float dcaV0dau{}, dcaPosToPV{}, dcaNegToPV{}, v0cosPA{};
+      std::array<float, 21> covV{};
 
       auto v0index = casc.template v0_as<o2::aod::V0sLinked>();
       if (v0index.has_v0Data()) {
@@ -229,7 +224,9 @@ struct HfCandidateCreatorCascade {
           covV[i] = v0row.positionCovMat()[i];
         }
       } else {
-        LOGF(warning, "V0Data not there for V0 %d in HF cascade %d. Skipping candidate.", casc.v0Id(), casc.globalIndex());
+        if (!silenceV0DataWarning) {
+          LOGF(warning, "V0Data not there for V0 %d in HF cascade %d. Skipping candidate.", casc.v0Id(), casc.globalIndex());
+        }
         continue; // this was inadequately linked, should not happen
       }
 
@@ -271,7 +268,6 @@ struct HfCandidateCreatorCascade {
       auto chi2PCA = df.getChi2AtPCACandidate();
       auto covMatrixPCA = df.calcPCACovMatrixFlat();
       registry.fill(HIST("hCovSVXX"), covMatrixPCA[0]); // FIXME: Calculation of errorDecayLength(XY) gives wrong values without this line.
-      // do I have to call "df.propagateTracksToVertex();"?
       auto trackParVarV0 = df.getTrack(0);
       auto trackParVarBach = df.getTrack(1);
 
@@ -292,7 +288,7 @@ struct HfCandidateCreatorCascade {
       trackParVarBach.propagateToDCA(primaryVertex, bz, &impactParameterBach);
 
       // get uncertainty of the decay length
-      double phi, theta;
+      double phi{}, theta{};
       getPointDirection(std::array{collision.posX(), collision.posY(), collision.posZ()}, secondaryVertex, phi, theta);
       auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixPCA, phi, theta));
       auto errorDecayLengthXY = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, 0.) + getRotatedCovMatrixXX(covMatrixPCA, phi, 0.));
@@ -320,7 +316,7 @@ struct HfCandidateCreatorCascade {
       // fill histograms
       if (fillHistograms) {
         // calculate invariant masses
-        mass2K0sP = RecoDecay::m(std::array{pVecBach, pVecV0}, std::array{massP, massK0s});
+        mass2K0sP = RecoDecay::m(std::array{pVecBach, pVecV0}, std::array{MassProton, MassK0Short});
         registry.fill(HIST("hMass2"), mass2K0sP);
       }
     }
@@ -376,10 +372,12 @@ struct HfCandidateCreatorCascade {
 
       /// bitmask with event. selection info
       float centrality{-1.f};
+      const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::None, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }
@@ -393,10 +391,12 @@ struct HfCandidateCreatorCascade {
 
       /// bitmask with event. selection info
       float centrality{-1.f};
+      const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0C, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }
@@ -410,10 +410,12 @@ struct HfCandidateCreatorCascade {
 
       /// bitmask with event. selection info
       float centrality{-1.f};
+      const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0M, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }

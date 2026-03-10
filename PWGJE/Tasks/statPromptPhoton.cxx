@@ -26,7 +26,6 @@
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CommonConstants/PhysicsConstants.h"
@@ -253,9 +252,9 @@ struct statPromptPhoton {
 
   using jMCClusters = o2::soa::Join<o2::aod::JMcClusterLbs, o2::aod::JClusters, o2::aod::JClusterTracks>;
   using jClusters = o2::soa::Join<o2::aod::JClusters, o2::aod::JClusterTracks>;
-  using jselectedCollisions = soa::Join<aod::JCollisions, aod::JCollisionBCs, aod::JCollisionPIs, aod::EvSels, aod::JEMCCollisionLbs, aod::JMcCollisionLbs>;
-  using jselectedDataCollisions = soa::Join<aod::JCollisions, aod::JCollisionBCs, aod::JCollisionPIs, aod::EvSels, aod::JEMCCollisionLbs>;
-  //  using jselectedDataCollisions = soa::Join<aod::JCollisions, aod::JCollisionBCs, aod::JCollisionPIs, aod::JCollisionMcInfos, aod::EvSels, aod::JEMCCollisionLbs>;
+  using jselectedCollisions = soa::Join<aod::JCollisions, aod::JCollisionPIs, aod::EvSels, aod::JEMCCollisionLbs, aod::JMcCollisionLbs>;
+  using jselectedDataCollisions = soa::Join<aod::JCollisions, aod::JCollisionPIs, aod::EvSels, aod::JEMCCollisionLbs>;
+  //  using jselectedDataCollisions = soa::Join<aod::JCollisions, aod::JCollisionPIs, aod::JCollisionMcInfos, aod::EvSels, aod::JEMCCollisionLbs>;
   using jfilteredCollisions = soa::Filtered<jselectedCollisions>;
   using jfilteredDataCollisions = soa::Filtered<jselectedDataCollisions>;
   using jfilteredMCClusters = soa::Filtered<jMCClusters>;
@@ -1114,9 +1113,9 @@ struct statPromptPhoton {
 
     histos.fill(HIST("DATA_nEvents"), 2.5);
 
-      if (!jetderiveddatautilities::selectTrigger(collision, triggerMaskBits)) {
-        return;
-      }
+    if (!jetderiveddatautilities::selectTrigger(collision, triggerMaskBits)) {
+      return;
+    }
 
     histos.fill(HIST("DATA_nEvents"), 3.5);
 

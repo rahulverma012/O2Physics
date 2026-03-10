@@ -28,7 +28,7 @@
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
+#include "Common/DataModel/PIDResponseTOF.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "Framework/ASoAHelpers.h"
@@ -247,6 +247,7 @@ struct LfTreeCreatorNuclei {
         track.hasTRD(),
         track.tpcInnerParam(),
         track.beta(),
+        track.pidForTracking(),
         track.tpcSignal(),
         track.pt(), track.eta(), track.phi(),
         track.sign(),

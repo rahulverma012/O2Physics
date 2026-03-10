@@ -12,7 +12,7 @@
 ///
 /// \file   mcPidTof.cxx
 /// \author Fabrizio Grosa fabrizio.grosa@cern.ch
-/// \brief  Task to produce PID tables for TOF split for pi, K, p, de, copied from https://github.com/AliceO2Group/O2Physics/blob/master/Common/TableProducer/PID/pidTofMerge.cxx
+/// \brief  Task to produce PID tables for TOF split for pi, K, p, de, tr, he3, alpha copied from https://github.com/AliceO2Group/O2Physics/blob/master/Common/TableProducer/PID/pidTofMerge.cxx
 ///         It works only for MC and adds the possibility to apply postcalibrations for MC.
 ///
 
@@ -21,7 +21,6 @@
 #include "Common/Core/TableHelper.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/FT0Corrected.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "Common/DataModel/PIDResponseTOF.h"
 #include "Common/TableProducer/PID/pidTOFBase.h"
 
@@ -352,7 +351,7 @@ struct TofSignal {
   HistogramRegistry histos{"Histos", {}, OutputObjHandlingPolicy::AnalysisObject};
   // Detector response and input parameters
   o2::pid::tof::TOFResoParamsV3 mRespParamsV3;
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
   struct : ConfigurableGroup {
     Configurable<std::string> cfgUrl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
     Configurable<std::string> cfgPathGrpLhcIf{"ccdb-path-grplhcif", "GLO/Config/GRPLHCIF", "Path on the CCDB for the GRPLHCIF object"};
@@ -472,7 +471,7 @@ struct TofEventTime {
   bool enableTableEvTimeTOFOnly = false;
   // Detector response and input parameters
   o2::pid::tof::TOFResoParamsV3 mRespParamsV3;
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
   TOFCalibConfig mTOFCalibConfig; // TOF Calib configuration
 
   // Event time configurations
@@ -721,6 +720,9 @@ static constexpr int IdxPi = 2;
 static constexpr int IdxKa = 3;
 static constexpr int IdxPr = 4;
 static constexpr int IdxDe = 5;
+static constexpr int IdxTr = 6;
+static constexpr int IdxHe = 7;
+static constexpr int IdxAl = 8;
 
 /// Task to produce the response table
 struct McPidTof {
@@ -729,16 +731,22 @@ struct McPidTof {
   Produces<o2::aod::pidTOFKa> tablePIDKa;
   Produces<o2::aod::pidTOFPr> tablePIDPr;
   Produces<o2::aod::pidTOFDe> tablePIDDe;
+  Produces<o2::aod::pidTOFTr> tablePIDTr;
+  Produces<o2::aod::pidTOFHe> tablePIDHe;
+  Produces<o2::aod::pidTOFAl> tablePIDAl;
 
   // Tables to produce (full)
   Produces<o2::aod::pidTOFFullPi> tablePIDFullPi;
   Produces<o2::aod::pidTOFFullKa> tablePIDFullKa;
   Produces<o2::aod::pidTOFFullPr> tablePIDFullPr;
   Produces<o2::aod::pidTOFFullDe> tablePIDFullDe;
+  Produces<o2::aod::pidTOFFullTr> tablePIDFullTr;
+  Produces<o2::aod::pidTOFFullHe> tablePIDFullHe;
+  Produces<o2::aod::pidTOFFullAl> tablePIDFullAl;
 
   // Detector response parameters
   o2::pid::tof::TOFResoParamsV3 mRespParamsV3;
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
   TOFCalibConfig mTOFCalibConfig; // TOF Calib configuration
   Configurable<bool> enableQaHistograms{"enableQaHistograms", false, "Flag to enable the QA histograms"};
 
@@ -769,7 +777,7 @@ struct McPidTof {
   {
     mTOFCalibConfig.inheritFromBaseTask(initContext);
     // Checking the tables are requested in the workflow and enabling them (only pi, K, p)
-    std::array<int, 4> supportedSpecies = {IdxPi, IdxKa, IdxPr, IdxDe};
+    std::array<int, 7> supportedSpecies = {IdxPi, IdxKa, IdxPr, IdxDe, IdxTr, IdxHe, IdxAl};
     for (auto iSpecie{0u}; iSpecie < supportedSpecies.size(); ++iSpecie) {
       // First checking tiny
       int flag = -1;
@@ -848,6 +856,38 @@ struct McPidTof {
         }
         break;
       }
+      case IdxDe: {
+        if (fullTable) {
+          tablePIDFullDe.reserve(size);
+        } else {
+          tablePIDDe.reserve(size);
+        }
+        break;
+      }
+      case IdxTr: {
+        if (fullTable) {
+          tablePIDFullTr.reserve(size);
+        } else {
+          tablePIDTr.reserve(size);
+        }
+        break;
+      }
+      case IdxHe: {
+        if (fullTable) {
+          tablePIDFullHe.reserve(size);
+        } else {
+          tablePIDHe.reserve(size);
+        }
+        break;
+      }
+      case IdxAl: {
+        if (fullTable) {
+          tablePIDFullAl.reserve(size);
+        } else {
+          tablePIDAl.reserve(size);
+        }
+        break;
+      }
       default:
         LOG(fatal) << "Wrong particle ID in reserveTable() for " << (fullTable ? "full" : "tiny") << " tables";
         break;
@@ -862,32 +902,49 @@ struct McPidTof {
         if (fullTable) {
           tablePIDFullPi(-999.f, -999.f);
         } else {
-          aod::pidutils::packInTable<aod::pidtof_tiny::binning>(-999.f,
-                                                                tablePIDPi);
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDPi);
         }
         break;
       case IdxKa:
         if (fullTable) {
           tablePIDFullKa(-999.f, -999.f);
         } else {
-          aod::pidutils::packInTable<aod::pidtof_tiny::binning>(-999.f,
-                                                                tablePIDKa);
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDKa);
         }
         break;
       case IdxPr:
         if (fullTable) {
           tablePIDFullPr(-999.f, -999.f);
         } else {
-          aod::pidutils::packInTable<aod::pidtof_tiny::binning>(-999.f,
-                                                                tablePIDPr);
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDPr);
         }
         break;
       case IdxDe:
         if (fullTable) {
           tablePIDFullDe(-999.f, -999.f);
         } else {
-          aod::pidutils::packInTable<aod::pidtof_tiny::binning>(-999.f,
-                                                                tablePIDDe);
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDDe);
+        }
+        break;
+      case IdxTr:
+        if (fullTable) {
+          tablePIDFullTr(-999.f, -999.f);
+        } else {
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDTr);
+        }
+        break;
+      case IdxHe:
+        if (fullTable) {
+          tablePIDFullHe(-999.f, -999.f);
+        } else {
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDHe);
+        }
+        break;
+      case IdxAl:
+        if (fullTable) {
+          tablePIDFullAl(-999.f, -999.f);
+        } else {
+          aod::pidtof_tiny::binning::packInTable(-999.f, tablePIDAl);
         }
         break;
       default:
@@ -906,6 +963,7 @@ struct McPidTof {
       if (std::find(prodPostCalib.begin(), prodPostCalib.end(), metadataInfo.get("LPMProductionTag")) == prodPostCalib.end()) {
         enableMcRecalib = false;
         LOGP(warn, "Nsigma postcalibrations turned off for {} (new MC productions have FT0 digitisation fixed)", metadataInfo.get("LPMProductionTag"));
+        return;
       }
     } else {
       LOGP(error, "Impossible to read metadata! Using default calibrations (2022 apass7)");
@@ -970,6 +1028,9 @@ struct McPidTof {
     constexpr auto ResponseKa = ResponseImplementation<PID::Kaon>();
     constexpr auto ResponsePr = ResponseImplementation<PID::Proton>();
     constexpr auto ResponseDe = ResponseImplementation<PID::Deuteron>();
+    constexpr auto ResponseTr = ResponseImplementation<PID::Triton>();
+    constexpr auto ResponseHe = ResponseImplementation<PID::Helium3>();
+    constexpr auto ResponseAl = ResponseImplementation<PID::Alpha>();
 
     mTOFCalibConfig.processSetup(mRespParamsV3, ccdb, bcs.iteratorAt(0)); // Update the calibration parameters
 
@@ -1013,7 +1074,7 @@ struct McPidTof {
                 nSigma = applyMcRecalib(pidId, trk.pt(), nSigma);
               }
             }
-            aod::pidutils::packInTable<aod::pidtof_tiny::binning>(nSigma, tablePIDPi);
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDPi);
             break;
           }
           case IdxKa: {
@@ -1023,7 +1084,7 @@ struct McPidTof {
                 nSigma = applyMcRecalib(pidId, trk.pt(), nSigma);
               }
             }
-            aod::pidutils::packInTable<aod::pidtof_tiny::binning>(nSigma, tablePIDKa);
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDKa);
             break;
           }
           case IdxPr: {
@@ -1033,7 +1094,7 @@ struct McPidTof {
                 nSigma = applyMcRecalib(pidId, trk.pt(), nSigma);
               }
             }
-            aod::pidutils::packInTable<aod::pidtof_tiny::binning>(nSigma, tablePIDPr);
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDPr);
             break;
           }
           case IdxDe: {
@@ -1043,7 +1104,37 @@ struct McPidTof {
                 nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                              // FIXME: currently postcalibrations for protons applied to deuterons, to be checked
               }
             }
-            aod::pidutils::packInTable<aod::pidtof_tiny::binning>(nSigma, tablePIDDe);
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDDe);
+            break;
+          }
+          case IdxTr: {
+            nSigma = ResponseTr.GetSeparation(mRespParamsV3, trk);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kTriton) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                            // FIXME: currently postcalibrations for protons applied to tritons, to be checked
+              }
+            }
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDTr);
+            break;
+          }
+          case IdxHe: {
+            nSigma = ResponseHe.GetSeparation(mRespParamsV3, trk);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kHelium3) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                             // FIXME: currently postcalibrations for protons applied to helium3, to be checked
+              }
+            }
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDHe);
+            break;
+          }
+          case IdxAl: {
+            nSigma = ResponseAl.GetSeparation(mRespParamsV3, trk);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kAlpha) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                           // FIXME: currently postcalibrations for protons applied to alpha, to be checked
+              }
+            }
+            aod::pidtof_tiny::binning::packInTable(nSigma, tablePIDAl);
             break;
           }
           default:
@@ -1099,6 +1190,39 @@ struct McPidTof {
               }
             }
             tablePIDFullDe(resolution, nSigma);
+            break;
+          }
+          case IdxTr: {
+            resolution = ResponseTr.GetExpectedSigma(mRespParamsV3, trk);
+            nSigma = ResponseTr.GetSeparation(mRespParamsV3, trk, resolution);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kTriton) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                            // FIXME: currently postcalibrations for protons applied to tritons, to be checked
+              }
+            }
+            tablePIDFullTr(resolution, nSigma);
+            break;
+          }
+          case IdxHe: {
+            resolution = ResponseHe.GetExpectedSigma(mRespParamsV3, trk);
+            nSigma = ResponseHe.GetSeparation(mRespParamsV3, trk, resolution);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kHelium3) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                             // FIXME: currently postcalibrations for protons applied to helium3, to be checked
+              }
+            }
+            tablePIDFullHe(resolution, nSigma);
+            break;
+          }
+          case IdxAl: {
+            resolution = ResponseAl.GetExpectedSigma(mRespParamsV3, trk);
+            nSigma = ResponseAl.GetSeparation(mRespParamsV3, trk, resolution);
+            if (enableMcRecalib && trk.has_mcParticle()) {
+              if (std::abs(trk.mcParticle().pdgCode()) == o2::constants::physics::kAlpha) { // we rescale only true signal
+                nSigma = applyMcRecalib(IdxPr, trk.pt(), nSigma);                           // FIXME: currently postcalibrations for protons applied to alpha, to be checked
+              }
+            }
+            tablePIDFullAl(resolution, nSigma);
             break;
           }
           default:

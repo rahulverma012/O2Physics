@@ -21,6 +21,7 @@
 #define COMMON_DATAMODEL_PIDRESPONSETOF_H_
 
 #include "Common/Core/PID/PIDTOF.h"
+#include "Common/Core/PID/PIDTOFParamService.h"
 
 #include <Framework/ASoA.h>
 #include <Framework/AnalysisDataModel.h>
@@ -253,12 +254,18 @@ namespace pidtofsignal
 DECLARE_SOA_COLUMN(TOFSignal, tofSignal, float);                   //! TOF signal from track time
 DECLARE_SOA_DYNAMIC_COLUMN(EventCollisionTime, eventCollisionTime, //! Event collision time used for the track. Needs the TOF
                            [](float signal, float tMinusTexp, float texp) -> float { return texp + tMinusTexp - signal; });
+DECLARE_SOA_DYNAMIC_COLUMN(TOFSignalInAnotherBC, tofSignalInAnotherBC, //! TOF signal but computed in another Bunch Crossing. Needs the original globalBC and the new globalBC to compute the delta time to apply to the signal.
+                           [](float signal, int64_t originalGlobalBC, int64_t newGlobalBC) -> float {
+                             const int64_t deltaBcPos = originalGlobalBC - newGlobalBC;
+                             return signal + o2::constants::lhc::LHCBunchSpacingNS * deltaBcPos * 1000.0f;
+                           });
 
 } // namespace pidtofsignal
 
 DECLARE_SOA_TABLE(TOFSignal, "AOD", "TOFSignal", //! Table of the TOF signal
                   pidtofsignal::TOFSignal,
-                  pidtofsignal::EventCollisionTime<pidtofsignal::TOFSignal>);
+                  pidtofsignal::EventCollisionTime<pidtofsignal::TOFSignal>,
+                  pidtofsignal::TOFSignalInAnotherBC<pidtofsignal::TOFSignal>);
 
 namespace pidtofevtime
 {
@@ -331,7 +338,102 @@ DECLARE_SOA_COLUMN(TOFNSigmaTr, tofNSigmaTr, float); //! Nsigma separation with 
 DECLARE_SOA_COLUMN(TOFNSigmaHe, tofNSigmaHe, float); //! Nsigma separation with the TOF detector for helium3
 DECLARE_SOA_COLUMN(TOFNSigmaAl, tofNSigmaAl, float); //! Nsigma separation with the TOF detector for alpha
 
+//! Expected resolution with the TOF detector for electron (computed on the fly)
+#define PERSPECIES_TOF_SIGMA_COLUMN(name, id)                                                         \
+  DECLARE_SOA_DYNAMIC_COLUMN(TOFExpSigma##name##Imp, tofExpSigmaDyn##name,                            \
+                             [](float tofExpMom,                                                      \
+                                float momentum,                                                       \
+                                float eta,                                                            \
+                                float tofSignal,                                                      \
+                                float tofEvTimeErr) -> float {                                        \
+                               return o2::pid::tof::TOFResponseImpl::expectedSigma<id>(tofSignal,     \
+                                                                                       tofExpMom,     \
+                                                                                       momentum,      \
+                                                                                       eta,           \
+                                                                                       tofEvTimeErr); \
+                             });
+
+PERSPECIES_TOF_SIGMA_COLUMN(El, o2::track::PID::Electron);
+PERSPECIES_TOF_SIGMA_COLUMN(Mu, o2::track::PID::Muon);
+PERSPECIES_TOF_SIGMA_COLUMN(Pi, o2::track::PID::Pion);
+PERSPECIES_TOF_SIGMA_COLUMN(Ka, o2::track::PID::Kaon);
+PERSPECIES_TOF_SIGMA_COLUMN(Pr, o2::track::PID::Proton);
+PERSPECIES_TOF_SIGMA_COLUMN(De, o2::track::PID::Deuteron);
+PERSPECIES_TOF_SIGMA_COLUMN(Tr, o2::track::PID::Triton);
+PERSPECIES_TOF_SIGMA_COLUMN(He, o2::track::PID::Helium3);
+PERSPECIES_TOF_SIGMA_COLUMN(Al, o2::track::PID::Alpha);
+#undef PERSPECIES_TOF_SIGMA_COLUMN
+
+#define PERSPECIES_TOF_SEPARATION_COLUMN(name, id)                                             \
+  DECLARE_SOA_DYNAMIC_COLUMN(TOFNSigma##name##Imp, tofNSigmaDyn##name,                         \
+                             [](const float tofExpMom,                                         \
+                                const float length,                                            \
+                                const float momentum,                                          \
+                                const float eta,                                               \
+                                const float tofSignal,                                         \
+                                const float tofEvTime,                                         \
+                                const float tofEvTimeErr) -> float {                           \
+                               return o2::pid::tof::TOFResponseImpl::nSigma<id>(tofSignal,     \
+                                                                                tofExpMom,     \
+                                                                                length,        \
+                                                                                momentum,      \
+                                                                                eta,           \
+                                                                                tofEvTime,     \
+                                                                                tofEvTimeErr); \
+                             });
+
+PERSPECIES_TOF_SEPARATION_COLUMN(El, o2::track::PID::Electron);
+PERSPECIES_TOF_SEPARATION_COLUMN(Mu, o2::track::PID::Muon);
+PERSPECIES_TOF_SEPARATION_COLUMN(Pi, o2::track::PID::Pion);
+PERSPECIES_TOF_SEPARATION_COLUMN(Ka, o2::track::PID::Kaon);
+PERSPECIES_TOF_SEPARATION_COLUMN(Pr, o2::track::PID::Proton);
+PERSPECIES_TOF_SEPARATION_COLUMN(De, o2::track::PID::Deuteron);
+PERSPECIES_TOF_SEPARATION_COLUMN(Tr, o2::track::PID::Triton);
+PERSPECIES_TOF_SEPARATION_COLUMN(He, o2::track::PID::Helium3);
+PERSPECIES_TOF_SEPARATION_COLUMN(Al, o2::track::PID::Alpha);
+#undef PERSPECIES_TOF_SEPARATION_COLUMN
+
 } // namespace pidtof
+
+using TOFExpSigmaDynEl = pidtof::TOFExpSigmaElImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynMu = pidtof::TOFExpSigmaMuImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynPi = pidtof::TOFExpSigmaPiImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynKa = pidtof::TOFExpSigmaKaImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynPr = pidtof::TOFExpSigmaPrImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynDe = pidtof::TOFExpSigmaDeImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynTr = pidtof::TOFExpSigmaTrImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynHe = pidtof::TOFExpSigmaHeImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+using TOFExpSigmaDynAl = pidtof::TOFExpSigmaAlImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTimeErr>;
+
+using TOFNSigmaDynEl = pidtof::TOFNSigmaElImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynMu = pidtof::TOFNSigmaMuImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynPi = pidtof::TOFNSigmaPiImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynKa = pidtof::TOFNSigmaKaImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynPr = pidtof::TOFNSigmaPrImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynDe = pidtof::TOFNSigmaDeImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynTr = pidtof::TOFNSigmaTrImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynHe = pidtof::TOFNSigmaHeImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+using TOFNSigmaDynAl = pidtof::TOFNSigmaAlImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal, pidtofevtime::TOFEvTime, pidtofevtime::TOFEvTimeErr>;
+
+using TOFExpSigmaDynEvTimeEl = pidtof::TOFExpSigmaElImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeMu = pidtof::TOFExpSigmaMuImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimePi = pidtof::TOFExpSigmaPiImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeKa = pidtof::TOFExpSigmaKaImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimePr = pidtof::TOFExpSigmaPrImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeDe = pidtof::TOFExpSigmaDeImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeTr = pidtof::TOFExpSigmaTrImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeHe = pidtof::TOFExpSigmaHeImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFExpSigmaDynEvTimeAl = pidtof::TOFExpSigmaAlImp<track::TOFExpMom, track::P, track::Eta, pidtofsignal::TOFSignal>;
+
+using TOFNSigmaDynEvTimeEl = pidtof::TOFNSigmaElImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeMu = pidtof::TOFNSigmaMuImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimePi = pidtof::TOFNSigmaPiImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeKa = pidtof::TOFNSigmaKaImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimePr = pidtof::TOFNSigmaPrImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeDe = pidtof::TOFNSigmaDeImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeTr = pidtof::TOFNSigmaTrImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeHe = pidtof::TOFNSigmaHeImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
+using TOFNSigmaDynEvTimeAl = pidtof::TOFNSigmaAlImp<track::TOFExpMom, track::Length, track::P, track::Eta, pidtofsignal::TOFSignal>;
 
 namespace pidtof_tiny
 {

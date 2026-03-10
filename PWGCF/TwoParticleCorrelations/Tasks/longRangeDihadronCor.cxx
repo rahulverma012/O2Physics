@@ -28,7 +28,9 @@
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/FT0Corrected.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
+#include "Common/DataModel/PIDResponseITS.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CommonConstants/MathConstants.h"
@@ -44,13 +46,18 @@
 #include "Framework/RunningWorkflowInfo.h"
 #include "Framework/StepTHn.h"
 #include "Framework/runDataProcessing.h"
+#include "ReconstructionDataFormats/PID.h"
+#include "ReconstructionDataFormats/Track.h"
 #include <CCDB/BasicCCDBManager.h>
 
 #include "TF1.h"
 #include "TRandom3.h"
 #include <TPDGCode.h>
 
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace o2;
@@ -59,9 +66,12 @@ using namespace o2::framework::expressions;
 
 // define the filtered collisions and tracks
 #define O2_DEFINE_CONFIGURABLE(NAME, TYPE, DEFAULT, HELP) Configurable<TYPE> NAME{#NAME, DEFAULT, HELP};
+// template for labelled array
+static constexpr float LongArrayFloat[3][6] = {{1.1, 1.2, 1.3, -1.1, -1.2, -1.3}, {2.1, 2.2, 2.3, -2.1, -2.2, -2.3}, {3.1, 3.2, 3.3, -3.1, -3.2, -3.3}};
 
 struct LongRangeDihadronCor {
   Service<ccdb::BasicCCDBManager> ccdb;
+  o2::aod::ITSResponse itsResponse;
 
   O2_DEFINE_CONFIGURABLE(cfgCutVtxZ, float, 10.0f, "Accepted z-vertex range")
   O2_DEFINE_CONFIGURABLE(cfgCutPtMin, float, 0.2f, "minimum accepted track pT")
@@ -99,6 +109,7 @@ struct LongRangeDihadronCor {
   O2_DEFINE_CONFIGURABLE(cfgCentralityWeight, std::string, "", "CCDB path to centrality weight object")
   O2_DEFINE_CONFIGURABLE(cfgLocalEfficiency, bool, false, "Use local efficiency object")
   O2_DEFINE_CONFIGURABLE(cfgUseEventWeights, bool, false, "Use event weights for mixed event")
+  O2_DEFINE_CONFIGURABLE(cfgDrawEtaPhiDis, bool, false, "draw eta-phi distribution for detectors in used")
   struct : ConfigurableGroup {
     O2_DEFINE_CONFIGURABLE(cfgMultCentHighCutFunction, std::string, "[0] + [1]*x + [2]*x*x + [3]*x*x*x + [4]*x*x*x*x + 10.*([5] + [6]*x + [7]*x*x + [8]*x*x*x + [9]*x*x*x*x)", "Functional for multiplicity correlation cut");
     O2_DEFINE_CONFIGURABLE(cfgMultCentLowCutFunction, std::string, "[0] + [1]*x + [2]*x*x + [3]*x*x*x + [4]*x*x*x*x - 3.*([5] + [6]*x + [7]*x*x + [8]*x*x*x + [9]*x*x*x*x)", "Functional for multiplicity correlation cut");
@@ -129,6 +140,21 @@ struct LongRangeDihadronCor {
     TF1* fT0AV0AMean = nullptr;
     TF1* fT0AV0ASigma = nullptr;
   } cfgFuncParas;
+  struct : ConfigurableGroup {
+    O2_DEFINE_CONFIGURABLE(cfgUseItsPID, bool, true, "Use ITS PID for particle identification")
+    O2_DEFINE_CONFIGURABLE(cfgPIDParticle, int, 0, "1 = pion, 2 = kaon, 3 = proton, 4 = kshort, 5 = lambda, 6 = phi, 0 for no PID")
+    O2_DEFINE_CONFIGURABLE(cfgTofPtCut, float, 0.5f, "Minimum pt to use TOF N-sigma")
+    Configurable<LabeledArray<float>> nSigmas{"nSigmas", {LongArrayFloat[0], 3, 6, {"TPC", "TOF", "ITS"}, {"upCut_pi", "upCut_ka", "upCut_pr", "lowCut_pi", "lowCut_ka", "lowCut_pr"}}, "Labeled array for n-sigma values for TPC, TOF, ITS for pions, kaons, protons (positive and negative)"};
+  } cfgPIDConfig;
+  struct : ConfigurableGroup {
+    O2_DEFINE_CONFIGURABLE(cfgRejectFT0AInside, bool, false, "Rejection of inner ring channels of the FT0A detector")
+    O2_DEFINE_CONFIGURABLE(cfgRejectFT0AOutside, bool, false, "Rejection of outer ring channels of the FT0A detector")
+    O2_DEFINE_CONFIGURABLE(cfgRejectFT0CInside, bool, false, "Rejection of inner ring channels of the FT0C detector")
+    O2_DEFINE_CONFIGURABLE(cfgRejectFT0COutside, bool, false, "Rejection of outer ring channels of the FT0C detector")
+    O2_DEFINE_CONFIGURABLE(cfgMirrorFT0ADeadChannels, bool, false, "If true, mirror FT0A channels 60-63 to amplitudes from 92-95 respectively")
+    O2_DEFINE_CONFIGURABLE(cfgMirrorFT0CDeadChannels, bool, false, "If true, mirror FT0C channels 177->145, 176->144, 178->146, 179->147, 139->115")
+    O2_DEFINE_CONFIGURABLE(cfgRunbyRunAmplitudeFT0, bool, false, "Produce run-by-run FT0 amplitude distribution");
+  } cfgFwdConfig;
 
   SliceCache cache;
 
@@ -160,7 +186,7 @@ struct LongRangeDihadronCor {
   Filter collisionFilter = (nabs(aod::collision::posZ) < cfgCutVtxZ);
   Filter trackFilter = (nabs(aod::track::eta) < cfgCutEta) && (aod::track::pt > cfgCutPtMin) && (aod::track::pt < cfgCutPtMax) && ((requireGlobalTrackInFilter()) || (aod::track::isGlobalTrackSDD == static_cast<uint8_t>(true))) && (aod::track::tpcChi2NCl < cfgCutChi2prTPCcls) && (nabs(aod::track::dcaZ) < cfgCutDCAz);
   using FilteredCollisions = soa::Filtered<soa::Join<aod::Collisions, aod::EvSel, aod::CentFT0Cs, aod::CentFT0CVariant1s, aod::CentFT0Ms, aod::CentFV0As, aod::Mults>>;
-  using FilteredTracks = soa::Filtered<soa::Join<aod::Tracks, aod::TrackSelection, aod::TracksExtra, aod::TracksDCA>>;
+  using FilteredTracks = soa::Filtered<soa::Join<aod::Tracks, aod::TrackSelection, aod::TracksExtra, aod::TracksDCA, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTOFbeta, aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr>>;
 
   // FT0 geometry
   o2::ft0::Geometry ft0Det;
@@ -200,6 +226,51 @@ struct LongRangeDihadronCor {
     kFT0A = 0,
     kFT0C = 1
   };
+  enum ParticleNsigma {
+    kPionUp = 0,
+    kKaonUp,
+    kProtonUp,
+    kPionLow,
+    kKaonLow,
+    kProtonLow
+  };
+  enum PIDIndex {
+    kCharged = 0,
+    kPions,
+    kKaons,
+    kProtons,
+    kK0,
+    kLambda,
+    kPhi
+  };
+  enum DetectorType {
+    kTPC = 0,
+    kTOF,
+    kITS
+  };
+  enum DetectorChannels {
+    kFT0AInnerRingMin = 0,
+    kFT0AInnerRingMax = 31,
+    kFT0AOuterRingMin = 32,
+    kFT0AOuterRingMax = 95,
+    kFT0CInnerRingMin = 96,
+    kFT0CInnerRingMax = 143,
+    kFT0COuterRingMin = 144,
+    kFT0COuterRingMax = 207
+  };
+  enum DeadChannels {
+    kFT0AMirrorChannelStart = 92,
+    kFT0AMirrorChannelEnd = 95,
+    kFT0CMirrorChannelStart = 144,
+    kFT0CMirrorChannelEnd = 147,
+    kFT0CMirrorChannelInnerRing = 115
+  };
+  std::array<float, 6> tofNsigmaCut;
+  std::array<float, 6> itsNsigmaCut;
+  std::array<float, 6> tpcNsigmaCut;
+  int lastRunNumber = -1;
+  std::vector<int> runNumbers;
+  std::map<int, std::shared_ptr<TH2>> histAmpCorrectPerRun; // map of TH3 histograms for all runs
 
   void init(InitContext&)
   {
@@ -208,6 +279,7 @@ struct LongRangeDihadronCor {
     }
     const AxisSpec axisPhi{72, 0.0, constants::math::TwoPI, "#varphi"};
     const AxisSpec axisEta{40, -1., 1., "#eta"};
+    const AxisSpec axisEtaFull{90, -4., 5., "#eta"};
 
     ccdb->setURL("http://alice-ccdb.cern.ch");
     ccdb->setCaching(true);
@@ -215,6 +287,28 @@ struct LongRangeDihadronCor {
     ccdb->setCreatedNotAfter(now);
 
     LOGF(info, "Starting init");
+
+    // filling tpc nSigmas array
+    tpcNsigmaCut[kPionUp] = cfgPIDConfig.nSigmas->getData()[kTPC][kPionUp];
+    tpcNsigmaCut[kKaonUp] = cfgPIDConfig.nSigmas->getData()[kTPC][kKaonUp];
+    tpcNsigmaCut[kProtonUp] = cfgPIDConfig.nSigmas->getData()[kTPC][kProtonUp];
+    tpcNsigmaCut[kPionLow] = cfgPIDConfig.nSigmas->getData()[kTPC][kPionLow];
+    tpcNsigmaCut[kKaonLow] = cfgPIDConfig.nSigmas->getData()[kTPC][kKaonLow];
+    tpcNsigmaCut[kProtonLow] = cfgPIDConfig.nSigmas->getData()[kTPC][kProtonLow];
+    // filling tof nSigmas array
+    tofNsigmaCut[kPionUp] = cfgPIDConfig.nSigmas->getData()[kTOF][kPionUp];
+    tofNsigmaCut[kKaonUp] = cfgPIDConfig.nSigmas->getData()[kTOF][kKaonUp];
+    tofNsigmaCut[kProtonUp] = cfgPIDConfig.nSigmas->getData()[kTOF][kProtonUp];
+    tofNsigmaCut[kPionLow] = cfgPIDConfig.nSigmas->getData()[kTOF][kPionLow];
+    tofNsigmaCut[kKaonLow] = cfgPIDConfig.nSigmas->getData()[kTOF][kKaonLow];
+    tofNsigmaCut[kProtonLow] = cfgPIDConfig.nSigmas->getData()[kTOF][kProtonLow];
+    // filling its nSigmas array
+    itsNsigmaCut[kPionUp] = cfgPIDConfig.nSigmas->getData()[kITS][kPionUp];
+    itsNsigmaCut[kKaonUp] = cfgPIDConfig.nSigmas->getData()[kITS][kKaonUp];
+    itsNsigmaCut[kProtonUp] = cfgPIDConfig.nSigmas->getData()[kITS][kProtonUp];
+    itsNsigmaCut[kPionLow] = cfgPIDConfig.nSigmas->getData()[kITS][kPionLow];
+    itsNsigmaCut[kKaonLow] = cfgPIDConfig.nSigmas->getData()[kITS][kKaonLow];
+    itsNsigmaCut[kProtonLow] = cfgPIDConfig.nSigmas->getData()[kITS][kProtonLow];
 
     // Event Counter
     if ((doprocessSameTpcFt0a || doprocessSameTpcFt0c || doprocessSameFt0aFt0c) && cfgUseAdditionalEventCut) {
@@ -279,26 +373,30 @@ struct LongRangeDihadronCor {
       registry.add("Centrality_used", hCentTitle.c_str(), {HistType::kTH1D, {{100, 0, 100}}}); // histogram to see how many events are in the same and mixed event
       registry.add("zVtx", "zVtx", {HistType::kTH1D, {axisVertex}});
       registry.add("zVtx_used", "zVtx_used", {HistType::kTH1D, {axisVertex}});
-      registry.add("Trig_hist_TPC_FT0A", "", {HistType::kTHnSparseF, {{axisSample, axisVertex, axisPtTrigger}}});
-      registry.add("Trig_hist_TPC_FT0C", "", {HistType::kTHnSparseF, {{axisSample, axisVertex, axisPtTrigger}}});
       registry.add("FT0Amp", "", {HistType::kTH2F, {axisChID, axisFit}});
       registry.add("FT0AmpCorrect", "", {HistType::kTH2F, {axisChID, axisFit}});
+      if (cfgDrawEtaPhiDis) {
+        registry.add("EtaPhi", "", {HistType::kTH2F, {axisEtaFull, axisPhi}});
+      }
     }
     if (doprocessSameTpcFt0a) {
       registry.add("deltaEta_deltaPhi_same_TPC_FT0A", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaTpcFt0a}}); // check to see the delta eta and delta phi distribution
       registry.add("deltaEta_deltaPhi_mixed_TPC_FT0A", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaTpcFt0a}});
       registry.add("Assoc_amp_same_TPC_FT0A", "", {HistType::kTH2D, {axisChannelFt0aAxis, axisAmplitudeFt0a}});
       registry.add("Assoc_amp_mixed_TPC_FT0A", "", {HistType::kTH2D, {axisChannelFt0aAxis, axisAmplitudeFt0a}});
+      registry.add("Trig_hist_TPC_FT0A", "", {HistType::kTHnSparseF, {{axisSample, axisVertex, axisPtTrigger}}});
     }
     if (doprocessSameTpcFt0c) {
       registry.add("deltaEta_deltaPhi_same_TPC_FT0C", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaTpcFt0c}}); // check to see the delta eta and delta phi distribution
       registry.add("deltaEta_deltaPhi_mixed_TPC_FT0C", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaTpcFt0c}});
       registry.add("Assoc_amp_same_TPC_FT0C", "", {HistType::kTH2D, {axisChannelFt0aAxis, axisAmplitudeFt0a}});
       registry.add("Assoc_amp_mixed_TPC_FT0C", "", {HistType::kTH2D, {axisChannelFt0aAxis, axisAmplitudeFt0a}});
+      registry.add("Trig_hist_TPC_FT0C", "", {HistType::kTHnSparseF, {{axisSample, axisVertex, axisPtTrigger}}});
     }
     if (doprocessSameFt0aFt0c) {
       registry.add("deltaEta_deltaPhi_same_FT0A_FT0C", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaFt0aFt0c}}); // check to see the delta eta and delta phi distribution
       registry.add("deltaEta_deltaPhi_mixed_FT0A_FT0C", "", {HistType::kTH2D, {axisDeltaPhi, axisDeltaEtaFt0aFt0c}});
+      registry.add("Trig_hist_FT0A_FT0C", "", {HistType::kTHnSparseF, {{axisSample, axisVertex, axisPtTrigger}}});
     }
 
     registry.add("eventcount", "bin", {HistType::kTH1F, {{4, 0, 4, "bin"}}}); // histogram to see how many events are in the same and mixed event
@@ -343,6 +441,19 @@ struct LongRangeDihadronCor {
     }
 
     LOGF(info, "End of init");
+  }
+
+  void createOutputObjectsForRun(int runNumber)
+  {
+    if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0) {
+      if (histAmpCorrectPerRun.find(runNumber) != histAmpCorrectPerRun.end()) {
+        LOGF(info, "you are trying to create QA hist again, please make sure you are not filling it twice");
+      }
+      const AxisSpec axisFit{1000, 0, 5000, "FIT amplitude"};
+      const AxisSpec axisChID{220, 0, 220, "FIT channel"};
+      std::shared_ptr<TH2> histFT0AmpCorrect = registry.add<TH2>(Form("%d/FT0AmpCorrect", runNumber), "FIT channel;FIT amplitude", {HistType::kTH2F, {axisChID, axisFit}});
+      histAmpCorrectPerRun.insert(std::make_pair(runNumber, histFT0AmpCorrect));
+    }
   }
 
   double getPhiFT0(uint64_t chno, int i)
@@ -402,6 +513,58 @@ struct LongRangeDihadronCor {
   bool trackSelected(TTrack track)
   {
     return ((track.tpcNClsFound() >= cfgCutTPCclu) && (track.tpcNClsCrossedRows() >= cfgCutTPCCrossedRows) && (track.itsNCls() >= cfgCutITSclu));
+  }
+
+  template <typename TTrack>
+  int getNsigmaPID(TTrack track)
+  {
+    // Computing Nsigma arrays for pion, kaon, and protons
+    std::array<float, 3> nSigmaTPC = {track.tpcNSigmaPi(), track.tpcNSigmaKa(), track.tpcNSigmaPr()};
+    std::array<float, 3> nSigmaTOF = {track.tofNSigmaPi(), track.tofNSigmaKa(), track.tofNSigmaPr()};
+    std::array<float, 3> nSigmaITS = {itsResponse.nSigmaITS<o2::track::PID::Pion>(track), itsResponse.nSigmaITS<o2::track::PID::Kaon>(track), itsResponse.nSigmaITS<o2::track::PID::Proton>(track)};
+    int pid = -1; // -1 = not identified, 1 = pion, 2 = kaon, 3 = proton
+
+    std::array<float, 3> nSigmaToUse = cfgPIDConfig.cfgUseItsPID ? nSigmaITS : nSigmaTPC;             // Choose which nSigma to use: TPC or ITS
+    std::array<float, 6> detectorNsigmaCut = cfgPIDConfig.cfgUseItsPID ? itsNsigmaCut : tpcNsigmaCut; // Choose which nSigma to use: TPC or ITS
+
+    bool isPion = false;
+    bool isKaon = false;
+    bool isProton = false;
+    bool isDetectedPion = nSigmaToUse[kPionUp] < detectorNsigmaCut[kPionUp] && nSigmaToUse[kPionUp] > detectorNsigmaCut[kPionLow];
+    bool isDetectedKaon = nSigmaToUse[kKaonUp] < detectorNsigmaCut[kKaonUp] && nSigmaToUse[kKaonUp] > detectorNsigmaCut[kKaonLow];
+    bool isDetectedProton = nSigmaToUse[kProtonUp] < detectorNsigmaCut[kProtonUp] && nSigmaToUse[kProtonUp] > detectorNsigmaCut[kProtonLow];
+
+    bool isTofPion = nSigmaTOF[kPionUp] < tofNsigmaCut[kPionUp] && nSigmaTOF[kPionUp] > tofNsigmaCut[kPionLow];
+    bool isTofKaon = nSigmaTOF[kKaonUp] < tofNsigmaCut[kKaonUp] && nSigmaTOF[kKaonUp] > tofNsigmaCut[kKaonLow];
+    bool isTofProton = nSigmaTOF[kProtonUp] < tofNsigmaCut[kProtonUp] && nSigmaTOF[kProtonUp] > tofNsigmaCut[kProtonLow];
+
+    if (track.pt() > cfgPIDConfig.cfgTofPtCut && !track.hasTOF()) {
+      return -1;
+    } else if (track.pt() > cfgPIDConfig.cfgTofPtCut && track.hasTOF()) {
+      isPion = isTofPion && isDetectedPion;
+      isKaon = isTofKaon && isDetectedKaon;
+      isProton = isTofProton && isDetectedProton;
+    } else {
+      isPion = isDetectedPion;
+      isKaon = isDetectedKaon;
+      isProton = isDetectedProton;
+    }
+
+    if ((isPion && isKaon) || (isPion && isProton) || (isKaon && isProton)) {
+      return -1; // more than one particle satisfy the criteria
+    }
+
+    if (isPion) {
+      pid = kPions;
+    } else if (isKaon) {
+      pid = kKaons;
+    } else if (isProton) {
+      pid = kProtons;
+    } else {
+      return -1; // no particle satisfies the criteria
+    }
+
+    return pid; // -1 = not identified, 1 = pion, 2 = kaon, 3 = proton
   }
 
   void loadAlignParam(uint64_t timestamp)
@@ -515,24 +678,53 @@ struct LongRangeDihadronCor {
   }
 
   template <typename TFT0s>
-  void getChannel(TFT0s const& ft0, std::size_t const& iCh, int& id, float& ampl, int fitType)
+  void getChannel(TFT0s const& ft0, std::size_t const& iCh, int& id, float& ampl, int fitType, int system)
   {
     if (fitType == kFT0C) {
       id = ft0.channelC()[iCh];
       id = id + Ft0IndexA;
       ampl = ft0.amplitudeC()[iCh];
-      registry.fill(HIST("FT0Amp"), id, ampl);
-      ampl = ampl / cstFT0RelGain[iCh];
-      registry.fill(HIST("FT0AmpCorrect"), id, ampl);
+      if ((cfgFwdConfig.cfgRejectFT0CInside && (id >= kFT0CInnerRingMin && id <= kFT0CInnerRingMax)) || (cfgFwdConfig.cfgRejectFT0COutside && (id >= kFT0COuterRingMin && id <= kFT0COuterRingMax)))
+        ampl = 0.;
+      if (system == SameEvent)
+        registry.fill(HIST("FT0Amp"), id, ampl);
+      ampl = ampl / cstFT0RelGain[id];
+      if (system == SameEvent) {
+        registry.fill(HIST("FT0AmpCorrect"), id, ampl);
+        if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0)
+          histAmpCorrectPerRun[lastRunNumber]->Fill(id, ampl);
+      }
     } else if (fitType == kFT0A) {
       id = ft0.channelA()[iCh];
       ampl = ft0.amplitudeA()[iCh];
-      registry.fill(HIST("FT0Amp"), id, ampl);
-      ampl = ampl / cstFT0RelGain[iCh];
-      registry.fill(HIST("FT0AmpCorrect"), id, ampl);
+      if ((cfgFwdConfig.cfgRejectFT0AInside && (id >= kFT0AInnerRingMin && id <= kFT0AInnerRingMax)) || (cfgFwdConfig.cfgRejectFT0AOutside && (id >= kFT0AOuterRingMin && id <= kFT0AOuterRingMax)))
+        ampl = 0.;
+      if (system == SameEvent)
+        registry.fill(HIST("FT0Amp"), id, ampl);
+      ampl = ampl / cstFT0RelGain[id];
+      if (system == SameEvent) {
+        registry.fill(HIST("FT0AmpCorrect"), id, ampl);
+        if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0)
+          histAmpCorrectPerRun[lastRunNumber]->Fill(id, ampl);
+      }
     } else {
       LOGF(fatal, "Cor Index %d out of range", fitType);
     }
+  }
+
+  bool isMirrorId(int id, int corType)
+  {
+    if (corType == kFT0A) {
+      if (id >= kFT0AMirrorChannelStart && id <= kFT0AMirrorChannelEnd)
+        return true;
+    }
+    if (corType == kFT0C) {
+      if (id == kFT0CMirrorChannelInnerRing)
+        return true;
+      else if (id >= kFT0CMirrorChannelStart && id <= kFT0CMirrorChannelEnd)
+        return true;
+    }
+    return false;
   }
 
   template <CorrelationContainer::CFStep step, typename TTracks, typename TFT0s>
@@ -552,6 +744,8 @@ struct LongRangeDihadronCor {
 
       if (!trackSelected(track1))
         continue;
+      if (cfgPIDConfig.cfgPIDParticle && getNsigmaPID(track1) != cfgPIDConfig.cfgPIDParticle)
+        continue; // if PID is selected, check if the track has the right PID
       if (!getEfficiencyCorrection(triggerWeight, track1.eta(), track1.pt(), posZ))
         continue;
       if (system == SameEvent) {
@@ -559,6 +753,9 @@ struct LongRangeDihadronCor {
           registry.fill(HIST("Trig_hist_TPC_FT0C"), fSampleIndex, posZ, track1.pt(), eventWeight * triggerWeight);
         } else if (corType == kFT0A) {
           registry.fill(HIST("Trig_hist_TPC_FT0A"), fSampleIndex, posZ, track1.pt(), eventWeight * triggerWeight);
+        }
+        if (cfgDrawEtaPhiDis && corType == kFT0A) {
+          registry.fill(HIST("EtaPhi"), track1.eta(), track1.phi(), eventWeight * triggerWeight);
         }
       }
 
@@ -573,31 +770,55 @@ struct LongRangeDihadronCor {
       for (std::size_t iCh = 0; iCh < channelSize; iCh++) {
         int chanelid = 0;
         float ampl = 0.;
-        getChannel(ft0, iCh, chanelid, ampl, corType);
+        getChannel(ft0, iCh, chanelid, ampl, corType, system);
+        if (corType == kFT0C) {
+          if ((cfgFwdConfig.cfgRejectFT0CInside && (chanelid >= kFT0CInnerRingMin && chanelid <= kFT0CInnerRingMax)) || (cfgFwdConfig.cfgRejectFT0COutside && (chanelid >= kFT0COuterRingMin && chanelid <= kFT0COuterRingMax)))
+            continue;
+        } else if (corType == kFT0A) {
+          if ((cfgFwdConfig.cfgRejectFT0AInside && (chanelid >= kFT0AInnerRingMin && chanelid <= kFT0AInnerRingMax)) || (cfgFwdConfig.cfgRejectFT0AOutside && (chanelid >= kFT0AOuterRingMin && chanelid <= kFT0AOuterRingMax)))
+            continue;
+        }
+        bool mirrorChannel = false;
+        if ((corType == kFT0A && cfgFwdConfig.cfgMirrorFT0ADeadChannels) || (corType == kFT0C && cfgFwdConfig.cfgMirrorFT0CDeadChannels))
+          mirrorChannel = isMirrorId(chanelid, corType);
+
         auto phi = getPhiFT0(chanelid, corType);
         auto eta = getEtaFT0(chanelid, corType);
+        if (cfgDrawEtaPhiDis && system == SameEvent) {
+          registry.fill(HIST("EtaPhi"), eta, phi, ampl * eventWeight);
+          if (mirrorChannel)
+            registry.fill(HIST("EtaPhi"), eta, 4 * PIHalf - phi, ampl * eventWeight);
+        }
         float deltaPhi = RecoDecay::constrainAngle(track1.phi() - phi, -PIHalf);
         float deltaEta = track1.eta() - eta;
         // fill the right sparse and histograms
         if (system == SameEvent) {
           if (corType == kFT0A) {
             registry.fill(HIST("Assoc_amp_same_TPC_FT0A"), chanelid, ampl);
-            sameTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
             registry.fill(HIST("deltaEta_deltaPhi_same_TPC_FT0A"), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            sameTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            if (mirrorChannel)
+              sameTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), RecoDecay::constrainAngle(track1.phi() - phi - 2 * PIHalf, -PIHalf), deltaEta, ampl * eventWeight * triggerWeight);
           } else if (corType == kFT0C) {
             registry.fill(HIST("Assoc_amp_same_TPC_FT0C"), chanelid, ampl);
-            sameTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
             registry.fill(HIST("deltaEta_deltaPhi_same_TPC_FT0C"), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            sameTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            if (mirrorChannel)
+              sameTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), RecoDecay::constrainAngle(track1.phi() - phi - 2 * PIHalf, -PIHalf), deltaEta, ampl * eventWeight * triggerWeight);
           }
         } else if (system == MixedEvent) {
           if (corType == kFT0A) {
             registry.fill(HIST("Assoc_amp_mixed_TPC_FT0A"), chanelid, ampl);
-            mixedTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
             registry.fill(HIST("deltaEta_deltaPhi_mixed_TPC_FT0A"), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            mixedTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            if (mirrorChannel)
+              mixedTpcFt0a->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), RecoDecay::constrainAngle(track1.phi() - phi - 2 * PIHalf, -PIHalf), deltaEta, ampl * eventWeight * triggerWeight);
           } else if (corType == kFT0C) {
             registry.fill(HIST("Assoc_amp_mixed_TPC_FT0C"), chanelid, ampl);
-            mixedTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
             registry.fill(HIST("deltaEta_deltaPhi_mixed_TPC_FT0C"), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            mixedTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), deltaPhi, deltaEta, ampl * eventWeight * triggerWeight);
+            if (mirrorChannel)
+              mixedTpcFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, track1.pt(), track1.pt(), RecoDecay::constrainAngle(track1.phi() - phi - 2 * PIHalf, -PIHalf), deltaEta, ampl * eventWeight * triggerWeight);
           }
         }
       }
@@ -605,37 +826,64 @@ struct LongRangeDihadronCor {
   }
 
   template <CorrelationContainer::CFStep step, typename TFT0s>
-  void fillCorrelationsFT0AFT0C(TFT0s const& ft0, float posZ, int system, float eventWeight) // function to fill the Output functions (sparse) and the delta eta and delta phi histograms
+  void fillCorrelationsFT0AFT0C(TFT0s const& ft0Col1, TFT0s const& ft0Col2, float posZ, int system, float eventWeight) // function to fill the Output functions (sparse) and the delta eta and delta phi histograms
   {
     int fSampleIndex = gRandom->Uniform(0, cfgSampleSize);
 
     float triggerWeight = 1.0f;
-    std::size_t channelASize = ft0.channelA().size();
-    std::size_t channelCSize = ft0.channelC().size();
+    std::size_t channelASize = ft0Col1.channelA().size();
+    std::size_t channelCSize = ft0Col2.channelC().size();
     // loop over all tracks
     for (std::size_t iChA = 0; iChA < channelASize; iChA++) {
 
       int chanelAid = 0;
       float amplA = 0.;
-      getChannel(ft0, iChA, chanelAid, amplA, kFT0A);
+      getChannel(ft0Col1, iChA, chanelAid, amplA, kFT0A, system);
       auto phiA = getPhiFT0(chanelAid, kFT0A);
       auto etaA = getEtaFT0(chanelAid, kFT0A);
+
+      bool mirrorChannelA = false;
+      if (cfgFwdConfig.cfgMirrorFT0ADeadChannels)
+        mirrorChannelA = isMirrorId(chanelAid, kFT0A);
+
+      if (system == SameEvent) {
+        registry.fill(HIST("Trig_hist_FT0A_FT0C"), fSampleIndex, posZ, 0.5, eventWeight * amplA);
+      }
 
       for (std::size_t iChC = 0; iChC < channelCSize; iChC++) {
         int chanelCid = 0;
         float amplC = 0.;
-        getChannel(ft0, iChC, chanelCid, amplC, kFT0C);
+        getChannel(ft0Col2, iChC, chanelCid, amplC, kFT0C, system);
         auto phiC = getPhiFT0(chanelCid, kFT0C);
         auto etaC = getEtaFT0(chanelCid, kFT0C);
         float deltaPhi = RecoDecay::constrainAngle(phiA - phiC, -PIHalf);
         float deltaEta = etaA - etaC;
+
+        bool mirrorChannelC = false;
+        if (cfgFwdConfig.cfgMirrorFT0CDeadChannels)
+          mirrorChannelC = isMirrorId(chanelCid, kFT0C);
+
         // fill the right sparse and histograms
         if (system == SameEvent) {
-          sameFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
           registry.fill(HIST("deltaEta_deltaPhi_same_FT0A_FT0C"), deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          sameFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          if (mirrorChannelA) {
+            sameFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, RecoDecay::constrainAngle(phiA + 2 * PIHalf - phiC, -PIHalf), deltaEta, amplA * amplC * eventWeight * triggerWeight);
+            if (mirrorChannelC)
+              sameFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          }
+          if (mirrorChannelC)
+            sameFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, RecoDecay::constrainAngle(phiA - phiC - 2 * PIHalf, -PIHalf), deltaEta, amplA * amplC * eventWeight * triggerWeight);
         } else if (system == MixedEvent) {
-          mixedFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
           registry.fill(HIST("deltaEta_deltaPhi_mixed_FT0A_FT0C"), deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          mixedFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          if (mirrorChannelA) {
+            mixedFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, RecoDecay::constrainAngle(phiA + 2 * PIHalf - phiC, -PIHalf), deltaEta, amplA * amplC * eventWeight * triggerWeight);
+            if (mirrorChannelC)
+              mixedFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, deltaPhi, deltaEta, amplA * amplC * eventWeight * triggerWeight);
+          }
+          if (mirrorChannelC)
+            mixedFt0aFt0c->getPairHist()->Fill(step, fSampleIndex, posZ, 0.5, 0.5, RecoDecay::constrainAngle(phiA - phiC - 2 * PIHalf, -PIHalf), deltaEta, amplA * amplC * eventWeight * triggerWeight);
         }
       }
     }
@@ -772,6 +1020,21 @@ struct LongRangeDihadronCor {
       return;
     }
 
+    int currentRunNumber = bc.runNumber();
+    if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0 && currentRunNumber != lastRunNumber) {
+      lastRunNumber = currentRunNumber;
+      if (std::find(runNumbers.begin(), runNumbers.end(), currentRunNumber) == runNumbers.end()) {
+        // if run number is not in the preconfigured list, create new output histograms for this run
+        createOutputObjectsForRun(currentRunNumber);
+        runNumbers.push_back(currentRunNumber);
+        LOGF(info, "Created Run-by-run objects in processSameTpcFt0a");
+      }
+      if (histAmpCorrectPerRun.find(currentRunNumber) == histAmpCorrectPerRun.end()) {
+        LOGF(fatal, "RunNumber %d not found in histAmpCorrectPerRun", currentRunNumber);
+        return;
+      }
+    }
+
     registry.fill(HIST("eventcount"), SameEvent); // because its same event i put it in the 1 bin
     fillYield(collision, tracks);
 
@@ -877,6 +1140,21 @@ struct LongRangeDihadronCor {
       return;
     }
 
+    int currentRunNumber = bc.runNumber();
+    if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0 && currentRunNumber != lastRunNumber) {
+      lastRunNumber = currentRunNumber;
+      if (std::find(runNumbers.begin(), runNumbers.end(), currentRunNumber) == runNumbers.end()) {
+        // if run number is not in the preconfigured list, create new output histograms for this run
+        createOutputObjectsForRun(currentRunNumber);
+        runNumbers.push_back(currentRunNumber);
+        LOGF(info, "Created Run-by-run objects in processSameTpcFt0c");
+      }
+      if (histAmpCorrectPerRun.find(currentRunNumber) == histAmpCorrectPerRun.end()) {
+        LOGF(fatal, "RunNumber %d not found in histAmpCorrectPerRun", currentRunNumber);
+        return;
+      }
+    }
+
     registry.fill(HIST("eventcount"), SameEvent); // because its same event i put it in the 1 bin
     fillYield(collision, tracks);
 
@@ -976,9 +1254,24 @@ struct LongRangeDihadronCor {
       return;
     }
 
+    int currentRunNumber = bc.runNumber();
+    if (cfgFwdConfig.cfgRunbyRunAmplitudeFT0 && currentRunNumber != lastRunNumber) {
+      lastRunNumber = currentRunNumber;
+      if (std::find(runNumbers.begin(), runNumbers.end(), currentRunNumber) == runNumbers.end()) {
+        // if run number is not in the preconfigured list, create new output histograms for this run
+        createOutputObjectsForRun(currentRunNumber);
+        runNumbers.push_back(currentRunNumber);
+        LOGF(info, "Created Run-by-run objects in processSameFt0aFt0c");
+      }
+      if (histAmpCorrectPerRun.find(currentRunNumber) == histAmpCorrectPerRun.end()) {
+        LOGF(fatal, "RunNumber %d not found in histAmpCorrectPerRun", currentRunNumber);
+        return;
+      }
+    }
+
     sameFt0aFt0c->fillEvent(tracks.size(), CorrelationContainer::kCFStepReconstructed);
     const auto& ft0 = collision.foundFT0();
-    fillCorrelationsFT0AFT0C<CorrelationContainer::kCFStepReconstructed>(ft0, collision.posZ(), SameEvent, weightCent);
+    fillCorrelationsFT0AFT0C<CorrelationContainer::kCFStepReconstructed>(ft0, ft0, collision.posZ(), SameEvent, weightCent);
   }
   PROCESS_SWITCH(LongRangeDihadronCor, processSameFt0aFt0c, "Process same event for FT0A-FT0C correlation", false);
 
@@ -1036,8 +1329,9 @@ struct LongRangeDihadronCor {
       float weightCent = 1.0f;
       if (!cfgCentTableUnavailable)
         getCentralityWeight(weightCent, cent1);
-      const auto& ft0 = collision2.foundFT0();
-      fillCorrelationsFT0AFT0C<CorrelationContainer::kCFStepReconstructed>(ft0, collision1.posZ(), MixedEvent, eventWeight * weightCent);
+      const auto& ft0Col1 = collision1.foundFT0();
+      const auto& ft0Col2 = collision2.foundFT0();
+      fillCorrelationsFT0AFT0C<CorrelationContainer::kCFStepReconstructed>(ft0Col1, ft0Col2, collision1.posZ(), MixedEvent, eventWeight * weightCent);
     }
   }
   PROCESS_SWITCH(LongRangeDihadronCor, processMixedFt0aFt0c, "Process mixed events for FT0A-FT0C correlation", false);

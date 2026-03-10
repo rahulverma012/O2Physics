@@ -87,7 +87,6 @@ struct HfDerivedDataCreatorD0ToKPi {
   Configurable<float> downSampleBkgFactor{"downSampleBkgFactor", 1., "Fraction of background candidates to keep for ML trainings"};
   Configurable<float> ptMaxForDownSample{"ptMaxForDownSample", 10., "Maximum pt for the application of the downsampling factor"};
 
-  HfHelper hfHelper;
   SliceCache cache;
   static constexpr double Mass{o2::constants::physics::MassD0};
 
@@ -106,7 +105,7 @@ struct HfDerivedDataCreatorD0ToKPi {
   using TypeMcCollisions = soa::Join<aod::McCollisions, aod::McCentFT0Ms>;
 
   Filter filterSelectCandidates = aod::hf_sel_candidate_d0::isSelD0 >= 1 || aod::hf_sel_candidate_d0::isSelD0bar >= 1;
-  Filter filterMcGenMatching = nabs(aod::hf_cand_2prong::flagMcMatchGen) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Filter filterMcGenMatching = nabs(aod::hf_cand_mc_flag::flagMcMatchGen) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
 
   Preslice<SelectedCandidates> candidatesPerCollision = aod::hf_cand::collisionId;
   Preslice<SelectedCandidatesKf> candidatesKfPerCollision = aod::hf_cand::collisionId;
@@ -128,14 +127,14 @@ struct HfDerivedDataCreatorD0ToKPi {
   Partition<SelectedCandidatesMcMl> candidatesMcMlAll = aod::hf_sel_candidate_d0::isSelD0 >= 0;
   Partition<SelectedCandidatesMcKfMl> candidatesMcKfMlAll = aod::hf_sel_candidate_d0::isSelD0 >= 0;
   // partitions for signal and background
-  Partition<SelectedCandidatesMc> candidatesMcSig = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMc> candidatesMcBkg = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcKf> candidatesMcKfSig = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcKf> candidatesMcKfBkg = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcKfMl> candidatesMcKfMlSig = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
-  Partition<SelectedCandidatesMcKfMl> candidatesMcKfMlBkg = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMc> candidatesMcSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMc> candidatesMcBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKf> candidatesMcKfSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKf> candidatesMcKfBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKfMl> candidatesMcKfMlSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKfMl> candidatesMcKfMlBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
 
   void init(InitContext const&)
   {
@@ -309,17 +308,17 @@ struct HfDerivedDataCreatorD0ToKPi {
           }
         }
 
-        double const ct = hfHelper.ctD0(candidate);
-        double const y = hfHelper.yD0(candidate);
-        float massD0, massD0bar;
+        double const ct = HfHelper::ctD0(candidate);
+        double const y = HfHelper::yD0(candidate);
+        float massD0{}, massD0bar{};
         float topolChi2PerNdf = -999.;
         if constexpr (ReconstructionType == aod::hf_cand::VertexerType::KfParticle) {
           massD0 = candidate.kfGeoMassD0();
           massD0bar = candidate.kfGeoMassD0bar();
           topolChi2PerNdf = candidate.kfTopolChi2OverNdf();
         } else {
-          massD0 = hfHelper.invMassD0ToPiK(candidate);
-          massD0bar = hfHelper.invMassD0barToKPi(candidate);
+          massD0 = HfHelper::invMassD0ToPiK(candidate);
+          massD0bar = HfHelper::invMassD0barToKPi(candidate);
         }
         std::vector<float> mlScoresD0, mlScoresD0bar;
         if constexpr (IsMl) {
@@ -327,10 +326,10 @@ struct HfDerivedDataCreatorD0ToKPi {
           std::copy(candidate.mlProbD0bar().begin(), candidate.mlProbD0bar().end(), std::back_inserter(mlScoresD0bar));
         }
         if (candidate.isSelD0()) {
-          fillTablesCandidate(candidate, 0, massD0, hfHelper.cosThetaStarD0(candidate), topolChi2PerNdf, ct, y, flagMcRec, origin, mlScoresD0);
+          fillTablesCandidate(candidate, 0, massD0, HfHelper::cosThetaStarD0(candidate), topolChi2PerNdf, ct, y, flagMcRec, origin, mlScoresD0);
         }
         if (candidate.isSelD0bar()) {
-          fillTablesCandidate(candidate, 1, massD0bar, hfHelper.cosThetaStarD0bar(candidate), topolChi2PerNdf, ct, y, flagMcRec, origin, mlScoresD0bar);
+          fillTablesCandidate(candidate, 1, massD0bar, HfHelper::cosThetaStarD0bar(candidate), topolChi2PerNdf, ct, y, flagMcRec, origin, mlScoresD0bar);
         }
       }
     }

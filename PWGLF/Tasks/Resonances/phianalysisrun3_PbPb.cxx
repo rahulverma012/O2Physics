@@ -13,13 +13,15 @@
 /// \author Sarjeeta Gami
 
 #include "PWGLF/DataModel/EPCalibrationTables.h"
+#include "PWGLF/Utils/inelGt.h"
 
 #include "Common/Core/TrackSelection.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CCDB/BasicCCDBManager.h"
@@ -72,27 +74,33 @@ struct phianalysisrun3_PbPb {
   } rctCut;
   RCTFlagsChecker rctChecker;
   HistogramRegistry histos{"histos", {}, OutputObjHandlingPolicy::AnalysisObject};
-  // events
-  Configurable<float> cfgCutVertex{"cfgCutVertex", 10.0f, "Accepted z-vertex range"};
-  // track
-  Configurable<float> cfgCutPT{"cfgCutPT", 0.2, "PT cut on daughter track"};
-  Configurable<float> cfgCutEta{"cfgCutEta", 0.8, "Eta cut on daughter track"};
-  Configurable<float> cfgCutDCAxy{"cfgCutDCAxy", 2.0f, "DCAxy range for tracks"};
-  Configurable<float> cfgCutDCAz{"cfgCutDCAz", 2.0f, "DCAz range for tracks"};
-  Configurable<float> nsigmacutTPC{"nsigmacutTPC", 2.0f, "Value of the TPC Nsigma cut"};
-  Configurable<float> nsigmacutTOF{"nsigmacutTOF", 2.0f, "Value of the TOF Nsigma cut"};
-  Configurable<float> nsigmaCutCombined{"nsigmaCutCombined", 3.0, "Value of the TOF Nsigma cut"};
-  Configurable<int> cfgNoMixedEvents{"cfgNoMixedEvents", 5, "Number of mixed events per event"};
-  Configurable<bool> fillOccupancy{"fillOccupancy", true, "fill Occupancy"};
-  Configurable<bool> isNoTOF{"isNoTOF", false, "isNoTOF"};
-  Configurable<int> pid{"pid", 0, "pid"};
-  Configurable<bool> additionalEvSel1{"additionalEvSel1", true, "Additional evsel1"};
-  Configurable<bool> additionalEvSel2{"additionalEvSel2", true, "Additional evsel2"};
-  Configurable<bool> additionalEvSel3{"additionalEvSel3", true, "Additional evsel3"};
-  Configurable<bool> additionalEvSel4{"additionalEvSel4", true, "Additional evsel4"};
-  Configurable<bool> additionalEvSel5{"additionalEvSel5", true, "Additional evsel5"};
-  Configurable<bool> additionalEvSel6{"additionalEvSel6", true, "Additional evsel6"};
+  HistogramRegistry registry{"registry"};
+  struct : ConfigurableGroup {
+    // events
+    Configurable<float> cfgCutVertex{"cfgCutVertex", 10.0f, "Accepted z-vertex range"};
+    // track
+    Configurable<float> cfgCutPT{"cfgCutPT", 0.2, "PT cut on daughter track"};
+    Configurable<float> cfgCutEta{"cfgCutEta", 0.8, "Eta cut on daughter track"};
+    Configurable<float> cfgCutDCAxy{"cfgCutDCAxy", 2.0f, "DCAxy range for tracks"};
+    Configurable<float> cfgCutDCAz{"cfgCutDCAz", 2.0f, "DCAz range for tracks"};
+    Configurable<float> nsigmacutTPC{"nsigmacutTPC", 2.0f, "Value of the TPC Nsigma cut"};
+    Configurable<float> nsigmacutTOF{"nsigmacutTOF", 2.0f, "Value of the TOF Nsigma cut"};
+    Configurable<float> nsigmaCutCombined{"nsigmaCutCombined", 3.0, "Value of the TOF Nsigma cut"};
+    Configurable<int> cfgNoMixedEvents{"cfgNoMixedEvents", 5, "Number of mixed events per event"};
+    Configurable<bool> fillOccupancy{"fillOccupancy", true, "fill Occupancy"};
+    Configurable<bool> isNoTOF{"isNoTOF", false, "isNoTOF"};
+    Configurable<bool> additionalEvSel1{"additionalEvSel1", true, "Additional evsel1"};
+    Configurable<bool> additionalEvSel2{"additionalEvSel2", true, "Additional evsel2"};
+    Configurable<bool> additionalEvSel3{"additionalEvSel3", true, "Additional evsel3"};
+    Configurable<bool> additionalEvSel4{"additionalEvSel4", true, "Additional evsel4"};
+    Configurable<bool> additionalEvSel5{"additionalEvSel5", true, "Additional evsel5"};
+    Configurable<bool> additionalEvSel6{"additionalEvSel6", true, "Additional evsel6"};
+    Configurable<bool> cutvz{"cutvz", true, "Vz cut"};
+    Configurable<bool> cutvzgen{"cutvzgen", true, "Vz cut"};
+    Configurable<bool> isINELgt0{"isINELgt0", true, "INEL>0 selection"};
+  } selectionConfig;
   Configurable<bool> cfgMultFT0{"cfgMultFT0", true, "cfgMultFT0"};
+  Configurable<int> pid{"pid", 0, "pid"};
   Configurable<float> cfgCutTOFBeta{"cfgCutTOFBeta", 0.0, "cut TOF beta"};
   Configurable<bool> useGlobalTrack{"useGlobalTrack", false, "use Global track"};
   Configurable<bool> iscustomDCAcut{"iscustomDCAcut", false, "iscustomDCAcut"};
@@ -117,14 +125,18 @@ struct phianalysisrun3_PbPb {
   ConfigurableAxis ptAxisphi{"ptAxisphi", {200, 0.0f, 20.0f}, "phi pT axis"};
   ConfigurableAxis centAxisphi{"centAxisphi", {200, 0.0, 200.0}, "phi centrality axis"};
   ConfigurableAxis massAxisphi{"massAxisphi", {200, 0.9, 1.1}, "phi mass axis"};
-
+  ConfigurableAxis axisNch{"axisNch", {100, 0.0f, 100.0f}, "Number of charged particles in |y| < 0.5"};
   ConfigurableAxis binsImpactPar{"binsImpactPar", {VARIABLE_WIDTH, 0, 3.5, 5.67, 7.45, 8.85, 10.0, 11.21, 12.26, 13.28, 14.23, 15.27}, "Binning of the impact parameter axis"};
   ConfigurableAxis binsPt{"binsPt", {VARIABLE_WIDTH, 0.0, 0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0}, "Binning of the pT axis"};
   ConfigurableAxis binsCent{"binsCent", {VARIABLE_WIDTH, 0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0}, "Binning of the centrality axis"};
   Configurable<int> cfgMinOccupancy{"cfgMinOccupancy", 0, "Minimum occupancy cut"};
   Configurable<int> cfgMaxOccupancy{"cfgMaxOccupancy", 3000, "Maximum occupancy cut"};
   Configurable<int> centestimator{"centestimator", 0, "Select multiplicity estimator: 0 - FT0C, 1 - FT0A, 2 - FT0M, 3 - FV0A, 4 - PVTracks"};
-
+  ConfigurableAxis binsMult{"binsMult", {500, 0.0f, +500.0f}, ""};
+  Configurable<bool> isApplyCentFT0C{"isApplyCentFT0C", true, "Centrality based on FT0C"};
+  Configurable<bool> isApplyCentFT0M{"isApplyCentFV0M", false, "Centrality based on FT0M"};
+  Configurable<bool> isApplyInelgt0{"isApplyInelgt0", false, "Enable INEL > 0 condition"};
+  Configurable<bool> isApplyTVX{"isApplyTVX", false, "Enable TVX trigger sel"};
   Configurable<bool> genacceptancecut{"genacceptancecut", true, "use acceptance cut for generated"};
   // MC
   Configurable<bool> isMC{"isMC", false, "Run MC"};
@@ -135,11 +147,13 @@ struct phianalysisrun3_PbPb {
     AxisSpec impactParAxis = {binsImpactPar, "Impact Parameter"};
     AxisSpec ptAxis = {binsPt, "#it{p}_{T} (GeV/#it{c})"};
     AxisSpec centAxis = {binsCent, "V0M (%)"};
+    AxisSpec multAxis = {binsMult, "Multiplicity #eta<0.5"};
+    AxisSpec axisEvent = {10, 0.5, 10.5, "#Event", "EventAxis"};
     if (!isMC) {
       histos.add("hCentrality", "Centrality distribution", kTH1F, {centAxisphi});
       histos.add("hVtxZ", "Vertex distribution in Z;Z (cm)", kTH1F, {{400, -20.0, 20.0}});
       histos.add("hOccupancy", "Occupancy distribution", kTH1F, {{500, 0, 50000}});
-      histos.add("hEvtSelInfo", "hEvtSelInfo", kTH1F, {{10, 0, 10.0}});
+      histos.add("hEvtSelInfo", "hEvtSelInfo", kTH1F, {{11, 0, 11.0}});
       histos.add("h3PhiInvMassUnlikeSign", "Invariant mass of Phi meson Unlike Sign", kTH3F, {centAxisphi, ptAxisphi, massAxisphi});
       histos.add("h3PhiInvMassMixed", "Invariant mass of Phi meson Mixed", kTH3F, {centAxisphi, ptAxisphi, massAxisphi});
       histos.add("h3PhiInvMassRot", "Invariant mass of Phi meson Rotation", kTH3F, {centAxisphi, ptAxisphi, massAxisphi});
@@ -250,6 +264,43 @@ struct phianalysisrun3_PbPb {
         histos.add("QAevent/hImpactParvsCentrRec", "Impact parameter of selected MC events vs centrality", kTH2F, {{120, 0.0f, 120.0f}, impactParAxis});
         histos.add("QAevent/phigenBeforeEvtSel", "phi before event selections", kTH2F, {ptAxis, impactParAxis});
         histos.add("QAevent/phigenAfterEvtSel", "phi after event selections", kTH2F, {ptAxis, impactParAxis});
+        histos.add("QAevent/hMultEta05Rec", "multiplicity in eta<0.5 of selected MC events", kTH1F, {multAxis});
+        histos.add("QAevent/hMultEta05vsCentrRec", "multiplicity in eta<0.5 of selected MC events vs centrality", kTH2F, {centAxis, multAxis});
+        histos.add("QAevent/hMultEta05Gen", "multiplicity in eta<0.5 of generated MC events", kTH1F, {multAxis});
+        histos.add("QAevent/hgendndetaVsMultEta05BeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+        histos.add("QAevent/hgendndetaVsMultEta05AfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+        histos.add("QAevent/hMultEta08Rec", "multiplicity in eta<0.5 of selected MC events", kTH1F, {multAxis});
+        histos.add("QAevent/hMultEta08vsCentrRec", "multiplicity in eta<0.5 of selected MC events vs centrality", kTH2F, {centAxis, multAxis});
+        histos.add("QAevent/hMultEta08Gen", "multiplicity in eta<0.5 of generated MC events", kTH1F, {multAxis});
+        histos.add("QAevent/hgendndetaVsMultEta08BeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+        histos.add("QAevent/hgendndetaVsMultEta08AfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+      }
+      if (doprocessEvtLossSigLossMC1) {
+        histos.add("MCEventHist", "MCEventHist", kTH1F, {axisEvent}, false);
+        auto hstat = histos.get<TH1>(HIST("MCEventHist"));
+        auto* x = hstat->GetXaxis();
+        x->SetBinLabel(1, "All MC events");
+        x->SetBinLabel(2, "MC events with reco event after event selection");
+        x->SetBinLabel(3, "MC events with no reco events");
+        histos.add("hImpactParameterGenwithNoreco", "Impact parameter of generated MC events, with no recoevent", kTH1F, {impactParAxis});
+        histos.add("hImpactParameterGen1", "Impact parameter of generated MC events", kTH1F, {impactParAxis});
+        histos.add("hImpactParameterRec1", "Impact parameter of selected MC events", kTH1F, {impactParAxis});
+        histos.add("hImpactParvsCentrRec", "Impact parameter of selected MC events vs centrality", kTH2F, {centAxis, impactParAxis});
+        histos.add("hMultEta05GenwithNoreco", "multiplicity in eta<0.5 of generated MC events, with no recoevent", kTH1F, {multAxis});
+        histos.add("hMultEta05Gen", "multiplicity in eta<0.5 of generated MC events", kTH1F, {multAxis});
+        histos.add("hMultEta05Rec", "multiplicity in eta<0.5 of selected MC events", kTH1F, {multAxis});
+        histos.add("hMultEta05vsCentrRec", "multiplicity in eta<0.5 of selected MC events vs centrality", kTH2F, {centAxis, multAxis});
+        histos.add("hMultGen", "multiplicity of generated MC events", kTH1F, {centAxisphi});
+        histos.add("hMultRec", "multiplicity of selected MC events", kTH1F, {centAxisphi});
+        histos.add("hMultvsCentrRec", "multiplicity of selected MC events vs centrality", kTH2F, {centAxisphi, multAxis});
+        histos.add("hgendndetaVsMultEta05BeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+        histos.add("hgendndetaVsMultEta05AfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity in eta<0.5", kTH2F, {ptAxis, multAxis});
+        histos.add("hgendndetaVsMultBeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity", kTH2F, {ptAxis, multAxis});
+        histos.add("hgendndetaVsMultAfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity", kTH2F, {ptAxis, multAxis});
+        histos.add("hgendndetaBeforeEvtSel", "Eta of all generated particles", kTH1F, {ptAxis});
+        histos.add("hgendndetaAfterEvtSel", "Eta of generated particles after EvtSel", kTH1F, {ptAxis});
+        histos.add("hgendndetaVscentBeforeEvtSel", "hgendndetaBeforeEvtSel vs centrality", kTH2F, {ptAxis, impactParAxis});
+        histos.add("hgendndetaVscentAfterEvtSel", "hgendndetaAfterEvtSel vs centrality", kTH2F, {ptAxis, impactParAxis});
       }
     }
   }
@@ -258,6 +309,7 @@ struct phianalysisrun3_PbPb {
   double rapidity;
   double genMass, recMass, resolution;
   ROOT::Math::PxPyPzMVector phiMother, daughter1, daughter2;
+  ROOT::Math::PxPyPzMVector d1, d2, mother;
   double mass{0.};
   double massrotation{0.};
   double pT{0.};
@@ -270,7 +322,7 @@ struct phianalysisrun3_PbPb {
     if (iscustomDCAcut && !(candidate.isGlobalTrack() && candidate.isPVContributor() && candidate.itsNCls() > cfgITScluster)) {
       return false;
     }
-    if (ismanualDCAcut && !(candidate.isGlobalTrackWoDCA() && candidate.isPVContributor() && std::abs(candidate.dcaXY()) < cfgCutDCAxy && std::abs(candidate.dcaZ()) < cfgCutDCAz && candidate.itsNCls() > cfgITScluster)) {
+    if (ismanualDCAcut && !(candidate.isGlobalTrackWoDCA() && candidate.isPVContributor() && std::abs(candidate.dcaXY()) < selectionConfig.cfgCutDCAxy && std::abs(candidate.dcaZ()) < selectionConfig.cfgCutDCAz && candidate.itsNCls() > cfgITScluster)) {
       return false;
     }
     if (useGlobalTrack && !(candidate.isGlobalTrack() && candidate.isPVContributor() && candidate.itsNCls() > cfgITScluster && candidate.tpcNClsCrossedRows() > cfgTPCcluster && candidate.tpcFractionSharedCls() < cfgTPCSharedcluster)) {
@@ -282,13 +334,13 @@ struct phianalysisrun3_PbPb {
   template <typename T>
   bool selectionPID(const T& candidate)
   {
-    if (!isNoTOF && candidate.hasTOF() && (candidate.tofNSigmaKa() * candidate.tofNSigmaKa() + candidate.tpcNSigmaKa() * candidate.tpcNSigmaKa()) < (nsigmaCutCombined * nsigmaCutCombined)) {
+    if (!selectionConfig.isNoTOF && candidate.hasTOF() && (candidate.tofNSigmaKa() * candidate.tofNSigmaKa() + candidate.tpcNSigmaKa() * candidate.tpcNSigmaKa()) < (selectionConfig.nsigmaCutCombined * selectionConfig.nsigmaCutCombined)) {
       return true;
     }
-    if (!isNoTOF && !candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC) {
+    if (!selectionConfig.isNoTOF && !candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC) {
       return true;
     }
-    if (isNoTOF && std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC) {
+    if (selectionConfig.isNoTOF && std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC) {
       return true;
     }
     return false;
@@ -297,22 +349,22 @@ struct phianalysisrun3_PbPb {
   bool selectionPIDpTdependent(const T& candidate, int pid)
   {
     if (pid == 0) {
-      if (!candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC) {
+      if (!candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC) {
         return true;
       }
-      if (candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC &&
-          std::abs(candidate.tofNSigmaKa()) < nsigmacutTOF) {
+      if (candidate.hasTOF() && std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC &&
+          std::abs(candidate.tofNSigmaKa()) < selectionConfig.nsigmacutTOF) {
         return true;
       }
       return false;
 
     } else if (pid == 1) {
       constexpr double kPtThresholdForTOF = 0.5;
-      if (candidate.pt() < kPtThresholdForTOF && std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC) {
+      if (candidate.pt() < kPtThresholdForTOF && std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC) {
         return true;
       }
       if (candidate.pt() >= kPtThresholdForTOF && candidate.hasTOF() && candidate.beta() > cfgCutTOFBeta &&
-          std::abs(candidate.tpcNSigmaKa()) < nsigmacutTPC && std::abs(candidate.tofNSigmaKa()) < nsigmacutTOF) {
+          std::abs(candidate.tpcNSigmaKa()) < selectionConfig.nsigmacutTPC && std::abs(candidate.tofNSigmaKa()) < selectionConfig.nsigmacutTOF) {
         return true;
       }
       if (!useGlobalTrack && !candidate.hasTPC()) {
@@ -326,32 +378,59 @@ struct phianalysisrun3_PbPb {
   template <typename CollType>
   bool myEventSelections(const CollType& collision)
   {
-    if (std::abs(collision.posZ()) > cfgCutVertex)
+    if (selectionConfig.cutvz && !(std::abs(collision.posZ()) < selectionConfig.cfgCutVertex))
       return false;
 
     if (!collision.sel8())
       return false;
 
-    if (additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder))
+    if (selectionConfig.additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder))
       return false;
 
-    if (additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))
+    if (selectionConfig.additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))
       return false;
 
-    if (additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup))
+    if (selectionConfig.additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup))
       return false;
 
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll))
+    if (selectionConfig.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll))
       return false;
-    if (additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))
+    if (selectionConfig.additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))
       return false;
-    if (additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV))
+    if (selectionConfig.additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV))
       return false;
+    if (selectionConfig.isINELgt0 && !collision.isInelGt0()) {
+      return false;
+    }
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy))
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy))
       return false;
 
     return true;
+  }
+  template <typename CheckColCent>
+  float selColMultMC(CheckColCent const& col)
+  {
+    auto cent = -1;
+    if (isApplyCentFT0C) {
+      cent = col.multMCFT0C();
+    }
+    if (isApplyCentFT0M) {
+      cent = col.multMCFT0A();
+    }
+    return cent;
+  }
+  template <typename CheckColCent>
+  float selColCent(CheckColCent const& col)
+  {
+    auto cent = -1;
+    if (isApplyCentFT0C) {
+      cent = col.centFT0C();
+    }
+    if (isApplyCentFT0M) {
+      cent = col.centFT0M();
+    }
+    return cent;
   }
 
   // deep angle cut on pair to remove photon conversion
@@ -405,15 +484,17 @@ struct phianalysisrun3_PbPb {
       }
     }
   }
-  Filter collisionFilter = nabs(aod::collision::posZ) < cfgCutVertex;
-  Filter acceptanceFilter = (nabs(aod::track::eta) < cfgCutEta && nabs(aod::track::pt) > cfgCutPT);
-  Filter dcacutFilter = (nabs(aod::track::dcaXY) < cfgCutDCAxy) && (nabs(aod::track::dcaZ) < cfgCutDCAz);
+  Filter collisionFilter =
+    (!selectionConfig.cutvz) ||
+    (nabs(aod::collision::posZ) < selectionConfig.cfgCutVertex);
+  Filter acceptanceFilter = (nabs(aod::track::eta) < selectionConfig.cfgCutEta && nabs(aod::track::pt) > selectionConfig.cfgCutPT);
+  Filter dcacutFilter = (nabs(aod::track::dcaXY) < selectionConfig.cfgCutDCAxy) && (nabs(aod::track::dcaZ) < selectionConfig.cfgCutDCAz);
 
-  using EventCandidates = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::FT0Mults, aod::MultZeqs, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFV0As>>;
+  using EventCandidates = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::FT0Mults, aod::MultZeqs, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFV0As, aod::Mults, aod::PVMults>>;
   using TrackCandidates = soa::Filtered<soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection, aod::pidTPCFullKa, aod::pidTOFFullKa, aod::pidTOFbeta>>;
 
   // using EventCandidatesMC = soa::Join<aod::Collisions, aod::EvSels, aod::FT0Mults, aod::MultZeqs, aod::McCollisionLabels>;
-  using EventCandidatesMC = soa::Join<aod::Collisions, aod::EvSels, aod::McCollisionLabels, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFV0As>;
+  using EventCandidatesMC = soa::Join<aod::Collisions, aod::EvSels, aod::McCollisionLabels, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFV0As, aod::Mults, aod::PVMults>;
   using TrackCandidatesMC = soa::Filtered<soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection,
                                                     aod::pidTPCFullKa, aod::pidTOFFullKa,
                                                     aod::McTrackLabels, aod::pidTOFbeta>>;
@@ -422,6 +503,8 @@ struct phianalysisrun3_PbPb {
   using CollisionMCRecTableCentFT0C = soa::SmallGroups<soa::Join<aod::McCollisionLabels, aod::Collisions, aod::CentFT0Cs, aod::EvSels, aod::CentFT0Ms, aod::CentFT0As, aod::CentFV0As>>;
   using TrackMCRecTable = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::McTrackLabels, aod::TrackSelection, aod::pidTPCFullKa, aod::pidTOFFullKa, aod::pidTOFbeta>;
   using FilTrackMCRecTable = soa::Filtered<TrackMCRecTable>;
+  using McCollisionMults = soa::Join<aod::McCollisions, aod::MultMCExtras>;
+  using LabeledTracks = soa::Join<aod::Tracks, aod::McTrackLabels>;
 
   ConfigurableAxis axisVertex{"axisVertex", {20, -10, 10}, "vertex axis for bin"};
   ConfigurableAxis axisMultiplicity{"axisMultiplicity", {2000, 0, 10000}, "multiplicity  for bin"};
@@ -442,39 +525,43 @@ struct phianalysisrun3_PbPb {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 1.5);
-    if (!collision.sel8()) {
+    if (cfgDoSel8 && !collision.sel8()) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 2.5);
-    if (additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
+    if (selectionConfig.additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 3.5);
-    if (additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
+    if (selectionConfig.additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 4.5);
-    if (additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
+    if (selectionConfig.additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 5.5);
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+    if (selectionConfig.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 6.5);
-    if (additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+    if (selectionConfig.additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 7.5);
-    if (additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+    if (selectionConfig.additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 8.5);
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
       return;
     }
     histos.fill(HIST("hEvtSelInfo"), 9.5);
+    if (selectionConfig.isINELgt0 && !collision.isInelGt0()) {
+      return;
+    }
+    histos.fill(HIST("hEvtSelInfo"), 10.5);
     float multiplicity{-1};
     const int kCentFT0C = 0;
     const int kCentFT0A = 1;
@@ -593,7 +680,7 @@ struct phianalysisrun3_PbPb {
     auto tracksTuple = std::make_tuple(tracks);
     //////// currently mixing the event with similar TPC multiplicity ////////
     BinningTypeVertexContributor1 binningOnPositions{{axisVertex, axisMultiplicity}, true};
-    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor1> pair{binningOnPositions, cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
+    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor1> pair{binningOnPositions, selectionConfig.cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
     for (const auto& [c1, tracks1, c2, tracks2] : pair) {
       if (rctCut.requireRCTFlagChecker && !rctChecker(c1)) {
         continue;
@@ -607,28 +694,33 @@ struct phianalysisrun3_PbPb {
       if (!c2.sel8()) {
         continue;
       }
-      if (additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
+      if (selectionConfig.additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
         continue;
       }
-      if (additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      if (selectionConfig.additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
         continue;
       }
-      if (additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
+      if (selectionConfig.additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
         continue;
       }
-      if (additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
+      if (selectionConfig.additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
         continue;
       }
-      if (additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
+      if (selectionConfig.additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
         continue;
       }
-      if (additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
+      if (selectionConfig.isINELgt0 &&
+          (!c1.isInelGt0() || !c2.isInelGt0())) {
+        continue;
+      }
+
       int occupancy1 = c1.trackOccupancyInTimeRange();
       int occupancy2 = c2.trackOccupancyInTimeRange();
 
-      if (fillOccupancy &&
+      if (selectionConfig.fillOccupancy &&
           ((occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy) ||
            (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy))) {
         continue;
@@ -664,7 +756,7 @@ struct phianalysisrun3_PbPb {
     auto tracksTuple = std::make_tuple(tracks);
     //////// currently mixing the event with similar TPC multiplicity ////////
     BinningTypeVertexContributor2 binningOnPositions{{axisVertex, axisMultiplicity}, true};
-    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor2> pair{binningOnPositions, cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
+    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor2> pair{binningOnPositions, selectionConfig.cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
     for (const auto& [c1, tracks1, c2, tracks2] : pair) {
       if (rctCut.requireRCTFlagChecker && !rctChecker(c1)) {
         continue;
@@ -678,28 +770,33 @@ struct phianalysisrun3_PbPb {
       if (!c2.sel8()) {
         continue;
       }
-      if (additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
+      if (selectionConfig.additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
         continue;
       }
-      if (additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      if (selectionConfig.additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
         continue;
       }
-      if (additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
+      if (selectionConfig.additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
         continue;
       }
-      if (additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
+      if (selectionConfig.additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
         continue;
       }
-      if (additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
+      if (selectionConfig.additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
         continue;
       }
-      if (additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
+      if (selectionConfig.isINELgt0 &&
+          (!c1.isInelGt0() || !c2.isInelGt0())) {
+        continue;
+      }
+
       int occupancy1 = c1.trackOccupancyInTimeRange();
       int occupancy2 = c2.trackOccupancyInTimeRange();
 
-      if (fillOccupancy &&
+      if (selectionConfig.fillOccupancy &&
           ((occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy) ||
            (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy))) {
         continue;
@@ -736,7 +833,7 @@ struct phianalysisrun3_PbPb {
     auto tracksTuple = std::make_tuple(tracks);
     //////// currently mixing the event with similar TPC multiplicity ////////
     BinningTypeVertexContributor3 binningOnPositions{{axisVertex, axisMultiplicity}, true};
-    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor3> pair{binningOnPositions, cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
+    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor3> pair{binningOnPositions, selectionConfig.cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
     for (const auto& [c1, tracks1, c2, tracks2] : pair) {
       if (rctCut.requireRCTFlagChecker && !rctChecker(c1)) {
         continue;
@@ -750,28 +847,33 @@ struct phianalysisrun3_PbPb {
       if (!c2.sel8()) {
         continue;
       }
-      if (additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
+      if (selectionConfig.additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
         continue;
       }
-      if (additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      if (selectionConfig.additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
         continue;
       }
-      if (additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
+      if (selectionConfig.additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
         continue;
       }
-      if (additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
+      if (selectionConfig.additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
         continue;
       }
-      if (additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
+      if (selectionConfig.additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
         continue;
       }
-      if (additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
+      if (selectionConfig.isINELgt0 &&
+          (!c1.isInelGt0() || !c2.isInelGt0())) {
+        continue;
+      }
+
       int occupancy1 = c1.trackOccupancyInTimeRange();
       int occupancy2 = c2.trackOccupancyInTimeRange();
 
-      if (fillOccupancy &&
+      if (selectionConfig.fillOccupancy &&
           ((occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy) ||
            (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy))) {
         continue;
@@ -808,7 +910,7 @@ struct phianalysisrun3_PbPb {
     auto tracksTuple = std::make_tuple(tracks);
     //////// currently mixing the event with similar TPC multiplicity ////////
     BinningTypeVertexContributor4 binningOnPositions{{axisVertex, axisMultiplicity}, true};
-    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor4> pair{binningOnPositions, cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
+    SameKindPair<EventCandidates, TrackCandidates, BinningTypeVertexContributor4> pair{binningOnPositions, selectionConfig.cfgNoMixedEvents, -1, collisions, tracksTuple, &cache};
     for (const auto& [c1, tracks1, c2, tracks2] : pair) {
       if (rctCut.requireRCTFlagChecker && !rctChecker(c1)) {
         continue;
@@ -822,28 +924,33 @@ struct phianalysisrun3_PbPb {
       if (!c2.sel8()) {
         continue;
       }
-      if (additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
+      if (selectionConfig.additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
         continue;
       }
-      if (additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      if (selectionConfig.additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
         continue;
       }
-      if (additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
+      if (selectionConfig.additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
         continue;
       }
-      if (additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
+      if (selectionConfig.additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
         continue;
       }
-      if (additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
+      if (selectionConfig.additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
         continue;
       }
-      if (additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
+      if (selectionConfig.isINELgt0 &&
+          (!c1.isInelGt0() || !c2.isInelGt0())) {
+        continue;
+      }
+
       int occupancy1 = c1.trackOccupancyInTimeRange();
       int occupancy2 = c2.trackOccupancyInTimeRange();
 
-      if (fillOccupancy &&
+      if (selectionConfig.fillOccupancy &&
           ((occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy) ||
            (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy))) {
         continue;
@@ -880,14 +987,14 @@ struct phianalysisrun3_PbPb {
     if (!collision.sel8()) {
       return;
     }
-    if (additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+    if (selectionConfig.additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
       return;
     }
-    if (additionalEvSel3 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
+    if (selectionConfig.additionalEvSel3 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
       return;
     }
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
       return;
     }
     float multiplicity{-1};
@@ -977,37 +1084,37 @@ struct phianalysisrun3_PbPb {
       if (cfgDoSel8 && !RecCollision.sel8()) {
         continue;
       }
-      if (std::abs(RecCollision.posZ()) > cfgCutVertex) {
+      if (std::abs(RecCollision.posZ()) > selectionConfig.cfgCutVertex) {
         continue;
       }
 
       histos.fill(HIST("hMC"), 4);
-      if (additionalEvSel1 && !RecCollision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
+      if (selectionConfig.additionalEvSel1 && !RecCollision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
         continue;
       }
       histos.fill(HIST("hMC"), 5);
-      if (additionalEvSel2 && !RecCollision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
+      if (selectionConfig.additionalEvSel2 && !RecCollision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
         continue;
       }
       histos.fill(HIST("hMC"), 6);
-      if (additionalEvSel3 && !RecCollision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
+      if (selectionConfig.additionalEvSel3 && !RecCollision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
         continue;
       }
       histos.fill(HIST("hMC"), 7);
-      if (additionalEvSel4 && !RecCollision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+      if (selectionConfig.additionalEvSel4 && !RecCollision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
         continue;
       }
       histos.fill(HIST("hMC"), 8);
-      if (additionalEvSel5 && !RecCollision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+      if (selectionConfig.additionalEvSel5 && !RecCollision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
         continue;
       }
       histos.fill(HIST("hMC"), 9);
-      if (additionalEvSel6 && !RecCollision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+      if (selectionConfig.additionalEvSel6 && !RecCollision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
         continue;
       }
       histos.fill(HIST("hMC"), 10);
       int occupancy = RecCollision.trackOccupancyInTimeRange();
-      if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+      if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
         continue;
       }
       histos.fill(HIST("hMC"), 11);
@@ -1145,7 +1252,7 @@ struct phianalysisrun3_PbPb {
             continue;
           }
           if (kCurrentDaughter.pdgCode() == PDG_t::kKPlus) {
-            if (genacceptancecut && kCurrentDaughter.pt() > cfgCutPT && std::abs(kCurrentDaughter.eta()) < cfgCutEta) {
+            if (genacceptancecut && kCurrentDaughter.pt() > selectionConfig.cfgCutPT && std::abs(kCurrentDaughter.eta()) < selectionConfig.cfgCutEta) {
               daughtp = true;
             }
             if (!genacceptancecut) {
@@ -1153,7 +1260,7 @@ struct phianalysisrun3_PbPb {
             }
             kaonPlus = ROOT::Math::PxPyPzMVector(kCurrentDaughter.px(), kCurrentDaughter.py(), kCurrentDaughter.pz(), massKa);
           } else if (kCurrentDaughter.pdgCode() == PDG_t::kKMinus) {
-            if (genacceptancecut && kCurrentDaughter.pt() > cfgCutPT && std::abs(kCurrentDaughter.eta()) < cfgCutEta) {
+            if (genacceptancecut && kCurrentDaughter.pt() > selectionConfig.cfgCutPT && std::abs(kCurrentDaughter.eta()) < selectionConfig.cfgCutEta) {
               daughtm = true;
             }
             if (!genacceptancecut) {
@@ -1174,11 +1281,11 @@ struct phianalysisrun3_PbPb {
 
   } // process MC
   PROCESS_SWITCH(phianalysisrun3_PbPb, processMC, "Process Reconstructed", false);
-  void processGen(aod::McCollision const& mcCollision, aod::McParticles& mcParticles, const soa::SmallGroups<EventCandidatesMC>& collisions)
+  void processGen(aod::McCollision const& mcCollision, aod::McParticles const& mcParticles, const soa::SmallGroups<EventCandidatesMC>& collisions)
   {
 
     histos.fill(HIST("hMC"), 0.5);
-    if (std::abs(mcCollision.posZ()) < cfgCutVertex) {
+    if (std::abs(mcCollision.posZ()) < selectionConfig.cfgCutVertex) {
       histos.fill(HIST("hMC"), 1.5);
     }
     float imp = mcCollision.impactParameter();
@@ -1190,15 +1297,15 @@ struct phianalysisrun3_PbPb {
       if (cfgDoSel8 && !collision.sel8()) {
         continue;
       }
-      if (std::abs(collision.mcCollision().posZ()) > cfgCutVertex) {
+      if (std::abs(collision.mcCollision().posZ()) > selectionConfig.cfgCutVertex) {
         continue;
       }
 
-      if (additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
       int occupancy = collision.trackOccupancyInTimeRange();
-      if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+      if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
         continue;
       }
       histos.fill(HIST("hOccupancy1"), occupancy);
@@ -1270,15 +1377,15 @@ struct phianalysisrun3_PbPb {
     if (cfgDoSel8 && !collision.sel8()) {
       return;
     }
-    if (std::abs(collision.mcCollision().posZ()) > cfgCutVertex) {
+    if (std::abs(collision.mcCollision().posZ()) > selectionConfig.cfgCutVertex) {
       return;
     }
 
-    if (additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+    if (selectionConfig.additionalEvSel2 && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
       return;
     }
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
       return;
     }
     auto multiplicity = collision.centFT0C();
@@ -1396,26 +1503,26 @@ struct phianalysisrun3_PbPb {
     if (!collision.sel8()) {
       return;
     }
-    if (additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
+    if (selectionConfig.additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
       return;
     }
-    if (additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
+    if (selectionConfig.additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
       return;
     }
-    if (additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
+    if (selectionConfig.additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
       return;
     }
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+    if (selectionConfig.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
       return;
     }
-    if (additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+    if (selectionConfig.additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
       return;
     }
-    if (additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+    if (selectionConfig.additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
       return;
     }
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
       return;
     }
     float multiplicity{-1};
@@ -1508,7 +1615,7 @@ struct phianalysisrun3_PbPb {
 
     auto tracksTuple = std::make_tuple(RecTracks);
     BinningTypeVertexContributor1 binningOnPositions{{axisVertex, axisMultiplicity}, true};
-    SameKindPair<EventCandidatesMC, TrackCandidatesMC, BinningTypeVertexContributor1> pairs{binningOnPositions, cfgNoMixedEvents, -1, recCollisions, tracksTuple, &cache};
+    SameKindPair<EventCandidatesMC, TrackCandidatesMC, BinningTypeVertexContributor1> pairs{binningOnPositions, selectionConfig.cfgNoMixedEvents, -1, recCollisions, tracksTuple, &cache};
 
     for (const auto& [c1, tracks1, c2, tracks2] : pairs) {
       if (!c1.sel8()) {
@@ -1517,30 +1624,30 @@ struct phianalysisrun3_PbPb {
       if (!c2.sel8()) {
         continue;
       }
-      if (additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
+      if (selectionConfig.additionalEvSel1 && (!c1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !c2.selection_bit(aod::evsel::kNoTimeFrameBorder))) {
         continue;
       }
-      if (additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      if (selectionConfig.additionalEvSel2 && (!c1.selection_bit(aod::evsel::kNoITSROFrameBorder) || !c2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
         continue;
       }
-      if (additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
+      if (selectionConfig.additionalEvSel3 && (!c1.selection_bit(aod::evsel::kNoSameBunchPileup) || !c2.selection_bit(aod::evsel::kNoSameBunchPileup))) {
         continue;
       }
-      if (additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
+      if (selectionConfig.additionalEvSel4 && (!c1.selection_bit(aod::evsel::kIsGoodITSLayersAll) || !c2.selection_bit(aod::evsel::kIsGoodITSLayersAll))) {
         continue;
       }
-      if (additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
+      if (selectionConfig.additionalEvSel5 && (!c1.selection_bit(aod::evsel::kNoCollInTimeRangeStandard) || !c2.selection_bit(aod::evsel::kNoCollInTimeRangeStandard))) {
         continue;
       }
-      if (additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      if (selectionConfig.additionalEvSel6 && (!c1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV) || !c2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
         continue;
       }
       int occupancy1 = c1.trackOccupancyInTimeRange();
       int occupancy2 = c2.trackOccupancyInTimeRange();
-      if (fillOccupancy && (occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy)) {
+      if (selectionConfig.fillOccupancy && (occupancy1 < cfgMinOccupancy || occupancy1 > cfgMaxOccupancy)) {
         continue;
       }
-      if (fillOccupancy && (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy)) {
+      if (selectionConfig.fillOccupancy && (occupancy2 < cfgMinOccupancy || occupancy2 > cfgMaxOccupancy)) {
         continue;
       }
 
@@ -1588,54 +1695,77 @@ struct phianalysisrun3_PbPb {
     }
   }
   PROCESS_SWITCH(phianalysisrun3_PbPb, processMixedEventMC, "Process Mixed event MC", true);
-  void processGen1(aod::McCollision const& mcCollision, aod::McParticles& mcParticles, const soa::SmallGroups<EventCandidatesMC>& collisions)
+  void processGen1(McCollisionMults::iterator const& mcCollision, aod::McParticles const& mcParticles, const soa::SmallGroups<EventCandidatesMC>& collisions)
   {
+    // all events
     histos.fill(HIST("hMC1"), 0.5);
-    if (std::abs(mcCollision.posZ()) < cfgCutVertex) {
+
+    // vertex QA (not selection)
+    if (!selectionConfig.cutvzgen ||
+        std::abs(mcCollision.posZ()) < selectionConfig.cfgCutVertex) {
       histos.fill(HIST("hMC1"), 1.5);
     }
+
+    // INEL>0 selection
+    if (isApplyInelgt0 && !mcCollision.isInelGt0())
+      return;
+
+    histos.fill(HIST("hMC1"), 2.5);
+
+    // TVX selection
+    if (isApplyTVX &&
+        !(mcCollision.multMCFT0C() > 0 && mcCollision.multMCFT0A() > 0))
+      return;
+
+    histos.fill(HIST("hMC1"), 3.5);
     std::vector<int64_t> selectedEvents(collisions.size());
     int nevts = 0;
     auto multiplicity = -1.0;
     for (const auto& collision : collisions) {
-      histos.fill(HIST("hMC1"), 2.5);
+      histos.fill(HIST("hMC1"), 4.5);
       if (cfgDoSel8 && !collision.sel8()) {
         continue;
       }
-      if (std::abs(collision.mcCollision().posZ()) > cfgCutVertex) {
+      histos.fill(HIST("hMC1"), 5.5);
+      if (selectionConfig.cutvz &&
+          std::abs(collision.mcCollision().posZ()) > selectionConfig.cfgCutVertex) {
         continue;
       }
 
-      histos.fill(HIST("hMC1"), 3.5);
-      if (additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
-        continue;
-      }
-      histos.fill(HIST("hMC1"), 4.5);
-      if (additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
-        continue;
-      }
-      histos.fill(HIST("hMC1"), 5.5);
-      if (additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
-        continue;
-      }
       histos.fill(HIST("hMC1"), 6.5);
-      if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+      if (selectionConfig.additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
         continue;
       }
       histos.fill(HIST("hMC1"), 7.5);
-      if (additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+      if (selectionConfig.additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
         continue;
       }
       histos.fill(HIST("hMC1"), 8.5);
-      if (additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+      if (selectionConfig.additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
         continue;
       }
       histos.fill(HIST("hMC1"), 9.5);
-      int occupancy = collision.trackOccupancyInTimeRange();
-      if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+      if (selectionConfig.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
         continue;
       }
       histos.fill(HIST("hMC1"), 10.5);
+      if (selectionConfig.additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+        continue;
+      }
+      histos.fill(HIST("hMC1"), 11.5);
+      if (selectionConfig.additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+        continue;
+      }
+      histos.fill(HIST("hMC1"), 12.5);
+      if (selectionConfig.isINELgt0 && !collision.isInelGt0()) {
+        continue;
+      }
+      histos.fill(HIST("hMC1"), 13.5);
+      int occupancy = collision.trackOccupancyInTimeRange();
+      if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+        continue;
+      }
+      histos.fill(HIST("hMC1"), 14.5);
       const int kCentFT0C = 0;
       const int kCentFT0A = 1;
       const int kCentFT0M = 2;
@@ -1655,11 +1785,11 @@ struct phianalysisrun3_PbPb {
     }
     selectedEvents.resize(nevts);
     const auto evtReconstructedAndSelected = std::find(selectedEvents.begin(), selectedEvents.end(), mcCollision.globalIndex()) != selectedEvents.end();
-    histos.fill(HIST("hMC1"), 11.5);
+    histos.fill(HIST("hMC1"), 15.5);
     if (!evtReconstructedAndSelected) { // Check that the event is reconstructed and that the reconstructed events pass the selection
       return;
     }
-    histos.fill(HIST("hMC1"), 12.5);
+    histos.fill(HIST("hMC1"), 16.5);
     for (const auto& mcParticle : mcParticles) {
 
       if (mcParticle.y() < rapiditycut1 || mcParticle.y() > rapiditycut2) {
@@ -1704,32 +1834,36 @@ struct phianalysisrun3_PbPb {
     if (cfgDoSel8 && !collision.sel8()) {
       return;
     }
-    if (std::abs(collision.mcCollision().posZ()) > cfgCutVertex) {
+    if (selectionConfig.cutvz &&
+        std::abs(collision.mcCollision().posZ()) > selectionConfig.cfgCutVertex) {
       return;
     }
-    if (additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
-      return;
-    }
-
-    if (additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
+    if (selectionConfig.additionalEvSel1 && !collision.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
       return;
     }
 
-    if (additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
+    if (selectionConfig.additionalEvSel2 && !collision.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
       return;
     }
 
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+    if (selectionConfig.additionalEvSel3 && !collision.selection_bit(aod::evsel::kNoSameBunchPileup)) {
       return;
     }
-    if (additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+
+    if (selectionConfig.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
       return;
     }
-    if (additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+    if (selectionConfig.additionalEvSel5 && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+      return;
+    }
+    if (selectionConfig.additionalEvSel6 && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+      return;
+    }
+    if (selectionConfig.isINELgt0 && !collision.isInelGt0()) {
       return;
     }
     int occupancy = collision.trackOccupancyInTimeRange();
-    if (fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
+    if (selectionConfig.fillOccupancy && (occupancy < cfgMinOccupancy || occupancy > cfgMaxOccupancy)) {
       return;
     }
     const int kCentFT0C = 0;
@@ -1747,7 +1881,7 @@ struct phianalysisrun3_PbPb {
       multiplicity = collision.centFV0A();
     }
     histos.fill(HIST("Centrec1"), multiplicity);
-    histos.fill(HIST("hMC1"), 13.5);
+    histos.fill(HIST("hMC1"), 17.5);
     auto oldindex = -999;
     for (const auto& track1 : tracks) {
       if (!selectionTrack(track1)) {
@@ -1841,44 +1975,168 @@ struct phianalysisrun3_PbPb {
   }
 
   PROCESS_SWITCH(phianalysisrun3_PbPb, processRec1, "Process Reconstructed", false);
-  void processEvtLossSigLossMC(aod::McCollisions::iterator const& mcCollision, aod::McParticles const& mcParticles, const soa::SmallGroups<EventCandidatesMC>& recCollisions)
+  void processEvtLossSigLossMC(McCollisionMults::iterator const& mcCollision, aod::McParticles const& mcParticles, const soa::SmallGroups<EventCandidatesMC>& recCollisions)
   {
 
+    if (selectionConfig.cutvzgen &&
+        std::abs(mcCollision.posZ()) > selectionConfig.cfgCutVertex) {
+      return;
+    }
+    if (isApplyInelgt0 && !mcCollision.isInelGt0()) {
+      return;
+    }
+
+    if (isApplyTVX && !(mcCollision.multMCFT0C() > 0 && mcCollision.multMCFT0A() > 0)) {
+      return;
+    }
     // Event loss estimation
     auto impactPar = mcCollision.impactParameter();
     histos.fill(HIST("QAevent/hImpactParameterGen"), impactPar);
-
+    histos.fill(HIST("QAevent/hMultEta05Gen"), mcCollision.multMCNParticlesEta05());
+    histos.fill(HIST("QAevent/hMultEta08Gen"), mcCollision.multMCNParticlesEta08());
     bool isSel = false;
     auto centrality = -999.;
     for (const auto& RecCollision : recCollisions) {
       if (!myEventSelections(RecCollision))
         continue;
-      centrality = RecCollision.centFT0C();
+      const int kCentFT0C = 0;
+      const int kCentFT0A = 1;
+      const int kCentFT0M = 2;
+      const int kCentFV0A = 3;
+
+      if (centestimator == kCentFT0C) {
+        centrality = RecCollision.centFT0C();
+
+      } else if (centestimator == kCentFT0A) {
+        centrality = RecCollision.centFT0A();
+
+      } else if (centestimator == kCentFT0M) {
+        centrality = RecCollision.centFT0M();
+
+      } else if (centestimator == kCentFV0A) {
+        centrality = RecCollision.centFV0A();
+      }
+
       isSel = true;
     }
 
     if (isSel) {
       histos.fill(HIST("QAevent/hImpactParameterRec"), impactPar);
       histos.fill(HIST("QAevent/hImpactParvsCentrRec"), centrality, impactPar);
+      histos.fill(HIST("QAevent/hMultEta05Rec"), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("QAevent/hMultEta05vsCentrRec"), centrality, mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("QAevent/hMultEta08Rec"), mcCollision.multMCNParticlesEta08());
+      histos.fill(HIST("QAevent/hMultEta08vsCentrRec"), centrality, mcCollision.multMCNParticlesEta08());
     }
 
     // Generated MC
     for (const auto& mcPart : mcParticles) {
-      const double kMaxRapidity = 0.5;
+      if (mcPart.y() < rapiditycut1 || mcPart.y() > rapiditycut2)
+        continue;
 
-      if (std::abs(mcPart.y()) >= kMaxRapidity || std::abs(mcPart.pdgCode()) != o2::constants::physics::kPhi)
-
+      // select phi meson
+      if (std::abs(mcPart.pdgCode()) != o2::constants::physics::kPhi)
         continue;
 
       // signal loss estimation
       histos.fill(HIST("QAevent/phigenBeforeEvtSel"), mcPart.pt(), impactPar);
+      histos.fill(HIST("QAevent/hgendndetaVsMultEta05BeforeEvtSel"), mcPart.pt(), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("QAevent/hgendndetaVsMultEta08BeforeEvtSel"), mcPart.pt(), mcCollision.multMCNParticlesEta08());
       if (isSel) {
         // signal loss estimation
         histos.fill(HIST("QAevent/phigenAfterEvtSel"), mcPart.pt(), impactPar);
+        histos.fill(HIST("QAevent/hgendndetaVsMultEta05AfterEvtSel"), mcPart.pt(), mcCollision.multMCNParticlesEta05());
+        histos.fill(HIST("QAevent/hgendndetaVsMultEta08AfterEvtSel"), mcPart.pt(), mcCollision.multMCNParticlesEta08());
       }
     } // end loop on gen particles
   }
   PROCESS_SWITCH(phianalysisrun3_PbPb, processEvtLossSigLossMC, "Process Signal Loss, Event Loss", false);
+  void processEvtLossSigLossMC1(McCollisionMults::iterator const& mcCollision, soa::SmallGroups<EventCandidatesMC> const& collisions, aod::McParticles const& GenParticles)
+  {
+    if (selectionConfig.cutvzgen &&
+        std::abs(mcCollision.posZ()) > selectionConfig.cfgCutVertex) {
+      return;
+    }
+    if (isApplyInelgt0 && !mcCollision.isInelGt0()) {
+      return;
+    }
+
+    if (isApplyTVX && !(mcCollision.multMCFT0C() > 0 && mcCollision.multMCFT0A() > 0)) {
+      return;
+    }
+    // All generated events
+    histos.fill(HIST("MCEventHist"), 1);
+    histos.fill(HIST("hImpactParameterGen1"), mcCollision.impactParameter());
+    histos.fill(HIST("hMultEta05Gen"), mcCollision.multMCNParticlesEta05());
+    histos.fill(HIST("hMultGen"), selColMultMC(mcCollision));
+
+    if (collisions.size() == 0) {
+      histos.fill(HIST("MCEventHist"), 3);
+      histos.fill(HIST("hImpactParameterGenwithNoreco"), mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05GenwithNoreco"), mcCollision.multMCNParticlesEta05());
+    }
+    bool atLeastOne = false;
+    auto centrality = -999.;
+    for (auto const& collision : collisions) {
+      if (!myEventSelections(collision))
+        continue;
+      centrality = selColCent(collision);
+      atLeastOne = true;
+    }
+    // Generated events with at least one reconstructed collision (event loss estimation)
+    if (atLeastOne) {
+      histos.fill(HIST("MCEventHist"), 2);
+      histos.fill(HIST("hImpactParameterRec1"), mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05Rec"), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hMultRec"), selColMultMC(mcCollision));
+      histos.fill(HIST("hImpactParvsCentrRec"), centrality, mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05vsCentrRec"), centrality, mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hMultvsCentrRec"), centrality, selColMultMC(mcCollision));
+    }
+    for (const auto& particle : GenParticles) {
+
+      if (particle.y() < rapiditycut1 || particle.y() > rapiditycut2)
+        continue;
+
+      if (particle.pdgCode() != o2::constants::physics::kPhi)
+        continue;
+
+      auto daughters = particle.daughters_as<aod::McParticles>();
+      static constexpr int kPhiNDaughters = 2;
+      if (daughters.size() != kPhiNDaughters)
+        continue;
+
+      bool daup = false, daun = false;
+
+      for (const auto& dau : daughters) {
+        if (dau.pdgCode() == PDG_t::kKPlus) {
+          daup = true;
+          d1 = ROOT::Math::PxPyPzMVector(dau.px(), dau.py(), dau.pz(), massKa);
+        } else if (dau.pdgCode() == PDG_t::kKMinus) {
+          daun = true;
+          d2 = ROOT::Math::PxPyPzMVector(dau.px(), dau.py(), dau.pz(), massKa);
+        }
+      }
+
+      if (!daup || !daun)
+        continue;
+
+      mother = d1 + d2;
+
+      histos.fill(HIST("hgendndetaBeforeEvtSel"), mother.Pt());
+      histos.fill(HIST("hgendndetaVscentBeforeEvtSel"), mother.Pt(), mcCollision.impactParameter());
+      histos.fill(HIST("hgendndetaVsMultEta05BeforeEvtSel"), mother.Pt(), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hgendndetaVsMultBeforeEvtSel"), mother.Pt(), selColMultMC(mcCollision));
+
+      if (atLeastOne) {
+        histos.fill(HIST("hgendndetaAfterEvtSel"), mother.Pt());
+        histos.fill(HIST("hgendndetaVscentAfterEvtSel"), mother.Pt(), mcCollision.impactParameter());
+        histos.fill(HIST("hgendndetaVsMultEta05AfterEvtSel"), mother.Pt(), mcCollision.multMCNParticlesEta05());
+        histos.fill(HIST("hgendndetaVsMultAfterEvtSel"), mother.Pt(), selColMultMC(mcCollision));
+      }
+    }
+  }
+  PROCESS_SWITCH(phianalysisrun3_PbPb, processEvtLossSigLossMC1, "Process Signal Loss, Event Loss", false);
 };
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {

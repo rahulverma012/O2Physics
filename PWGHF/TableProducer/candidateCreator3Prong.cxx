@@ -21,7 +21,10 @@
 
 #include "PWGHF/Core/CentralityEstimation.h"
 #include "PWGHF/Core/DecayChannels.h"
+#include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
+#include "PWGHF/DataModel/TrackIndexSkimmingTables.h"
 #include "PWGHF/Utils/utilsBfieldCCDB.h"
 #include "PWGHF/Utils/utilsEvSelHf.h"
 #include "PWGHF/Utils/utilsMcGen.h"
@@ -31,6 +34,7 @@
 #include "PWGLF/DataModel/mcCentrality.h"
 
 #include "Common/Core/RecoDecay.h"
+#include "Common/Core/ZorroSummary.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
@@ -44,6 +48,7 @@
 #include <Framework/AnalysisDataModel.h>
 #include <Framework/AnalysisHelpers.h>
 #include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
 #include <Framework/Configurable.h>
 #include <Framework/DeviceSpec.h>
 #include <Framework/HistogramRegistry.h>
@@ -75,6 +80,7 @@
 #include <vector>
 
 using namespace o2;
+using namespace o2::analysis;
 using namespace o2::hf_evsel;
 using namespace o2::hf_trkcandsel;
 using namespace o2::aod::hf_cand_3prong;
@@ -94,12 +100,24 @@ struct HfCandidateCreator3Prong {
   Produces<aod::HfCand3Prong0PidPi> rowProng0PidPi;
   Produces<aod::HfCand3Prong0PidKa> rowProng0PidKa;
   Produces<aod::HfCand3Prong0PidPr> rowProng0PidPr;
+  Produces<aod::HfCand3Prong0PidDe> rowProng0PidDe;
+  Produces<aod::HfCand3Prong0PidTr> rowProng0PidTr;
+  Produces<aod::HfCand3Prong0PidHe> rowProng0PidHe;
+  Produces<aod::HfCand3Prong0PidAl> rowProng0PidAl;
   Produces<aod::HfCand3Prong1PidPi> rowProng1PidPi;
   Produces<aod::HfCand3Prong1PidKa> rowProng1PidKa;
   Produces<aod::HfCand3Prong1PidPr> rowProng1PidPr;
+  Produces<aod::HfCand3Prong1PidDe> rowProng1PidDe;
+  Produces<aod::HfCand3Prong1PidTr> rowProng1PidTr;
+  Produces<aod::HfCand3Prong1PidHe> rowProng1PidHe;
+  Produces<aod::HfCand3Prong1PidAl> rowProng1PidAl;
   Produces<aod::HfCand3Prong2PidPi> rowProng2PidPi;
   Produces<aod::HfCand3Prong2PidKa> rowProng2PidKa;
   Produces<aod::HfCand3Prong2PidPr> rowProng2PidPr;
+  Produces<aod::HfCand3Prong2PidDe> rowProng2PidDe;
+  Produces<aod::HfCand3Prong2PidTr> rowProng2PidTr;
+  Produces<aod::HfCand3Prong2PidHe> rowProng2PidHe;
+  Produces<aod::HfCand3Prong2PidAl> rowProng2PidAl;
 
   // vertexing
   Configurable<bool> propagateToPCA{"propagateToPCA", true, "create tracks version propagated to PCA"};
@@ -120,29 +138,33 @@ struct HfCandidateCreator3Prong {
   Configurable<bool> createDs{"createDs", false, "enable Ds+/- candidate creation"};
   Configurable<bool> createLc{"createLc", false, "enable Lc+/- candidate creation"};
   Configurable<bool> createXic{"createXic", false, "enable Xic+/- candidate creation"};
+  Configurable<bool> createCharmNuclei{"createCharmNuclei", false, "enable createCharmNuclei candidate creation"};
   // KF
   Configurable<bool> applyTopoConstraint{"applyTopoConstraint", false, "apply origin from PV hypothesis for created candidate, works only in KF mode"};
   Configurable<bool> applyInvMassConstraint{"applyInvMassConstraint", false, "apply particle type hypothesis to recalculate created candidate's momentum, works only in KF mode"};
 
+  Configurable<LabeledArray<float>> tpcPidBBParamsLightNuclei{"tpcPidBBParamsLightNuclei", {hf_presel_lightnuclei::BetheBlochParams[0], hf_presel_lightnuclei::NParticleRows, hf_presel_lightnuclei::NBetheBlochParams, hf_presel_lightnuclei::labelsRowsNucleiType, hf_presel_lightnuclei::labelsBetheBlochParams}, "TPC PID Bethe–Bloch parameter configurations for light nuclei (deuteron, triton, helium-3)"};
+
   HfEventSelection hfEvSel;        // event selection and monitoring
   o2::vertexing::DCAFitterN<3> df; // 3-prong vertex fitter
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
 
   int runNumber{0};
   double bz{0.};
 
-  const float toMicrometers = 10000.; // from cm to µm
+  constexpr static float CentiToMicro{10000.f}; // from cm to µm
   constexpr static float UndefValueFloat{-999.f};
 
   using FilteredHf3Prongs = soa::Filtered<aod::Hf3Prongs>;
   using FilteredPvRefitHf3Prongs = soa::Filtered<soa::Join<aod::Hf3Prongs, aod::HfPvRefit3Prong>>;
-  using TracksWCovExtraPidPiKaPr = soa::Join<aod::TracksWCovExtra, aod::TracksPidPi, aod::PidTpcTofFullPi, aod::TracksPidKa, aod::PidTpcTofFullKa, aod::TracksPidPr, aod::PidTpcTofFullPr>;
+  using TracksWCovExtraPidPiKaPrLightNuclei = soa::Join<aod::TracksWCovExtra, aod::TracksPidPi, aod::PidTpcTofFullPi, aod::TracksPidKa, aod::PidTpcTofFullKa, aod::TracksPidPr, aod::PidTpcTofFullPr, aod::TracksPidDe, aod::PidTpcTofFullDe, aod::TracksPidHe, aod::PidTpcTofFullHe, aod::TracksPidTr, aod::PidTpcTofFullTr, aod::TracksPidAl, aod::PidTpcTofFullAl>;
 
   // filter candidates
-  Filter filterSelected3Prongs = (createDplus && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::DplusToPiKPi))) != static_cast<uint8_t>(0)) || (createDs && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::DsToKKPi))) != static_cast<uint8_t>(0)) || (createLc && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::LcToPKPi))) != static_cast<uint8_t>(0)) || (createXic && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::XicToPKPi))) != static_cast<uint8_t>(0));
+  Filter filterSelected3Prongs = (createDplus && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::DplusToPiKPi))) != static_cast<uint8_t>(0)) || (createDs && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::DsToKKPi))) != static_cast<uint8_t>(0)) || (createLc && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::LcToPKPi))) != static_cast<uint8_t>(0)) || (createXic && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::XicToPKPi))) != static_cast<uint8_t>(0)) || (createCharmNuclei && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::CdToDeKPi))) != static_cast<uint8_t>(0)) || (createCharmNuclei && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::CtToTrKPi))) != static_cast<uint8_t>(0)) || (createCharmNuclei && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::ChToHeKPi))) != static_cast<uint8_t>(0)) || (createCharmNuclei && (o2::aod::hf_track_index::hfflag & static_cast<uint8_t>(BIT(DecayType::CaToAlKPi))) != static_cast<uint8_t>(0));
 
   std::shared_ptr<TH1> hCandidates;
   HistogramRegistry registry{"registry"};
+  OutputObj<ZorroSummary> zorroSummary{"zorroSummary"};
 
   void init(InitContext const&)
   {
@@ -181,13 +203,13 @@ struct HfCandidateCreator3Prong {
     if (nProcessesUpc > 0 && isRun2) {
       LOGP(fatal, "Process function for UPC is only available in Run 3!");
     }
-    std::array<bool, 4> creationFlags = {createDplus, createDs, createLc, createXic};
+    std::array<bool, 5> creationFlags = {createDplus, createDs, createLc, createXic, createCharmNuclei};
     if (std::accumulate(creationFlags.begin(), creationFlags.end(), 0) == 0) {
       LOGP(fatal, "At least one particle specie should be enabled for the creation.");
     }
 
     if (createLc && createXic && applyInvMassConstraint) {
-      LOGP(fatal, "Unable to apply invariant mass constraint due to ambiguity of mass hypothesis: only one of Lc and Xic can be reconstructed.");
+      LOGP(fatal, "Unable to apply invariant mass constraint due to ambiguity of mass hypothesis: only one of Lc and Xic and Cd can be reconstructed.");
     }
 
     // histograms
@@ -196,6 +218,8 @@ struct HfCandidateCreator3Prong {
     registry.add("hMass3PiKPi", "3-prong candidates;inv. mass (#pi K#pi) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{600, 1.6, 2.2}}});
     registry.add("hMass3KKPi", "3-prong candidates;inv. mass (KK #pi) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{600, 1.7, 2.3}}});
     registry.add("hMass3PiKK", "3-prong candidates;inv. mass (#pi KK) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{600, 1.7, 2.3}}});
+    registry.add("hMass3DeKPi", "3-prong candidates;inv. mass (deK#pi) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{2000, 2.5, 4.5}}});
+    registry.add("hMass3PiKDe", "3-prong candidates;inv. mass (#pi Kde) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{2000, 2.5, 4.5}}});
     registry.add("hMass2KPi", "2-prong pairs;inv. mass (K#pi) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{1200, 0.8, 2.0}}});
     registry.add("hMass2PiK", "2-prong pairs;inv. mass (#pi K) (GeV/#it{c}^{2});entries", {HistType::kTH1D, {{1200, 0.8, 2.0}}});
     registry.add("hCovPVXX", "3-prong candidates;XX element of cov. matrix of prim. vtx. position (cm^{2});entries", {HistType::kTH1F, {{100, 0., 1.e-4}}});
@@ -211,15 +235,15 @@ struct HfCandidateCreator3Prong {
     hCandidates = registry.add<TH1>("hCandidates", "candidates counter", {HistType::kTH1D, {axisCands}});
 
     // init HF event selection helper
-    hfEvSel.init(registry);
+    hfEvSel.init(registry, &zorroSummary);
 
     // Configure DCAFitterN
     // df.setBz(bz);
     df.setPropagateToPCA(propagateToPCA);
-    df.setMaxR(maxR);
-    df.setMaxDZIni(maxDZIni);
-    df.setMinParamChange(minParamChange);
-    df.setMinRelChi2Change(minRelChi2Change);
+    df.setMaxR(static_cast<float>(maxR));
+    df.setMaxDZIni(static_cast<float>(maxDZIni));
+    df.setMinParamChange(static_cast<float>(minParamChange));
+    df.setMinRelChi2Change(static_cast<float>(minRelChi2Change));
     df.setUseAbsDCA(useAbsDCA);
     df.setWeightedFinalPCA(useWeightedFinalPCA);
 
@@ -248,12 +272,26 @@ struct HfCandidateCreator3Prong {
       fillProngPid<HfProngSpecies::Proton>(track1, rowProng1PidPr);
       fillProngPid<HfProngSpecies::Proton>(track2, rowProng2PidPr);
     }
+    if (createCharmNuclei) {
+      fillProngPidLightNuclei<HfProngSpecies::Deuteron>(track0, rowProng0PidDe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Deuteron>(track1, rowProng1PidDe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Deuteron>(track2, rowProng2PidDe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Helium3>(track0, rowProng0PidHe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Helium3>(track1, rowProng1PidHe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Helium3>(track2, rowProng2PidHe, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Triton>(track0, rowProng0PidTr, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Triton>(track1, rowProng1PidTr, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Triton>(track2, rowProng2PidTr, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Alpha>(track0, rowProng0PidAl, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Alpha>(track1, rowProng1PidAl, tpcPidBBParamsLightNuclei);
+      fillProngPidLightNuclei<HfProngSpecies::Alpha>(track2, rowProng2PidAl, tpcPidBBParamsLightNuclei);
+    }
   }
 
   template <bool DoPvRefit, bool ApplyUpcSel, o2::hf_centrality::CentralityEstimator CentEstimator, typename Coll, typename Cand, typename BCsType>
   void runCreator3ProngWithDCAFitterN(Coll const&,
                                       Cand const& rowsTrackIndexProng3,
-                                      TracksWCovExtraPidPiKaPr const&,
+                                      TracksWCovExtraPidPiKaPrLightNuclei const&,
                                       BCsType const& bcs)
   {
     // loop over triplets of track indices
@@ -273,9 +311,9 @@ struct HfCandidateCreator3Prong {
         continue;
       }
 
-      auto track0 = rowTrackIndexProng3.template prong0_as<TracksWCovExtraPidPiKaPr>();
-      auto track1 = rowTrackIndexProng3.template prong1_as<TracksWCovExtraPidPiKaPr>();
-      auto track2 = rowTrackIndexProng3.template prong2_as<TracksWCovExtraPidPiKaPr>();
+      auto track0 = rowTrackIndexProng3.template prong0_as<TracksWCovExtraPidPiKaPrLightNuclei>();
+      auto track1 = rowTrackIndexProng3.template prong1_as<TracksWCovExtraPidPiKaPrLightNuclei>();
+      auto track2 = rowTrackIndexProng3.template prong2_as<TracksWCovExtraPidPiKaPrLightNuclei>();
       auto trackParVar0 = getTrackParCov(track0);
       auto trackParVar1 = getTrackParCov(track1);
       auto trackParVar2 = getTrackParCov(track2);
@@ -292,7 +330,7 @@ struct HfCandidateCreator3Prong {
         // df.setBz(bz); /// put it outside the 'if'! Otherwise we have a difference wrt bz Configurable (< 1 permille) in Run2 conv. data
         // df.print();
       }
-      df.setBz(bz);
+      df.setBz(static_cast<float>(bz));
 
       // reconstruct the 3-prong secondary vertex
       hCandidates->Fill(SVFitting::BeforeFit);
@@ -356,15 +394,15 @@ struct HfCandidateCreator3Prong {
       trackParVar0.propagateToDCA(primaryVertex, bz, &impactParameter0);
       trackParVar1.propagateToDCA(primaryVertex, bz, &impactParameter1);
       trackParVar2.propagateToDCA(primaryVertex, bz, &impactParameter2);
-      registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0.getY() * toMicrometers);
-      registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1.getY() * toMicrometers);
-      registry.fill(HIST("hDcaXYProngs"), track2.pt(), impactParameter2.getY() * toMicrometers);
-      registry.fill(HIST("hDcaZProngs"), track0.pt(), impactParameter0.getZ() * toMicrometers);
-      registry.fill(HIST("hDcaZProngs"), track1.pt(), impactParameter1.getZ() * toMicrometers);
-      registry.fill(HIST("hDcaZProngs"), track2.pt(), impactParameter2.getZ() * toMicrometers);
+      registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0.getY() * CentiToMicro);
+      registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1.getY() * CentiToMicro);
+      registry.fill(HIST("hDcaXYProngs"), track2.pt(), impactParameter2.getY() * CentiToMicro);
+      registry.fill(HIST("hDcaZProngs"), track0.pt(), impactParameter0.getZ() * CentiToMicro);
+      registry.fill(HIST("hDcaZProngs"), track1.pt(), impactParameter1.getZ() * CentiToMicro);
+      registry.fill(HIST("hDcaZProngs"), track2.pt(), impactParameter2.getZ() * CentiToMicro);
 
       // get uncertainty of the decay length
-      double phi, theta;
+      double phi{}, theta{};
       getPointDirection(std::array{primaryVertex.getX(), primaryVertex.getY(), primaryVertex.getZ()}, secondaryVertex, phi, theta);
       auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixPCA, phi, theta));
       auto errorDecayLengthXY = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, 0.) + getRotatedCovMatrixXX(covMatrixPCA, phi, 0.));
@@ -410,6 +448,8 @@ struct HfCandidateCreator3Prong {
         const auto massPiKPi = RecoDecay::m(arrayMomenta, std::array{MassPiPlus, MassKPlus, MassPiPlus});
         const auto massKKPi = RecoDecay::m(arrayMomenta, std::array{MassKPlus, MassKPlus, MassPiPlus});
         const auto massPiKK = RecoDecay::m(arrayMomenta, std::array{MassPiPlus, MassKPlus, MassKPlus});
+        const auto massDeKPi = RecoDecay::m(arrayMomenta, std::array{MassDeuteron, MassKPlus, MassPiPlus});
+        const auto massPiKDe = RecoDecay::m(arrayMomenta, std::array{MassPiPlus, MassKPlus, MassDeuteron});
         const auto massKPi = RecoDecay::m(std::array{arrayMomenta.at(1), arrayMomenta.at(2)}, std::array{MassKPlus, MassPiPlus});
         const auto massPiK = RecoDecay::m(std::array{arrayMomenta.at(0), arrayMomenta.at(1)}, std::array{MassPiPlus, MassKPlus});
         registry.fill(HIST("hMass3PiKPi"), massPiKPi);
@@ -417,6 +457,8 @@ struct HfCandidateCreator3Prong {
         registry.fill(HIST("hMass3PiKP"), massPiKP);
         registry.fill(HIST("hMass3KKPi"), massKKPi);
         registry.fill(HIST("hMass3PiKK"), massPiKK);
+        registry.fill(HIST("hMass3DeKPi"), massDeKPi);
+        registry.fill(HIST("hMass3PiKDe"), massPiKDe);
         registry.fill(HIST("hMass2KPi"), massKPi);
         registry.fill(HIST("hMass2PiK"), massPiK);
       }
@@ -426,7 +468,7 @@ struct HfCandidateCreator3Prong {
   template <bool DoPvRefit, bool ApplyUpcSel, o2::hf_centrality::CentralityEstimator CentEstimator, typename Coll, typename Cand, typename BCsType>
   void runCreator3ProngWithKFParticle(Coll const&,
                                       Cand const& rowsTrackIndexProng3,
-                                      TracksWCovExtraPidPiKaPr const&,
+                                      TracksWCovExtraPidPiKaPrLightNuclei const&,
                                       BCsType const& bcs)
   {
     for (const auto& rowTrackIndexProng3 : rowsTrackIndexProng3) {
@@ -444,9 +486,9 @@ struct HfCandidateCreator3Prong {
         continue;
       }
 
-      auto track0 = rowTrackIndexProng3.template prong0_as<TracksWCovExtraPidPiKaPr>();
-      auto track1 = rowTrackIndexProng3.template prong1_as<TracksWCovExtraPidPiKaPr>();
-      auto track2 = rowTrackIndexProng3.template prong2_as<TracksWCovExtraPidPiKaPr>();
+      auto track0 = rowTrackIndexProng3.template prong0_as<TracksWCovExtraPidPiKaPrLightNuclei>();
+      auto track1 = rowTrackIndexProng3.template prong1_as<TracksWCovExtraPidPiKaPrLightNuclei>();
+      auto track2 = rowTrackIndexProng3.template prong2_as<TracksWCovExtraPidPiKaPrLightNuclei>();
 
       /// Set the magnetic field from ccdb.
       /// The static instance of the propagator was already modified in the HFTrackIndexSkimCreator,
@@ -462,7 +504,7 @@ struct HfCandidateCreator3Prong {
       }
       float covMatrixPV[6];
 
-      KFParticle::SetField(bz);
+      KFParticle::SetField(static_cast<float>(bz));
       KFPVertex kfpVertex = createKFPVertexFromCollision(collision);
 
       if constexpr (DoPvRefit) {
@@ -494,22 +536,22 @@ struct HfCandidateCreator3Prong {
 
       float impactParameter0XY = 0., errImpactParameter0XY = 0., impactParameter1XY = 0., errImpactParameter1XY = 0., impactParameter2XY = 0., errImpactParameter2XY = 0.;
       if (!kfFirstProton.GetDistanceFromVertexXY(kfpV, impactParameter0XY, errImpactParameter0XY)) {
-        registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0XY * toMicrometers);
-        registry.fill(HIST("hDcaZProngs"), track0.pt(), std::sqrt(kfFirstProton.GetDistanceFromVertex(kfpV) * kfFirstProton.GetDistanceFromVertex(kfpV) - impactParameter0XY * impactParameter0XY) * toMicrometers);
+        registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0XY * CentiToMicro);
+        registry.fill(HIST("hDcaZProngs"), track0.pt(), std::sqrt(kfFirstProton.GetDistanceFromVertex(kfpV) * kfFirstProton.GetDistanceFromVertex(kfpV) - impactParameter0XY * impactParameter0XY) * CentiToMicro);
       } else {
         registry.fill(HIST("hDcaXYProngs"), track0.pt(), UndefValueFloat);
         registry.fill(HIST("hDcaZProngs"), track0.pt(), UndefValueFloat);
       }
       if (!kfSecondKaon.GetDistanceFromVertexXY(kfpV, impactParameter1XY, errImpactParameter1XY)) {
-        registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1XY * toMicrometers);
-        registry.fill(HIST("hDcaZProngs"), track1.pt(), std::sqrt(kfSecondKaon.GetDistanceFromVertex(kfpV) * kfSecondKaon.GetDistanceFromVertex(kfpV) - impactParameter1XY * impactParameter1XY) * toMicrometers);
+        registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1XY * CentiToMicro);
+        registry.fill(HIST("hDcaZProngs"), track1.pt(), std::sqrt(kfSecondKaon.GetDistanceFromVertex(kfpV) * kfSecondKaon.GetDistanceFromVertex(kfpV) - impactParameter1XY * impactParameter1XY) * CentiToMicro);
       } else {
         registry.fill(HIST("hDcaXYProngs"), track1.pt(), UndefValueFloat);
         registry.fill(HIST("hDcaZProngs"), track1.pt(), UndefValueFloat);
       }
       if (!kfThirdProton.GetDistanceFromVertexXY(kfpV, impactParameter2XY, errImpactParameter2XY)) {
-        registry.fill(HIST("hDcaXYProngs"), track2.pt(), impactParameter2XY * toMicrometers);
-        registry.fill(HIST("hDcaZProngs"), track2.pt(), std::sqrt(kfThirdProton.GetDistanceFromVertex(kfpV) * kfThirdProton.GetDistanceFromVertex(kfpV) - impactParameter2XY * impactParameter2XY) * toMicrometers);
+        registry.fill(HIST("hDcaXYProngs"), track2.pt(), impactParameter2XY * CentiToMicro);
+        registry.fill(HIST("hDcaZProngs"), track2.pt(), std::sqrt(kfThirdProton.GetDistanceFromVertex(kfpV) * kfThirdProton.GetDistanceFromVertex(kfpV) - impactParameter2XY * impactParameter2XY) * CentiToMicro);
       } else {
         registry.fill(HIST("hDcaXYProngs"), track2.pt(), UndefValueFloat);
         registry.fill(HIST("hDcaZProngs"), track2.pt(), UndefValueFloat);
@@ -585,14 +627,14 @@ struct HfCandidateCreator3Prong {
       const float massPiK = kfPairPiK.GetMass();
 
       if (applyInvMassConstraint) { // constraints applied after minv getters - to preserve unbiased values of minv
-        kfCandPKPi.SetNonlinearMassConstraint(createLc ? MassLambdaCPlus : MassXiCPlus);
-        kfCandPiKP.SetNonlinearMassConstraint(createLc ? MassLambdaCPlus : MassXiCPlus);
-        kfCandPiKPi.SetNonlinearMassConstraint(MassDPlus);
-        kfCandKKPi.SetNonlinearMassConstraint(MassDS);
-        kfCandPiKK.SetNonlinearMassConstraint(MassDS);
+        kfCandPKPi.SetNonlinearMassConstraint(createLc ? static_cast<float>(MassLambdaCPlus) : static_cast<float>(MassXiCPlus));
+        kfCandPiKP.SetNonlinearMassConstraint(createLc ? static_cast<float>(MassLambdaCPlus) : static_cast<float>(MassXiCPlus));
+        kfCandPiKPi.SetNonlinearMassConstraint(static_cast<float>(MassDPlus));
+        kfCandKKPi.SetNonlinearMassConstraint(static_cast<float>(MassDS));
+        kfCandPiKK.SetNonlinearMassConstraint(static_cast<float>(MassDS));
       }
 
-      const float chi2geo = kfCandPKPi.Chi2() / kfCandPKPi.NDF();
+      const float chi2geo = kfCandPKPi.Chi2() / static_cast<float>(kfCandPKPi.NDF());
       const std::pair<float, float> ldl = kfCalculateLdL(kfCandPKPi, kfpV);
 
       std::array<float, 3> pProng0 = kfCalculateProngMomentumInSecondaryVertex(kfFirstProton, kfCandPiKP);
@@ -605,7 +647,7 @@ struct HfCandidateCreator3Prong {
       registry.fill(HIST("hCovSVZZ"), kfCandPKPi.Covariance(2, 2));
 
       auto* covMatrixSV = kfCandPKPi.CovarianceMatrix();
-      double phi, theta;
+      double phi{}, theta{};
       getPointDirection(std::array{kfpV.GetX(), kfpV.GetY(), kfpV.GetZ()}, std::array{kfCandPKPi.GetX(), kfCandPKPi.GetY(), kfCandPKPi.GetZ()}, phi, theta);
       auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixSV, phi, theta));
       auto errorDecayLengthXY = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, 0.) + getRotatedCovMatrixXX(covMatrixSV, phi, 0.));
@@ -628,7 +670,7 @@ struct HfCandidateCreator3Prong {
                        kfpV.GetX(), kfpV.GetY(), kfpV.GetZ(),
                        kfCandPKPi.GetX(), kfCandPKPi.GetY(), kfCandPKPi.GetZ(),
                        errorDecayLength, errorDecayLengthXY,
-                       kfCandPKPi.GetChi2() / kfCandPKPi.GetNDF(),
+                       kfCandPKPi.GetChi2() / static_cast<float>(kfCandPKPi.GetNDF()),
                        pProng0.at(0), pProng0.at(1), pProng0.at(2),
                        pProng1.at(0), pProng1.at(1), pProng1.at(2),
                        pProng2.at(0), pProng2.at(1), pProng2.at(2),
@@ -675,7 +717,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/ PV refit and w/o centrality selections
   void processPvRefitWithDCAFitterN(soa::Join<aod::Collisions, aod::EvSels> const& collisions,
                                     FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                    TracksWCovExtraPidPiKaPr const& tracks,
+                                    TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                     aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ true, false, CentralityEstimator::None>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -685,7 +727,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/o PV refit and w/o centrality selections
   void processNoPvRefitWithDCAFitterN(soa::Join<aod::Collisions, aod::EvSels> const& collisions,
                                       FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                      TracksWCovExtraPidPiKaPr const& tracks,
+                                      TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                       aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ false, false, CentralityEstimator::None>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -695,7 +737,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/ PV refit and w/o centrality selections
   void processPvRefitWithKFParticle(soa::Join<aod::Collisions, aod::EvSels> const& collisions,
                                     FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                    TracksWCovExtraPidPiKaPr const& tracks,
+                                    TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                     aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ true, false, CentralityEstimator::None>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -705,7 +747,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/o PV refit and w/o centrality selections
   void processNoPvRefitWithKFParticle(soa::Join<aod::Collisions, aod::EvSels> const& collisions,
                                       FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                      TracksWCovExtraPidPiKaPr const& tracks,
+                                      TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                       aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ false, false, CentralityEstimator::None>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -721,7 +763,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/ PV refit and w/ centrality selection on FT0C
   void processPvRefitWithDCAFitterNCentFT0C(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs> const& collisions,
                                             FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                            TracksWCovExtraPidPiKaPr const& tracks,
+                                            TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                             aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ true, false, CentralityEstimator::FT0C>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -731,7 +773,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/o PV refit and  w/ centrality selection on FT0C
   void processNoPvRefitWithDCAFitterNCentFT0C(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs> const& collisions,
                                               FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                              TracksWCovExtraPidPiKaPr const& tracks,
+                                              TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                               aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ false, false, CentralityEstimator::FT0C>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -741,7 +783,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/ PV refit and w/ centrality selection on FT0C
   void processPvRefitWithKFParticleCentFT0C(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs> const& collisions,
                                             FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                            TracksWCovExtraPidPiKaPr const& tracks,
+                                            TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                             aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ true, false, CentralityEstimator::FT0C>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -751,7 +793,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/o PV refit and  w/ centrality selection on FT0C
   void processNoPvRefitWithKFParticleCentFT0C(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs> const& collisions,
                                               FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                              TracksWCovExtraPidPiKaPr const& tracks,
+                                              TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                               aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ false, false, CentralityEstimator::FT0C>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -767,7 +809,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/ PV refit and w/ centrality selection on FT0M
   void processPvRefitWithDCAFitterNCentFT0M(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                             FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                            TracksWCovExtraPidPiKaPr const& tracks,
+                                            TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                             aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ true, false, CentralityEstimator::FT0M>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -777,7 +819,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/o PV refit and  w/ centrality selection on FT0M
   void processNoPvRefitWithDCAFitterNCentFT0M(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                               FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                              TracksWCovExtraPidPiKaPr const& tracks,
+                                              TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                               aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithDCAFitterN</*doPvRefit*/ false, false, CentralityEstimator::FT0M>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -787,7 +829,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/ PV refit and w/ centrality selection on FT0M
   void processPvRefitWithKFParticleCentFT0M(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                             FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                            TracksWCovExtraPidPiKaPr const& tracks,
+                                            TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                             aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ true, false, CentralityEstimator::FT0M>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -797,7 +839,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/o PV refit and  w/ centrality selection on FT0M
   void processNoPvRefitWithKFParticleCentFT0M(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                               FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                              TracksWCovExtraPidPiKaPr const& tracks,
+                                              TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                               aod::BCsWithTimestamps const& bcWithTimeStamps)
   {
     runCreator3ProngWithKFParticle</*doPvRefit*/ false, false, CentralityEstimator::FT0M>(collisions, rowsTrackIndexProng3, tracks, bcWithTimeStamps);
@@ -813,7 +855,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/ PV refit and w/ centrality selection on UPC
   void processPvRefitWithDCAFitterNUpc(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                        FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                       TracksWCovExtraPidPiKaPr const& tracks,
+                                       TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                        aod::BcFullInfos const& bcWithTimeStamps,
                                        aod::FT0s const& /*ft0s*/,
                                        aod::FV0As const& /*fv0as*/,
@@ -827,7 +869,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using DCA fitter  w/o PV refit and  w/ centrality selection on UPC
   void processNoPvRefitWithDCAFitterNUpc(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                          FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                         TracksWCovExtraPidPiKaPr const& tracks,
+                                         TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                          aod::BcFullInfos const& bcWithTimeStamps,
                                          aod::FT0s const& /*ft0s*/,
                                          aod::FV0As const& /*fv0as*/,
@@ -841,7 +883,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/ PV refit and w/ centrality selection on UPC
   void processPvRefitWithKFParticleUpc(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                        FilteredPvRefitHf3Prongs const& rowsTrackIndexProng3,
-                                       TracksWCovExtraPidPiKaPr const& tracks,
+                                       TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                        aod::BcFullInfos const& bcWithTimeStamps,
                                        aod::FT0s const& /*ft0s*/,
                                        aod::FV0As const& /*fv0as*/,
@@ -855,7 +897,7 @@ struct HfCandidateCreator3Prong {
   /// @brief process function using KFParticle package  w/o PV refit and  w/ centrality selection on UPC
   void processNoPvRefitWithKFParticleUpc(soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Ms> const& collisions,
                                          FilteredHf3Prongs const& rowsTrackIndexProng3,
-                                         TracksWCovExtraPidPiKaPr const& tracks,
+                                         TracksWCovExtraPidPiKaPrLightNuclei const& tracks,
                                          aod::BcFullInfos const& bcWithTimeStamps,
                                          aod::FT0s const& /*ft0s*/,
                                          aod::FV0As const& /*fv0as*/,
@@ -882,9 +924,10 @@ struct HfCandidateCreator3Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::None, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, static_cast<float>(ir));
 
     } /// end loop over collisions
   }
@@ -900,9 +943,10 @@ struct HfCandidateCreator3Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0C, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, static_cast<float>(ir));
 
     } /// end loop over collisions
   }
@@ -918,9 +962,10 @@ struct HfCandidateCreator3Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0M, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, static_cast<float>(ir));
 
     } /// end loop over collisions
   }
@@ -941,9 +986,10 @@ struct HfCandidateCreator3Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMaskWithUpc<true, CentralityEstimator::None, aod::BcFullInfos>(collision, centrality, ccdb, registry, bcs);
-
+      const auto bc = collision.template foundBC_as<aod::BcFullInfos>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, static_cast<float>(ir));
 
     } /// end loop over collisions
   }
@@ -1109,10 +1155,10 @@ struct HfCandidateCreator3ProngExpressions {
               return;
             }
             if (indexRec > -1) {
-              flagChannelMain = sign * channelMain;
+              flagChannelMain = static_cast<int8_t>(sign * channelMain);
 
-              /// swapping for D+, Ds->Kpipi and Lc->pKpi
-              if (std::abs(flagChannelMain) == DecayChannelMain::DplusToPiKK || std::abs(flagChannelMain) == DecayChannelMain::DsToPiKK || std::abs(flagChannelMain) == DecayChannelMain::LcToPKPi) {
+              /// swapping for D+, Ds->Kpipi; Lc, Xic->pKpi
+              if (std::abs(flagChannelMain) == DecayChannelMain::DplusToPiKK || std::abs(flagChannelMain) == DecayChannelMain::DsToPiKK || std::abs(flagChannelMain) == DecayChannelMain::LcToPKPi || std::abs(flagChannelMain) == DecayChannelMain::XicToPKPi) {
                 if (arrayDaughters[0].has_mcParticle()) {
                   swapping = static_cast<int8_t>(std::abs(arrayDaughters[0].mcParticle().pdgCode()) == kPiPlus);
                 }
@@ -1162,7 +1208,7 @@ struct HfCandidateCreator3ProngExpressions {
             indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughters, Pdg::kDPlus, arrPdgDaughtersDplusToPiKPi, true, &sign, 2);
           }
           if (indexRec > -1) {
-            flagChannelMain = sign * DecayChannelMain::DplusToPiKPi;
+            flagChannelMain = static_cast<int8_t>(sign * DecayChannelMain::DplusToPiKPi);
           }
         }
 
@@ -1192,7 +1238,7 @@ struct HfCandidateCreator3ProngExpressions {
             }
           }
           if (indexRec > -1) {
-            flagChannelMain = sign * (isDplus ? DecayChannelMain::DplusToPiKK : DecayChannelMain::DsToPiKK);
+            flagChannelMain = sign * (isDplus ? static_cast<int8_t>(DecayChannelMain::DplusToPiKK) : static_cast<int8_t>(DecayChannelMain::DsToPiKK));
             if (arrayDaughters[0].has_mcParticle()) {
               swapping = static_cast<int8_t>(std::abs(arrayDaughters[0].mcParticle().pdgCode()) == kPiPlus);
             }
@@ -1220,7 +1266,7 @@ struct HfCandidateCreator3ProngExpressions {
             indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughters, Pdg::kDStar, arrPdgDaughtersDstarToPiKPi, true, &sign, 2);
           }
           if (indexRec > -1) {
-            flagChannelMain = sign * DecayChannelMain::DstarToPiKPi;
+            flagChannelMain = static_cast<int8_t>(sign * DecayChannelMain::DstarToPiKPi);
             flagChannelResonant = 0;
           }
         }
@@ -1238,7 +1284,7 @@ struct HfCandidateCreator3ProngExpressions {
             indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughters, Pdg::kLambdaCPlus, arrPdgDaughtersLcToPKPi, true, &sign, 2);
           }
           if (indexRec > -1) {
-            flagChannelMain = sign * DecayChannelMain::LcToPKPi;
+            flagChannelMain = static_cast<int8_t>(sign * DecayChannelMain::LcToPKPi);
 
             // Flagging the different Λc± → p± K∓ π± decay channels
             if (arrayDaughters[0].has_mcParticle()) {
@@ -1250,11 +1296,11 @@ struct HfCandidateCreator3ProngExpressions {
                 auto daughI = mcParticles.rawIteratorAt(arrDaughIndex[iProng]);
                 arrPdgDaugResonant[iProng] = std::abs(daughI.pdgCode());
               }
-              if ((arrPdgDaugResonant[0] == arrPdgDaugResonantLcToPKstar0[0] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToPKstar0[1]) || (arrPdgDaugResonant[0] == arrPdgDaugResonantLcToPKstar0[1] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToPKstar0[0])) {
+              if ((arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToPKstar0[0]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToPKstar0[1])) || (arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToPKstar0[1]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToPKstar0[0]))) {
                 flagChannelResonant = DecayChannelResonant::LcToPKstar0;
-              } else if ((arrPdgDaugResonant[0] == arrPdgDaugResonantLcToDeltaplusplusK[0] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToDeltaplusplusK[1]) || (arrPdgDaugResonant[0] == arrPdgDaugResonantLcToDeltaplusplusK[1] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToDeltaplusplusK[0])) {
+              } else if ((arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToDeltaplusplusK[0]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToDeltaplusplusK[1])) || (arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToDeltaplusplusK[1]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToDeltaplusplusK[0]))) {
                 flagChannelResonant = DecayChannelResonant::LcToDeltaplusplusK;
-              } else if ((arrPdgDaugResonant[0] == arrPdgDaugResonantLcToL1520Pi[0] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToL1520Pi[1]) || (arrPdgDaugResonant[0] == arrPdgDaugResonantLcToL1520Pi[1] && arrPdgDaugResonant[1] == arrPdgDaugResonantLcToL1520Pi[0])) {
+              } else if ((arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToL1520Pi[0]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToL1520Pi[1])) || (arrPdgDaugResonant[0] == std::abs(arrPdgDaugResonantLcToL1520Pi[1]) && arrPdgDaugResonant[1] == std::abs(arrPdgDaugResonantLcToL1520Pi[0]))) {
                 flagChannelResonant = DecayChannelResonant::LcToL1520Pi;
               }
             }
@@ -1274,7 +1320,7 @@ struct HfCandidateCreator3ProngExpressions {
             indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughters, Pdg::kXiCPlus, arrPdgDaughtersXicToPKPi, true, &sign, 2);
           }
           if (indexRec > -1) {
-            flagChannelMain = sign * DecayChannelMain::XicToPKPi;
+            flagChannelMain = static_cast<int8_t>(sign * DecayChannelMain::XicToPKPi);
             flagChannelResonant = 0; // TODO
             if (arrayDaughters[0].has_mcParticle()) {
               swapping = static_cast<int8_t>(std::abs(arrayDaughters[0].mcParticle().pdgCode()) == kPiPlus);
@@ -1286,7 +1332,7 @@ struct HfCandidateCreator3ProngExpressions {
       // Check whether the particle is non-prompt (from a b quark).
       if (flagChannelMain != 0) {
         auto particle = mcParticles.rawIteratorAt(indexRec);
-        origin = RecoDecay::getCharmHadronOrigin(mcParticles, particle, false, &idxBhadMothers);
+        origin = static_cast<int8_t>(RecoDecay::getCharmHadronOrigin(mcParticles, particle, false, &idxBhadMothers));
       }
       if (origin == RecoDecay::OriginType::NonPrompt) {
         auto bHadMother = mcParticles.rawIteratorAt(idxBhadMothers[0]);

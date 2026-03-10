@@ -17,7 +17,9 @@
 /// \author Carolina Reetz <c.reetz@cern.ch>, Heidelberg University
 /// \author Jaeyoon Cho <jaeyoon.cho@cern.ch>, Inha University
 
+#include "PWGHF/Core/DecayChannelsLegacy.h"
 #include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 
@@ -69,7 +71,7 @@ struct HfTaskXicToXiPiPi {
 
   static constexpr int NVarsMultiClass{3};
 
-  Service<o2::framework::O2DatabasePDG> pdg;
+  Service<o2::framework::O2DatabasePDG> pdg{};
 
   Filter filterSelectCandidates = (aod::hf_sel_candidate_xic::isSelXicToXiPiPi >= selectionFlagXic);
 

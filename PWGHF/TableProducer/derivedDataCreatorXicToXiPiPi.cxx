@@ -15,7 +15,9 @@
 ///
 /// \author Vít Kučera <vit.kucera@cern.ch>, Inha University
 
+#include "PWGHF/Core/DecayChannelsLegacy.h"
 #include "PWGHF/Core/HfHelper.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 #include "PWGHF/DataModel/DerivedTables.h"
@@ -85,7 +87,6 @@ struct HfDerivedDataCreatorXicToXiPiPi {
   Configurable<float> downSampleBkgFactor{"downSampleBkgFactor", 1., "Fraction of background candidates to keep for ML trainings"};
   Configurable<float> ptMaxForDownSample{"ptMaxForDownSample", 10., "Maximum pt for the application of the downsampling factor"};
 
-  HfHelper hfHelper;
   SliceCache cache;
   static constexpr double Mass{o2::constants::physics::MassXiCPlus};
 
@@ -101,7 +102,7 @@ struct HfDerivedDataCreatorXicToXiPiPi {
   using THfCandDaughtersMl = aod::Cascades;
 
   Filter filterSelectCandidates = (aod::hf_sel_candidate_xic::isSelXicToXiPiPi & static_cast<int>(BIT(o2::aod::hf_sel_candidate_xic::XicToXiPiPiSelectionStep::RecoMl - 1))) != 0;
-  Filter filterMcGenMatching = aod::hf_cand_xic_to_xi_pi_pi::flagMcMatchGen != 0;
+  Filter filterMcGenMatching = aod::hf_cand_mc_flag::flagMcMatchGen != 0;
 
   Preslice<SelectedCandidates> candidatesPerCollision = aod::hf_cand::collisionId;
   Preslice<SelectedCandidatesMc> candidatesMcPerCollision = aod::hf_cand::collisionId;
@@ -115,10 +116,10 @@ struct HfDerivedDataCreatorXicToXiPiPi {
   Partition<SelectedCandidatesMl> candidatesMlAll = aod::hf_sel_candidate_xic::isSelXicToXiPiPi >= 0;
   Partition<SelectedCandidatesMcMl> candidatesMcMlAll = aod::hf_sel_candidate_xic::isSelXicToXiPiPi >= 0;
   // partitions for signal and background
-  Partition<SelectedCandidatesMc> candidatesMcSig = aod::hf_cand_xic_to_xi_pi_pi::flagMcMatchRec != 0;
-  Partition<SelectedCandidatesMc> candidatesMcBkg = aod::hf_cand_xic_to_xi_pi_pi::flagMcMatchRec == 0;
-  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = aod::hf_cand_xic_to_xi_pi_pi::flagMcMatchRec != 0;
-  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = aod::hf_cand_xic_to_xi_pi_pi::flagMcMatchRec == 0;
+  Partition<SelectedCandidatesMc> candidatesMcSig = aod::hf_cand_mc_flag::flagMcMatchRec != 0;
+  Partition<SelectedCandidatesMc> candidatesMcBkg = aod::hf_cand_mc_flag::flagMcMatchRec == 0;
+  Partition<SelectedCandidatesMcMl> candidatesMcMlSig = aod::hf_cand_mc_flag::flagMcMatchRec != 0;
+  Partition<SelectedCandidatesMcMl> candidatesMcMlBkg = aod::hf_cand_mc_flag::flagMcMatchRec == 0;
 
   void init(InitContext const&)
   {
@@ -285,8 +286,8 @@ struct HfDerivedDataCreatorXicToXiPiPi {
           }
         }
         float const massXicToXiPiPi = candidate.invMassXicPlus();
-        double const ct = hfHelper.ctXic(candidate);
-        double const y = hfHelper.yXic(candidate);
+        double const ct = HfHelper::ctXic(candidate);
+        double const y = HfHelper::yXic(candidate);
         std::vector<float> mlScoresXicToXiPiPi;
         if constexpr (IsMl) {
           std::copy(candidate.mlProbXicToXiPiPi().begin(), candidate.mlProbXicToXiPiPi().end(), std::back_inserter(mlScoresXicToXiPiPi));

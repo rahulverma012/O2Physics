@@ -12,19 +12,25 @@
 /// \brief write relevant information for dalitz ee analysis to an AO2D.root file. This file is then the only necessary input to perform pcm analysis.
 /// \author daiki.sekihata@cern.ch
 
-#include "Math/Vector4D.h"
-
-#include "DetectorsBase/GeometryManager.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "CCDB/BasicCCDBManager.h"
-
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 #include "PWGEM/Dilepton/Utils/PairUtilities.h"
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
+#include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DataFormatsParameters/GRPObject.h>
+#include <DetectorsBase/GeometryManager.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+
+#include <Math/Vector4D.h> // IWYU pragma: keep
+
+#include <cmath>
+#include <set>
+#include <string>
+#include <utility>
 
 using namespace o2;
 using namespace o2::soa;
@@ -32,10 +38,10 @@ using namespace o2::framework;
 using namespace o2::framework::expressions;
 using namespace o2::constants::physics;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsMult, aod::EMEventsCent>;
+using MyCollisions = soa::Join<aod::PMEvents, aod::EMEventsMult_000, aod::EMEventsCent_000>;
 using MyCollision = MyCollisions::iterator;
 
-using MyTracks = soa::Join<aod::EMPrimaryElectrons, aod::EMPrimaryElectronsCov, aod::EMPrimaryElectronEMEventIds>;
+using MyTracks = soa::Join<aod::EMPrimaryElectrons, aod::EMPrimaryElectronsCov, aod::EMPrimaryElectronDaEMEventIds>;
 using MyTrack = MyTracks::iterator;
 
 using MyTracksCEFP = soa::Join<aod::EMPrimaryElectrons, aod::EMPrimaryElectronsCov>;
@@ -49,7 +55,7 @@ struct skimmerDalitzEE {
   };
 
   SliceCache cache;
-  Preslice<MyTracks> perCol = o2::aod::emprimaryelectron::emeventId;
+  Preslice<MyTracks> perCol = o2::aod::emprimaryelectronda::pmeventId;
 
   SliceCache cache_cefp;
   PresliceUnsorted<MyTracksCEFP> perCol_cefp = o2::aod::emprimaryelectron::collisionId;
@@ -235,13 +241,13 @@ struct skimmerDalitzEE {
     if (track.tpcNSigmaEl() < minTPCNsigmaEl || maxTPCNsigmaEl < track.tpcNSigmaEl()) {
       return false;
     }
-    if (applyPiRej_TPC && abs(track.tpcNSigmaPi()) < maxTPCNsigmaPi) {
+    if (applyPiRej_TPC && std::abs(track.tpcNSigmaPi()) < maxTPCNsigmaPi) {
       return false;
     }
-    if (applyKaRej_TPC && abs(track.tpcNSigmaKa()) < maxTPCNsigmaKa) {
+    if (applyKaRej_TPC && std::abs(track.tpcNSigmaKa()) < maxTPCNsigmaKa) {
       return false;
     }
-    if (applyPrRej_TPC && abs(track.tpcNSigmaPr()) < maxTPCNsigmaPr) {
+    if (applyPrRej_TPC && std::abs(track.tpcNSigmaPr()) < maxTPCNsigmaPr) {
       return false;
     }
 
@@ -251,10 +257,10 @@ struct skimmerDalitzEE {
   template <typename TTrack>
   bool isElectron_TOFrequire(TTrack const& track)
   {
-    if (applyPiRej_TPC && abs(track.tpcNSigmaPi()) < maxTPCNsigmaPi) {
+    if (applyPiRej_TPC && std::abs(track.tpcNSigmaPi()) < maxTPCNsigmaPi) {
       return false;
     }
-    return minTPCNsigmaEl < track.tpcNSigmaEl() && track.tpcNSigmaEl() < maxTPCNsigmaEl && abs(track.tofNSigmaEl()) < maxTOFNsigmaEl;
+    return minTPCNsigmaEl < track.tpcNSigmaEl() && track.tpcNSigmaEl() < maxTPCNsigmaEl && std::abs(track.tofNSigmaEl()) < maxTOFNsigmaEl;
   }
 
   template <EM_EEPairType pairtype, bool isCEFP, typename TCollision, typename TTracks1, typename TTracks2>
@@ -290,7 +296,7 @@ struct skimmerDalitzEE {
 
         fRegistry.fill(HIST("hNpairs"), static_cast<int>(pairtype));
         npair++;
-      }      // end of pairing loop
+      } // end of pairing loop
     } else { // LS
       for (auto& [t1, t2] : combinations(CombinationsStrictlyUpperIndexPolicy(tracks1, tracks2))) {
         if (!checkTrack(t1) || !checkTrack(t2)) {
@@ -332,8 +338,8 @@ struct skimmerDalitzEE {
         continue;
       }
 
-      auto posTracks_per_coll = posTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
-      auto negTracks_per_coll = negTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
+      auto posTracks_per_coll = posTracks->sliceByCached(o2::aod::emprimaryelectronda::pmeventId, collision.globalIndex(), cache);
+      auto negTracks_per_coll = negTracks->sliceByCached(o2::aod::emprimaryelectronda::pmeventId, collision.globalIndex(), cache);
       fRegistry.fill(HIST("hNpos"), collision.centFT0C(), posTracks_per_coll.size());
       fRegistry.fill(HIST("hNele"), collision.centFT0C(), negTracks_per_coll.size());
       // LOGF(info, "collision.centFT0C() = %f, posTracks_per_coll.size() = %d, negTracks_per_coll.size() = %d", collision.centFT0C() , posTracks_per_coll.size(), negTracks_per_coll.size());
@@ -370,7 +376,7 @@ struct skimmerDalitzEE {
   }
   PROCESS_SWITCH(skimmerDalitzEE, processCEFP, "Process dalitz ee for CEFP", false); // for central event filter processing
 
-  void processOnlyNee(soa::Join<aod::EMEvents, aod::EMEventsMult, aod::EMEventsCent> const& collisions)
+  void processOnlyNee(soa::Join<aod::PMEvents, aod::EMEventsMult_000, aod::EMEventsCent_000> const& collisions)
   {
     for (auto& collision : collisions) {
       float centralities[3] = {collision.centFT0M(), collision.centFT0A(), collision.centFT0C()};

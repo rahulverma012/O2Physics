@@ -22,7 +22,9 @@
 
 #include "PWGHF/Core/CentralityEstimation.h"
 #include "PWGHF/Core/DecayChannels.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
+#include "PWGHF/DataModel/TrackIndexSkimmingTables.h"
 #include "PWGHF/Utils/utilsBfieldCCDB.h"
 #include "PWGHF/Utils/utilsEvSelHf.h"
 #include "PWGHF/Utils/utilsMcGen.h"
@@ -32,6 +34,7 @@
 #include "PWGLF/DataModel/mcCentrality.h"
 
 #include "Common/Core/RecoDecay.h"
+#include "Common/Core/ZorroSummary.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
@@ -113,12 +116,12 @@ struct HfCandidateCreator2Prong {
 
   HfEventSelection hfEvSel;        // event selection and monitoring
   o2::vertexing::DCAFitterN<2> df; // 2-prong vertex fitter
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
 
   int runNumber{0};
   double bz{0.};
 
-  const float toMicrometers = 10000.; // from cm to µm
+  constexpr static float CentiToMicro{10000.f}; // from cm to µm
 
   std::shared_ptr<TH1> hCandidates;
 
@@ -127,6 +130,7 @@ struct HfCandidateCreator2Prong {
   ConfigurableAxis axisMass{"axisMass", {500, 1.6, 2.1}, "axis for mass (GeV/c^2)"};
 
   HistogramRegistry registry{"registry"};
+  OutputObj<ZorroSummary> zorroSummary{"zorroSummary"};
 
   void init(InitContext const&)
   {
@@ -183,7 +187,7 @@ struct HfCandidateCreator2Prong {
     hCandidates = registry.add<TH1>("hCandidates", "candidates counter", {HistType::kTH1D, {axisCands}});
 
     // init HF event selection helper
-    hfEvSel.init(registry);
+    hfEvSel.init(registry, &zorroSummary);
 
     if (std::accumulate(doprocessDF.begin(), doprocessDF.end(), 0) == 1) {
       registry.fill(HIST("hVertexerType"), aod::hf_cand::VertexerType::DCAFitter);
@@ -309,13 +313,13 @@ struct HfCandidateCreator2Prong {
       o2::dataformats::DCA impactParameter1;
       trackParVar0.propagateToDCA(primaryVertex, bz, &impactParameter0);
       trackParVar1.propagateToDCA(primaryVertex, bz, &impactParameter1);
-      registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0.getY() * toMicrometers);
-      registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1.getY() * toMicrometers);
-      registry.fill(HIST("hDcaZProngs"), track0.pt(), impactParameter0.getZ() * toMicrometers);
-      registry.fill(HIST("hDcaZProngs"), track1.pt(), impactParameter1.getZ() * toMicrometers);
+      registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0.getY() * CentiToMicro);
+      registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1.getY() * CentiToMicro);
+      registry.fill(HIST("hDcaZProngs"), track0.pt(), impactParameter0.getZ() * CentiToMicro);
+      registry.fill(HIST("hDcaZProngs"), track1.pt(), impactParameter1.getZ() * CentiToMicro);
 
       // get uncertainty of the decay length
-      double phi, theta;
+      double phi{}, theta{};
       getPointDirection(std::array{primaryVertex.getX(), primaryVertex.getY(), primaryVertex.getZ()}, secondaryVertex, phi, theta);
       auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixPCA, phi, theta));
       auto errorDecayLengthXY = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, 0.) + getRotatedCovMatrixXX(covMatrixPCA, phi, 0.));
@@ -435,15 +439,15 @@ struct HfCandidateCreator2Prong {
 
       float impactParameter0XY = 0., errImpactParameter0XY = 0., impactParameter1XY = 0., errImpactParameter1XY = 0.;
       if (!kfPosPion.GetDistanceFromVertexXY(kfpV, impactParameter0XY, errImpactParameter0XY)) {
-        registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0XY * toMicrometers);
-        registry.fill(HIST("hDcaZProngs"), track0.pt(), std::sqrt(kfPosPion.GetDistanceFromVertex(kfpV) * kfPosPion.GetDistanceFromVertex(kfpV) - impactParameter0XY * impactParameter0XY) * toMicrometers);
+        registry.fill(HIST("hDcaXYProngs"), track0.pt(), impactParameter0XY * CentiToMicro);
+        registry.fill(HIST("hDcaZProngs"), track0.pt(), std::sqrt(kfPosPion.GetDistanceFromVertex(kfpV) * kfPosPion.GetDistanceFromVertex(kfpV) - impactParameter0XY * impactParameter0XY) * CentiToMicro);
       } else {
         registry.fill(HIST("hDcaXYProngs"), track0.pt(), -999.f);
         registry.fill(HIST("hDcaZProngs"), track0.pt(), -999.f);
       }
       if (!kfNegPion.GetDistanceFromVertexXY(kfpV, impactParameter1XY, errImpactParameter1XY)) {
-        registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1XY * toMicrometers);
-        registry.fill(HIST("hDcaZProngs"), track1.pt(), std::sqrt(kfNegPion.GetDistanceFromVertex(kfpV) * kfNegPion.GetDistanceFromVertex(kfpV) - impactParameter1XY * impactParameter1XY) * toMicrometers);
+        registry.fill(HIST("hDcaXYProngs"), track1.pt(), impactParameter1XY * CentiToMicro);
+        registry.fill(HIST("hDcaZProngs"), track1.pt(), std::sqrt(kfNegPion.GetDistanceFromVertex(kfpV) * kfNegPion.GetDistanceFromVertex(kfpV) - impactParameter1XY * impactParameter1XY) * CentiToMicro);
       } else {
         registry.fill(HIST("hDcaXYProngs"), track1.pt(), -999.f);
         registry.fill(HIST("hDcaZProngs"), track1.pt(), -999.f);
@@ -468,7 +472,7 @@ struct HfCandidateCreator2Prong {
 
       auto* covMatrixSV = kfCandD0.CovarianceMatrix();
 
-      double phi, theta;
+      double phi{}, theta{};
       getPointDirection(std::array{kfpV.GetX(), kfpV.GetY(), kfpV.GetZ()}, std::array{kfCandD0.GetX(), kfCandD0.GetY(), kfCandD0.GetZ()}, phi, theta);
       auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixSV, phi, theta));
       auto errorDecayLengthXY = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, 0.) + getRotatedCovMatrixXX(covMatrixSV, phi, 0.));
@@ -740,9 +744,10 @@ struct HfCandidateCreator2Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::None, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }
@@ -758,9 +763,10 @@ struct HfCandidateCreator2Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0C, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }
@@ -776,9 +782,10 @@ struct HfCandidateCreator2Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMask<true, CentralityEstimator::FT0M, aod::BCsWithTimestamps>(collision, centrality, ccdb, registry);
-
+      const auto bc = collision.template foundBC_as<aod::BCsWithTimestamps>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }
@@ -799,9 +806,10 @@ struct HfCandidateCreator2Prong {
       float centrality{-1.f};
       const auto occupancy = o2::hf_occupancy::getOccupancyColl(collision, hfEvSel.occEstimator);
       const auto rejectionMask = hfEvSel.getHfCollisionRejectionMaskWithUpc<true, CentralityEstimator::None, aod::BcFullInfos>(collision, centrality, ccdb, registry, bcs);
-
+      const auto bc = collision.template foundBC_as<aod::BcFullInfos>();
+      const auto ir = hfEvSel.getInteractionRate(bc, ccdb); // Hz
       /// monitor the satisfied event selections
-      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy);
+      hfEvSel.fillHistograms(collision, rejectionMask, centrality, occupancy, ir);
 
     } /// end loop over collisions
   }

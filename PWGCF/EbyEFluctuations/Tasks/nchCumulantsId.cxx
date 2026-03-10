@@ -13,8 +13,12 @@
 /// \brief Event by Event conserved charges fluctuations
 /// \author Pravata Panigrahi <pravata.panigrahi@cern.ch> :: Sadhana Dash(sadhana@phy.iitb.ac.in)
 
-#include <algorithm>
-#include <vector>
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
 
 #include "Framework/ASoAHelpers.h"
 #include "Framework/AnalysisDataModel.h"
@@ -24,11 +28,8 @@
 #include "Framework/O2DatabasePDGPlugin.h"
 #include "Framework/runDataProcessing.h"
 
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/TrackSelectionTables.h"
+#include <algorithm>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -123,15 +124,15 @@ struct NchCumulantsId {
     const AxisSpec axisTOFExpMom = {200, 0.0f, 10.0f, "#it{p}_{tofExpMom} (GeV/#it{c})"};
 
     const AxisSpec axisNch(100, -50, 50, "Net_charge_dN");
-    const AxisSpec axisPosCh(101, -1, 100, "Pos_charge");
-    const AxisSpec axisNegCh(101, -1, 100, "Neg_charge");
-    const AxisSpec axisNt(201, -1, 200, "Mult_midRap_Nch");
+    const AxisSpec axisPosCh(1001, -1, 1000, "Pos_charge");
+    const AxisSpec axisNegCh(1001, -1, 1000, "Neg_charge");
+    const AxisSpec axisNt(5001, -1, 5000, "Mult_midRap_Nch");
     const AxisSpec axisPrCh(101, -1, 100, "Pr_charge");
     const AxisSpec axisAPrCh(101, -1, 100, "APr_charge");
     const AxisSpec axisKaCh(101, -1, 100, "Ka_charge");
     const AxisSpec axisAKaCh(101, -1, 100, "AKa_charge");
-    const AxisSpec axisPiCh(101, -1, 100, "Pion_Positive");
-    const AxisSpec axisAPiCh(101, -1, 100, "Pion_Negative");
+    const AxisSpec axisPiCh(1001, -1, 1000, "Pion_Positive");
+    const AxisSpec axisAPiCh(1001, -1, 1000, "Pion_Negative");
 
     HistogramConfigSpec qnHist1({HistType::kTHnSparseD, {axisNch, axisPosCh, axisNegCh, axisPrCh, axisAPrCh, axisKaCh, axisAKaCh, axisNt, axisCent}});
     HistogramConfigSpec qnHist2({HistType::kTHnSparseD, {axisNch, axisPosCh, axisNegCh, axisPiCh, axisAPiCh, axisKaCh, axisAKaCh, axisNt, axisCent}});

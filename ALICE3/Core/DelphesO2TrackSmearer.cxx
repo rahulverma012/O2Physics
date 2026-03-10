@@ -36,6 +36,8 @@
 
 #include "ALICE3/Core/DelphesO2TrackSmearer.h"
 
+#include "ALICE3/Core/GeometryContainer.h"
+
 #include <CommonConstants/PhysicsConstants.h>
 #include <Framework/Logger.h>
 
@@ -61,33 +63,13 @@ bool TrackSmearer::loadTable(int pdg, const char* filename, bool forceReload)
     LOG(info) << " --- LUT table for PDG " << pdg << " has been already loaded with index " << ipdg << std::endl;
     return false;
   }
-  if (strncmp(filename, "ccdb:", 5) == 0) { // Check if filename starts with "ccdb:"
-    LOG(info) << " --- LUT file source identified as CCDB.";
-    std::string path = std::string(filename).substr(5); // Remove "ccdb:" prefix
-    const std::string outPath = "/tmp/LUTs/";
-    filename = Form("%s/%s/snapshot.root", outPath.c_str(), path.c_str());
-    std::ifstream checkFile(filename); // Check if file already exists
-    if (!checkFile.is_open()) {        // File does not exist, retrieve from CCDB
-      LOG(info) << " --- CCDB source detected for PDG " << pdg << ": " << path;
-      if (!mCcdbManager) {
-        LOG(fatal) << " --- CCDB manager not set. Please set it before loading LUT from CCDB.";
-      }
-      std::map<std::string, std::string> metadata;
-      mCcdbManager->getCCDBAccessor().retrieveBlob(path, outPath, metadata, 1);
-      // Add CCDB handling logic here if needed
-      LOG(info) << " --- Now retrieving LUT file from CCDB to: " << filename;
-    } else { // File exists, proceed to load
-      LOG(info) << " --- LUT file already exists: " << filename << ". Skipping download.";
-      checkFile.close();
-    }
-    return loadTable(pdg, filename, forceReload);
-  }
 
+  const std::string localFilename = o2::fastsim::GeometryEntry::accessFile(filename, "./.ALICE3/LUTs/", mCcdbManager, 10);
   mLUTHeader[ipdg] = new lutHeader_t;
 
-  std::ifstream lutFile(filename, std::ifstream::binary);
+  std::ifstream lutFile(localFilename, std::ifstream::binary);
   if (!lutFile.is_open()) {
-    LOG(info) << " --- cannot open covariance matrix file for PDG " << pdg << ": " << filename << std::endl;
+    LOG(info) << " --- cannot open covariance matrix file for PDG " << pdg << ": " << localFilename << std::endl;
     delete mLUTHeader[ipdg];
     mLUTHeader[ipdg] = nullptr;
     return false;
@@ -95,6 +77,7 @@ bool TrackSmearer::loadTable(int pdg, const char* filename, bool forceReload)
   lutFile.read(reinterpret_cast<char*>(mLUTHeader[ipdg]), sizeof(lutHeader_t));
   if (lutFile.gcount() != sizeof(lutHeader_t)) {
     LOG(info) << " --- troubles reading covariance matrix header for PDG " << pdg << ": " << filename << std::endl;
+    LOG(info) << " --- expected/detected " << sizeof(lutHeader_t) << "/" << lutFile.gcount() << std::endl;
     delete mLUTHeader[ipdg];
     mLUTHeader[ipdg] = nullptr;
     return false;
@@ -137,7 +120,8 @@ bool TrackSmearer::loadTable(int pdg, const char* filename, bool forceReload)
           mLUTEntry[ipdg][inch][irad][ieta][ipt] = new lutEntry_t;
           lutFile.read(reinterpret_cast<char*>(mLUTEntry[ipdg][inch][irad][ieta][ipt]), sizeof(lutEntry_t));
           if (lutFile.gcount() != sizeof(lutEntry_t)) {
-            LOG(info) << " --- troubles reading covariance matrix entry for PDG " << pdg << ": " << filename << std::endl;
+            LOG(info) << " --- troubles reading covariance matrix entry for PDG " << pdg << ": " << localFilename << std::endl;
+            LOG(info) << " --- expected/detected " << sizeof(lutHeader_t) << "/" << lutFile.gcount() << std::endl;
             return false;
           }
         }
@@ -153,12 +137,13 @@ bool TrackSmearer::loadTable(int pdg, const char* filename, bool forceReload)
 
 /*****************************************************************/
 
-lutEntry_t*
-  TrackSmearer::getLUTEntry(int pdg, float nch, float radius, float eta, float pt, float& interpolatedEff)
+lutEntry_t* TrackSmearer::getLUTEntry(const int pdg, const float nch, const float radius, const float eta, const float pt, float& interpolatedEff)
 {
-  auto ipdg = getIndexPDG(pdg);
-  if (!mLUTHeader[ipdg])
+  const int ipdg = getIndexPDG(pdg);
+  if (!mLUTHeader[ipdg]) {
     return nullptr;
+  }
+
   auto inch = mLUTHeader[ipdg]->nchmap.find(nch);
   auto irad = mLUTHeader[ipdg]->radmap.find(radius);
   auto ieta = mLUTHeader[ipdg]->etamap.find(eta);
@@ -280,7 +265,6 @@ bool TrackSmearer::smearTrack(O2Track& o2track, lutEntry_t* lutEntry, float inte
 
 bool TrackSmearer::smearTrack(O2Track& o2track, int pdg, float nch)
 {
-
   auto pt = o2track.getPt();
   switch (pdg) {
     case o2::constants::physics::kHelium3:
@@ -290,7 +274,7 @@ bool TrackSmearer::smearTrack(O2Track& o2track, int pdg, float nch)
   }
   auto eta = o2track.getEta();
   float interpolatedEff = 0.0f;
-  auto lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, interpolatedEff);
+  lutEntry_t* lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, interpolatedEff);
   if (!lutEntry || !lutEntry->valid)
     return false;
   return smearTrack(o2track, lutEntry, interpolatedEff);
@@ -298,20 +282,20 @@ bool TrackSmearer::smearTrack(O2Track& o2track, int pdg, float nch)
 
 /*****************************************************************/
 // relative uncertainty on pt
-double TrackSmearer::getPtRes(int pdg, float nch, float eta, float pt)
+double TrackSmearer::getPtRes(const int pdg, const float nch, const float eta, const float pt)
 {
   float dummy = 0.0f;
-  auto lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
+  lutEntry_t* lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
   auto val = std::sqrt(lutEntry->covm[14]) * lutEntry->pt;
   return val;
 }
 
 /*****************************************************************/
 // relative uncertainty on eta
-double TrackSmearer::getEtaRes(int pdg, float nch, float eta, float pt)
+double TrackSmearer::getEtaRes(const int pdg, const float nch, const float eta, const float pt)
 {
   float dummy = 0.0f;
-  auto lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
+  lutEntry_t* lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
   auto sigmatgl = std::sqrt(lutEntry->covm[9]);                                  // sigmatgl2
   auto etaRes = std::fabs(std::sin(2.0 * std::atan(std::exp(-eta)))) * sigmatgl; // propagate tgl to eta uncertainty
   etaRes /= lutEntry->eta;                                                       // relative uncertainty
@@ -319,27 +303,27 @@ double TrackSmearer::getEtaRes(int pdg, float nch, float eta, float pt)
 }
 /*****************************************************************/
 // absolute uncertainty on pt
-double TrackSmearer::getAbsPtRes(int pdg, float nch, float eta, float pt)
+double TrackSmearer::getAbsPtRes(const int pdg, const float nch, const float eta, const float pt)
 {
   float dummy = 0.0f;
-  auto lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
+  lutEntry_t* lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
   auto val = std::sqrt(lutEntry->covm[14]) * lutEntry->pt * lutEntry->pt;
   return val;
 }
 
 /*****************************************************************/
 // absolute uncertainty on eta
-double TrackSmearer::getAbsEtaRes(int pdg, float nch, float eta, float pt)
+double TrackSmearer::getAbsEtaRes(const int pdg, const float nch, const float eta, const float pt)
 {
   float dummy = 0.0f;
-  auto lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
+  lutEntry_t* lutEntry = getLUTEntry(pdg, nch, 0., eta, pt, dummy);
   auto sigmatgl = std::sqrt(lutEntry->covm[9]);                                  // sigmatgl2
   auto etaRes = std::fabs(std::sin(2.0 * std::atan(std::exp(-eta)))) * sigmatgl; // propagate tgl to eta uncertainty
   return etaRes;
 }
 /*****************************************************************/
 // efficiency
-double TrackSmearer::getEfficiency(int pdg, float nch, float eta, float pt)
+double TrackSmearer::getEfficiency(const int pdg, const float nch, const float eta, const float pt)
 {
   float efficiency = 0.0f;
   getLUTEntry(pdg, nch, 0., eta, pt, efficiency);
@@ -360,7 +344,7 @@ double TrackSmearer::getEfficiency(int pdg, float nch, float eta, float pt)
 //   return true;
 
 // #if 0
-//   auto lutEntry = getLUTEntry(track.PID, 0., 0., track.Eta, track.PT);
+//   lutEntry_t* lutEntry = getLUTEntry(track.PID, 0., 0., track.Eta, track.PT);
 //   if (!lutEntry)
 //     return;
 
