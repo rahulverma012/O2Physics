@@ -1,4 +1,4 @@
-// Copyright 2019-2023 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -14,23 +14,25 @@
 /// \author Anton Riedel, TU München, anton.riedel@tum.de
 /// \author Laura Serksnyte, TU München, laura.serksnyte@tum.de
 
-#include <cstdint>
-#include <vector>
-#include <string>
-#include <bitset>
-#include <algorithm>
-#include <random>
-#include <chrono>
-
-#include "fairlogger/Logger.h"
-#include "Framework/Configurable.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/RunningWorkflowInfo.h"
-
 #include "PWGCF/DataModel/FemtoDerived.h"
+
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/DeviceSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/RunningWorkflowInfo.h>
+#include <Framework/runDataProcessing.h>
+
+#include <array>
+#include <bitset>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <random>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::aod;
@@ -244,7 +246,7 @@ struct femoDreamCollisionMasker {
             NegChildPIDTPCBits.at(CollisionMasks::kPartTwo).push_back(option.defaultValue.get<femtodreamparticle::cutContainerType>());
           }
         }
-      } else if (device.name.find("femto-dream-triplet-task-track-track-track") != std::string::npos) {
+      } else if ((device.name.find("femto-dream-triplet-task-track-track-track") != std::string::npos) || (device.name.find("femto-dream-triplet-task-track-track-track-pb-pb") != std::string::npos)) {
         LOG(info) << "Matched workflow: " << device.name;
         TaskFinder = CollisionMasks::kTrackTrackTrack;
         for (auto const& option : device.options) {
@@ -268,7 +270,7 @@ struct femoDreamCollisionMasker {
             TrackDCACutPtDep.push_back(option.defaultValue.get<bool>());
           }
         }
-      } else if (device.name.find("femto-dream-triplet-task-track-track-v0") != std::string::npos) {
+      } else if ((device.name.find("femto-dream-triplet-task-track-track-v0") != std::string::npos) || (device.name.find("femto-dream-triplet-task-track-track-v0-pb-pb") != std::string::npos)) {
         LOG(info) << "Matched workflow: " << device.name;
         TaskFinder = CollisionMasks::kTrackTrackV0;
         for (auto const& option : device.options) {

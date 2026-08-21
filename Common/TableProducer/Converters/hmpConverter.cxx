@@ -12,9 +12,10 @@
 // HMPID converter to new format
 // to be used with Run 2 converted data and older AO2Ds
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -24,6 +25,7 @@ struct hmpConverter {
 
   void process(aod::HMPID_000 const& hmpLegacy, aod::Tracks const&)
   {
+    HMPID_001.reserve(hmpLegacy.size());
     for (auto& hmpData : hmpLegacy) {
 
       float phots[] = {0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};

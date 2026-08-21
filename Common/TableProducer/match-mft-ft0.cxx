@@ -9,40 +9,47 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-// \file   match-mft-ft0.cxx
-// \author Sarah Herrmann <sarah.herrmann@cern.ch>
-//
-// \brief This code loops over every MFT tracks (except orphan tracks) and propagates
-//        them to the FT0-C, matching the signals in some BC to reduce track ambiguity
-//        It produces a table containing for each MFT track a list of BCs with an FT0C match
-//        called aod::BCofMFT
-// \date 03/09/24
-
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-
-#include "MathUtils/Utils.h"
-#include "CommonConstants/LHCConstants.h"
-#include "Common/Core/trackUtilities.h"         //for getTrackPar()
-#include "ReconstructionDataFormats/TrackFwd.h" //for propagate
-// https://github.com/AliceO2Group/AliceO2/blob/dev/DataFormats/Reconstruction/include/ReconstructionDataFormats/TrackFwd.h
-#include "CommonConstants/LHCConstants.h"
-#include "Math/MatrixFunctions.h"
-#include "Math/SMatrix.h"
-
-#include "CCDB/BasicCCDBManager.h"
-#include "CCDB/CcdbApi.h"
-
-#include "DataFormatsParameters/GRPMagField.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "Field/MagneticField.h"
-#include "TGeoGlobalMagField.h"
-
-#include "DataFormatsParameters/GRPMagField.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "DetectorsBase/Propagator.h"
+/// \file   match-mft-ft0.cxx
+/// \author Sarah Herrmann <sarah.herrmann@cern.ch>
+///
+/// \brief This code loops over every MFT tracks (except orphan tracks) and propagates
+///        them to the FT0-C, matching the signals in some BC to reduce track ambiguity
+///        It produces a table containing for each MFT track a list of BCs with an FT0C match
+///        called aod::BCofMFT
+/// \date 03/09/24
+/// \note https://github.com/AliceO2Group/AliceO2/blob/dev/DataFormats/Reconstruction/include/ReconstructionDataFormats/TrackFwd.h
 
 #include "Common/DataModel/MatchMFTFT0.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CommonConstants/LHCConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DetectorsBase/Propagator.h>
+#include <Field/MagneticField.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/TrackFwd.h> //for propagate
+
+#include <Math/MatrixFunctions.h>
+#include <Math/MatrixRepresentationsStatic.h>
+#include <Math/SMatrix.h>
+#include <TGeoGlobalMagField.h>
+
+#include <RtypesCore.h>
+
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 using SMatrix55 = ROOT::Math::SMatrix<double, 5, 5, ROOT::Math::MatRepSym<double, 5>>;
 using SMatrix5 = ROOT::Math::SVector<Double_t, 5>;
@@ -117,11 +124,11 @@ T getCompatibleBCs(aod::AmbiguousMFTTrack const& atrack, aod::Collision const& c
   }
 
   if (bcIt != bcs.end() && maxBCId >= minBCId) {
-    T slice{{bcs.asArrowTable()->Slice(minBCId, maxBCId - minBCId + 1)}, (uint64_t)minBCId};
+    auto slice = bcs.rawSlice(minBCId, maxBCId - minBCId + 1);
     bcs.copyIndexBindings(slice);
     return slice;
   } else {
-    T slice{{bcs.asArrowTable()->Slice(minBCId, maxBCId - minBCId)}, (uint64_t)minBCId};
+    auto slice = bcs.rawSlice(minBCId, maxBCId - minBCId);
     bcs.copyIndexBindings(slice);
     return slice;
   }
@@ -134,17 +141,9 @@ T getCompatibleBCs(aod::MFTTracks::iterator const& track, aod::Collision const& 
   // define firstBC and lastBC (globalBC of beginning and end of the range, when no shift is applied)
 
   auto bcIt = collOrig.bc_as<T>();
-  // auto timstp = bcIt.timestamp();
 
   int64_t firstBC = bcIt.globalBC() + (track.trackTime() - track.trackTimeRes()) / o2::constants::lhc::LHCBunchSpacingNS;
   int64_t lastBC = firstBC + 2 * track.trackTimeRes() / o2::constants::lhc::LHCBunchSpacingNS + 1; // to have a delta = 198 BC
-
-  // printf(">>>>>>>>>>>>>>>>>>>>>>>>>>> last-first %lld\n", lastBC-firstBC);
-
-  // int collTimeResInBC = collOrig.collisionTimeRes()/o2::constants::lhc::LHCBunchSpacingNS;
-
-  // int64_t collFirstBC = bcIt.globalBC() + (collOrig.collisionTime() - collOrig.collisionTimeRes())/o2::constants::lhc::LHCBunchSpacingNS;
-  // int64_t collLastBC = collFirstBC + 2*collOrig.collisionTimeRes()/o2::constants::lhc::LHCBunchSpacingNS +1;
 
   int64_t minBCId = bcIt.globalIndex();
 
@@ -188,9 +187,7 @@ T getCompatibleBCs(aod::MFTTracks::iterator const& track, aod::Collision const& 
       {
         // means that the slice of compatible BCs is empty
 
-        T slice{{bcs.asArrowTable()->Slice(0, 0)}, (uint64_t)0};
-        // bcs.copyIndexBindings(slice); REMOVED IT BECAUSE I DON'T KNOW WHAT IT DOES HERE
-        return slice; // returns an empty slice
+        return bcs.emptySlice();
       }
     }
   }
@@ -202,9 +199,7 @@ T getCompatibleBCs(aod::MFTTracks::iterator const& track, aod::Collision const& 
     if (bcIt != bcs.end() && ((int64_t)bcIt.globalBC() > (int64_t)lastBC + deltaBC)) {
       // check the following element
 
-      T slice{{bcs.asArrowTable()->Slice(0, 0)}, (uint64_t)0};
-      // bcs.copyIndexBindings(slice); REMOVED IT BECAUSE I DON'T KNOW WHAT IT DOES HERE
-      return slice; // returns an empty slice
+      return bcs.emptySlice();
     }
   }
 
@@ -215,15 +210,10 @@ T getCompatibleBCs(aod::MFTTracks::iterator const& track, aod::Collision const& 
   }
 
   if (maxBCId < minBCId) {
-    if (bcIt == bcs.end()) {
-      printf("at the end of the bcs iterator %d\n", 1);
-    }
-    T slice{{bcs.asArrowTable()->Slice(0, 0)}, (uint64_t)0};
-    // bcs.copyIndexBindings(slice); REMOVED IT BECAUSE I DON'T KNOW WHAT IT DOES HERE
-    return slice; // returns an empty slice
+    return bcs.emptySlice();
   }
 
-  T slice{{bcs.asArrowTable()->Slice(minBCId, maxBCId - minBCId + 1)}, (uint64_t)minBCId};
+  auto slice = bcs.rawSlice(minBCId, maxBCId - minBCId + 1);
   bcs.copyIndexBindings(slice);
   return slice;
 }

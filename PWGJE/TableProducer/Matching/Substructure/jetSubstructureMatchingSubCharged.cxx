@@ -13,8 +13,22 @@
 //
 /// \author Nima Zardoshti <nima.zardoshti@cern.ch>
 
+#include "PWGJE/DataModel/Jet.h"
+#include "PWGJE/DataModel/JetReducedData.h"
+#include "PWGJE/DataModel/JetSubstructure.h"
+#include "PWGJE/TableProducer/Matching/Substructure/jetSubstructureMatchingSub.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/ConfigContext.h>
+#include <Framework/DataProcessorSpec.h>
+#include <Framework/runDataProcessing.h>
+
 #include <vector>
-#include "PWGJE/TableProducer/Matching/Substructure/jetSubstructureMatchingSub.cxx"
+
+using namespace o2;
+using namespace o2::framework;
+using namespace o2::framework::expressions;
 
 using ChargedJetSubstructureMatchingSub = JetSubstructureMatchingSub<soa::Join<aod::ChargedJets, aod::ChargedJetConstituents, aod::ChargedJetsMatchedToChargedEventWiseSubtractedJets>,
                                                                      soa::Join<aod::ChargedEventWiseSubtractedJets, aod::ChargedEventWiseSubtractedJetConstituents, aod::ChargedEventWiseSubtractedJetsMatchedToChargedJets>,

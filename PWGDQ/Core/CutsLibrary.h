@@ -15,11 +15,15 @@
 #ifndef PWGDQ_CORE_CUTSLIBRARY_H_
 #define PWGDQ_CORE_CUTSLIBRARY_H_
 
-#include <string>
-#include <vector>
-#include "PWGDQ/Core/AnalysisCut.h"
 #include "PWGDQ/Core/AnalysisCompositeCut.h"
-#include "PWGDQ/Core/VarManager.h"
+#include "PWGDQ/Core/AnalysisCut.h"
+
+#include <Framework/Array2D.h>
+
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
 // ///////////////////////////////////////////////
 //   These are the Cuts used in the CEFP Task   //
@@ -97,8 +101,6 @@
 //           End of Cuts for CEFP               //
 // ///////////////////////////////////////////////
 
-#include "rapidjson/document.h"
-
 namespace o2::aod
 {
 namespace dqcuts
@@ -119,6 +121,41 @@ bool ValidateJSONAnalysisCompositeCut(T cut);
 template <typename T>
 AnalysisCompositeCut* ParseJSONAnalysisCompositeCut(T key, const char* cutName);
 } // namespace dqcuts
+namespace dqmlcuts
+{
+struct BinaryBdtScoreConfig {
+  std::vector<std::string> inputFeatures;
+  std::vector<std::string> onnxFiles;
+  std::vector<std::pair<double, double>> binsCent; // bins for centrality
+  std::vector<std::pair<double, double>> binsPt;   // bins for pT
+  std::vector<double> binsMl;                      // bins for flattened binning
+  std::string centType;
+  o2::framework::LabeledArray<double> cutsMl; // BDT score cuts for each bin
+  std::vector<int> cutDirs;                   // direction of the cuts on the BDT score
+};
+
+struct MultiClassBdtScoreConfig {
+  std::vector<std::string> inputFeatures;
+  std::vector<std::string> onnxFiles;
+  std::vector<std::pair<double, double>> binsCent;
+  std::vector<std::pair<double, double>> binsPt;
+  std::vector<double> binsMl;
+  std::string centType;
+  o2::framework::LabeledArray<double> cutsMl;
+  std::vector<int> cutDirs;
+};
+
+using BdtScoreConfig = std::variant<BinaryBdtScoreConfig, MultiClassBdtScoreConfig>;
+
+BdtScoreConfig GetBdtScoreCutsAndConfigFromJSON(const char* json);
+
+o2::framework::LabeledArray<double> makeLabeledCutsMl(const std::vector<std::vector<double>>& cuts,
+                                                      const std::vector<std::string>& labelsPt,
+                                                      const std::vector<std::string>& labelsClass);
+int getMlBinIndex(double cent, double pt,
+                  const std::vector<std::pair<double, double>>& binsCent,
+                  const std::vector<std::pair<double, double>>& binsPt);
+} // namespace dqmlcuts
 } // namespace o2::aod
 
 AnalysisCompositeCut* o2::aod::dqcuts::GetCompositeCut(const char* cutName);

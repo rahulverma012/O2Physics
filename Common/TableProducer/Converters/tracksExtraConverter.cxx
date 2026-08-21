@@ -19,9 +19,12 @@
 
 /// \author F.Mazzaschi <fmazzasc@cern.ch>
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdint>
 
 using namespace o2;
 using namespace o2::framework;
@@ -30,6 +33,7 @@ struct TracksExtraConverter {
   Produces<aod::StoredTracksExtra_001> tracksExtra_001;
   void process(aod::TracksExtra_000 const& tracksExtra_000)
   {
+    tracksExtra_001.reserve(tracksExtra_000.size());
 
     for (const auto& track0 : tracksExtra_000) {
 

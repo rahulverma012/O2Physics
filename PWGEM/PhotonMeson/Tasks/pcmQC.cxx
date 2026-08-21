@@ -8,24 +8,46 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-//
-// ========================
-//
-// This code runs loop over v0 photons for PCM QC.
-//    Please write to: daiki.sekihata@cern.ch
 
-#include <string>
-#include <vector>
+/// \file MaterialBudget.cxx
+/// \brief This code runs loop over v0 photons for PCM QC.
+/// \author Daiki Sekihata, daiki.sekihata@cern.ch
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoAHelpers.h"
-
-#include "PWGEM/PhotonMeson/Utils/PCMUtilities.h"
-#include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
-#include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
 #include "PWGEM/PhotonMeson/Core/EMPhotonEventCut.h"
+#include "PWGEM/PhotonMeson/Core/V0PhotonCandidate.h"
+#include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
+#include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
+
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CCDB/CcdbApi.h>
+#include <CommonConstants/MathConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DataFormatsParameters/GRPObject.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+#include <MathUtils/Utils.h>
+
+#include <TH1.h>
+
+#include <array>
+#include <cmath>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 using namespace o2;
 using namespace o2::aod;
@@ -34,16 +56,24 @@ using namespace o2::framework::expressions;
 using namespace o2::soa;
 using namespace o2::aod::pwgem::photon;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsMult, aod::EMEventsCent>;
+using MyCollisions = soa::Join<aod::PMEvents, aod::EMEventsAlias, aod::EMEventsMult_000, aod::EMEventsCent_000>;
 using MyCollision = MyCollisions::iterator;
 
-using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0PhotonsKFCov, aod::V0KFEMEventIds>;
+using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0KFEMEventIds>;
 using MyV0Photon = MyV0Photons::iterator;
+
+using MyV0PhotonsML = soa::Join<MyV0Photons, aod::V0PhotonsPhiVPsi>;
+using MyV0PhotonML = MyV0PhotonsML::iterator;
 
 struct PCMQC {
   Configurable<int> cfgCentEstimator{"cfgCentEstimator", 2, "FT0M:0, FT0A:1, FT0C:2"};
   Configurable<float> cfgCentMin{"cfgCentMin", 0, "min. centrality"};
   Configurable<float> cfgCentMax{"cfgCentMax", 999.f, "max. centrality"};
+  Configurable<std::string> ccdburl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
+  Configurable<std::string> grpPath{"grpPath", "GLO/GRP/GRP", "Path of the grp file"};
+  Configurable<std::string> grpmagPath{"grpmagPath", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object"};
+  Configurable<bool> skipGRPOquery{"skipGRPOquery", true, "skip grpo query"};
+  Configurable<float> d_bz_input{"d_bz_input", -999, "bz field in kG, -999 is automatic"};
 
   EMPhotonEventCut fEMEventCut;
   struct : ConfigurableGroup {
@@ -79,25 +109,46 @@ struct PCMQC {
     Configurable<float> cfg_max_eta_v0{"cfg_max_eta_v0", +0.8, "max eta for v0 photons at PV"};
     Configurable<float> cfg_min_v0radius{"cfg_min_v0radius", 4.0, "min v0 radius"};
     Configurable<float> cfg_max_v0radius{"cfg_max_v0radius", 90.0, "max v0 radius"};
+    Configurable<float> cfg_midL_v0radius{"cfg_midL_v0radius", -1.0, "middle low v0 radius for rejection if >0"};
+    Configurable<float> cfg_midH_v0radius{"cfg_midH_v0radius", -1.0, "middle high v0 radius for rejection if >0"};
     Configurable<float> cfg_max_alpha_ap{"cfg_max_alpha_ap", 0.95, "max alpha for AP cut"};
     Configurable<float> cfg_max_qt_ap{"cfg_max_qt_ap", 0.01, "max qT for AP cut"};
-    Configurable<float> cfg_min_cospa{"cfg_min_cospa", 0.997, "min V0 CosPA"};
-    Configurable<float> cfg_max_pca{"cfg_max_pca", 3.0, "max distance btween 2 legs"};
+    Configurable<float> cfg_min_cospa{"cfg_min_cospa", 0.999, "min V0 CosPA"};
+    Configurable<float> cfg_max_pca{"cfg_max_pca", 1.5, "max distance btween 2 legs"};
     Configurable<float> cfg_max_chi2kf{"cfg_max_chi2kf", 1e+10, "max chi2/ndf with KF"};
-    Configurable<bool> cfg_require_v0_with_correct_xz{"cfg_require_v0_with_correct_xz", true, "flag to select V0s with correct xz"};
     Configurable<bool> cfg_reject_v0_on_itsib{"cfg_reject_v0_on_itsib", true, "flag to reject V0s on ITSib"};
     Configurable<int> cfg_min_ncluster_tpc{"cfg_min_ncluster_tpc", 0, "min ncluster tpc"};
     Configurable<int> cfg_min_ncrossedrows{"cfg_min_ncrossedrows", 40, "min ncrossed rows"};
     Configurable<float> cfg_max_frac_shared_clusters_tpc{"cfg_max_frac_shared_clusters_tpc", 999.f, "max fraction of shared clusters in TPC"};
     Configurable<float> cfg_max_chi2tpc{"cfg_max_chi2tpc", 4.0, "max chi2/NclsTPC"};
-    Configurable<float> cfg_max_chi2its{"cfg_max_chi2its", 5.0, "max chi2/NclsITS"};
+    Configurable<float> cfg_max_chi2its{"cfg_max_chi2its", 36.0, "max chi2/NclsITS"};
     Configurable<float> cfg_min_TPCNsigmaEl{"cfg_min_TPCNsigmaEl", -3.0, "min. TPC n sigma for electron"};
     Configurable<float> cfg_max_TPCNsigmaEl{"cfg_max_TPCNsigmaEl", +3.0, "max. TPC n sigma for electron"};
     Configurable<bool> cfg_disable_itsonly_track{"cfg_disable_itsonly_track", false, "flag to disable ITSonly tracks"};
     Configurable<bool> cfg_disable_tpconly_track{"cfg_disable_tpconly_track", false, "flag to disable TPConly tracks"};
+    Configurable<bool> cfg_dEdx_postcalibration{"cfg_dEdx_postcalibration", false, "flag to enable dEdx post calibration"};
+    // for ML cuts
+    Configurable<bool> cfg_apply_ml_cuts{"cfg_apply_ml", false, "flag to apply ML cut"};
+    Configurable<bool> cfg_use_2d_binning{"cfg_use_2d_binning", false, "flag to use 2D binning (pT, cent)"};
+    Configurable<bool> cfg_load_ml_models_from_ccdb{"cfg_load_ml_models_from_ccdb", true, "flag to load ML models from CCDB"};
+    Configurable<int> cfg_timestamp_ccdb{"cfg_timestamp_ccdb", -1, "timestamp for CCDB"};
+    Configurable<int> cfg_nclasses_ml{"cfg_nclasses_ml", static_cast<int>(o2::analysis::em_cuts_ml::NCutScores), "number of classes for ML"};
+    Configurable<std::vector<int>> cfg_cut_dir_ml{"cfg_cut_dir_ml", std::vector<int>{o2::analysis::em_cuts_ml::vecCutDir}, "cut direction for ML"};
+    Configurable<std::vector<std::string>> cfg_input_feature_names{"cfg_input_feature_names", std::vector<std::string>{"feature1", "feature2"}, "input feature names for ML models"};
+    Configurable<std::vector<std::string>> cfg_model_paths_ccdb{"cfg_model_paths_ccdb", std::vector<std::string>{"path_ccdb/BDT_PCM/"}, "CCDB paths for ML models"};
+    Configurable<std::vector<std::string>> cfg_onnx_file_names{"cfg_onnx_file_names", std::vector<std::string>{"ModelHandler_onnx_PCM.onnx"}, "ONNX file names for ML models"};
+    Configurable<std::vector<std::string>> cfg_labels_bins_ml{"cfg_labels_bins_ml", std::vector<std::string>{"bin 0", "bin 1"}, "Labels for bins"};
+    Configurable<std::vector<std::string>> cfg_labels_cut_scores_ml{"cfg_labels_cut_scores_ml", std::vector<std::string>{o2::analysis::em_cuts_ml::labelsCutScore}, "Labels for cut scores"};
+    Configurable<std::vector<double>> cfg_bins_pt_ml{"cfg_bins_pt_ml", std::vector<double>{0.0, +1e+10}, "pT bin limits for ML application"};
+    Configurable<std::vector<double>> cfg_bins_cent_ml{"cfg_bins_cent_ml", std::vector<double>{o2::analysis::em_cuts_ml::vecBinsCent}, "centrality bins for ML"};
+    Configurable<std::vector<double>> cfg_cuts_ml_flat{"cfg_cuts_ml_flat", {0.5}, "Flattened ML cuts: [bin0_score0, bin0_score1, ..., binN_scoreM]"};
   } pcmcuts;
 
-  static constexpr std::string_view event_types[2] = {"before/", "after/"};
+  o2::ccdb::CcdbApi ccdbApi;
+  o2::framework::Service<o2::ccdb::BasicCCDBManager> ccdb{};
+  int mRunNumber = 0;
+  float d_bz = 0;
+  static constexpr std::array<std::string_view, 2> event_types = {"before/", "after/"};
   HistogramRegistry fRegistry{"output", {}, OutputObjHandlingPolicy::AnalysisObject, false, false};
 
   void init(InitContext&)
@@ -105,6 +156,55 @@ struct PCMQC {
     addhistograms();
     DefineEMEventCut();
     DefinePCMCut();
+
+    mRunNumber = 0;
+    d_bz = 0;
+
+    ccdb->setURL(ccdburl);
+    ccdb->setCaching(true);
+    ccdb->setLocalObjectValidityChecking();
+    ccdb->setFatalWhenNull(false);
+  }
+
+  template <typename TCollision>
+  void initCCDB(TCollision const& collision)
+  {
+    if (mRunNumber == collision.runNumber()) {
+      return;
+    }
+
+    // In case override, don't proceed, please - no CCDB access required
+    if (d_bz_input > -990) {
+      d_bz = d_bz_input;
+      o2::parameters::GRPMagField grpmag;
+      if (std::fabs(d_bz) > 1e-5) {
+        grpmag.setL3Current(30000.f / (d_bz / 5.0f));
+      }
+      mRunNumber = collision.runNumber();
+      return;
+    }
+
+    auto run3grp_timestamp = collision.timestamp();
+    o2::parameters::GRPObject* grpo = nullptr;
+    o2::parameters::GRPMagField* grpmag = nullptr;
+    if (!skipGRPOquery) {
+      grpo = ccdb->getForTimeStamp<o2::parameters::GRPObject>(grpPath, run3grp_timestamp);
+    }
+    if (grpo) {
+      // Fetch magnetic field from ccdb for current collision
+      d_bz = grpo->getNominalL3Field();
+      LOG(info) << "Retrieved GRP for timestamp " << run3grp_timestamp << " with magnetic field of " << d_bz << " kZG";
+    } else {
+      grpmag = ccdb->getForTimeStamp<o2::parameters::GRPMagField>(grpmagPath, run3grp_timestamp);
+      if (!grpmag) {
+        LOG(fatal) << "Got nullptr from CCDB for path " << grpmagPath << " of object GRPMagField and " << grpPath << " of object GRPObject for timestamp " << run3grp_timestamp;
+      }
+      // Fetch magnetic field from ccdb for current collision
+      d_bz = std::lround(5.f * grpmag->getL3Current() / 30000.f);
+      LOG(info) << "Retrieved GRP for timestamp " << run3grp_timestamp << " with magnetic field of " << d_bz << " kZG";
+    }
+    fV0PhotonCut.SetD_Bz(d_bz);
+    mRunNumber = collision.runNumber();
   }
 
   void addhistograms()
@@ -135,8 +235,9 @@ struct PCMQC {
 
     // v0 info
     fRegistry.add("V0/hPt", "pT;p_{T,#gamma} (GeV/c)", kTH1F, {{2000, 0.0f, 20}}, false);
-    fRegistry.add("V0/hEtaPhi", "#eta vs. #varphi;#varphi (rad.);#eta", kTH2F, {{90, 0, 2 * M_PI}, {200, -1.0f, 1.0f}}, false);
-    fRegistry.add("V0/hRadius", "V0Radius; radius in Z (cm);radius in XY (cm)", kTH2F, {{200, -100, 100}, {200, 0.0f, 100.0f}}, false);
+    fRegistry.add("V0/hEtaPhi", "#eta vs. #varphi;#varphi (rad.);#eta", kTH2F, {{90, 0, o2::constants::math::TwoPI}, {200, -1.0f, 1.0f}}, false);
+    fRegistry.add("V0/hXY", "conversion point in XY;V_{x} (cm);V_{y} (cm)", kTH2F, {{400, -100.0f, 100.0f}, {400, -100.0f, 100.0f}}, false);
+    fRegistry.add("V0/hRZ", "conversion point in RZ;Z (cm);R_{xy} (cm)", kTH2F, {{200, -100, 100}, {200, 0.0f, 100.0f}}, false);
     fRegistry.add("V0/hCosPA", "V0CosPA;cosine pointing angle in 3D", kTH1F, {{100, 0.99f, 1.0f}}, false);
     fRegistry.add("V0/hCosPAXY", "V0CosPA;cosine pointing angle in XY", kTH1F, {{100, 0.99f, 1.0f}}, false);
     fRegistry.add("V0/hCosPARZ", "V0CosPA;cosine pointing angle in RZ", kTH1F, {{100, 0.99f, 1.0f}}, false);
@@ -145,24 +246,34 @@ struct PCMQC {
     fRegistry.add("V0/hDCAz_Pt", "DCA_{z} to PV vs. p_{T};DCA_{z} (cm);p_{T} (GeV/c)", kTH2F, {{200, -5.f, +5.f}, {2000, 0.0f, 20}}, false);
     fRegistry.add("V0/hAPplot", "AP plot;#alpha;q_{T} (GeV/c)", kTH2F, {{200, -1.0f, +1.0f}, {250, 0.0f, 0.25f}}, false);
     fRegistry.add("V0/hMassGamma", "hMassGamma;R_{xy} (cm);m_{ee} (GeV/c^{2})", kTH2F, {{200, 0.0f, 100.0f}, {100, 0.0f, 0.1f}}, false);
-    fRegistry.add("V0/hGammaRxy", "conversion point in XY;V_{x} (cm);V_{y} (cm)", kTH2F, {{400, -100.0f, 100.0f}, {400, -100.0f, 100.0f}}, false);
     fRegistry.add("V0/hKFChi2vsM", "KF chi2 vs. m_{ee};m_{ee} (GeV/c^{2});KF chi2/NDF", kTH2F, {{100, 0.0f, 0.1f}, {100, 0.f, 100.0f}}, false);
     fRegistry.add("V0/hKFChi2vsR", "KF chi2 vs. conversion point in XY;R_{xy} (cm);KF chi2/NDF", kTH2F, {{200, 0.0f, 100.0f}, {100, 0.f, 100.0f}}, false);
     fRegistry.add("V0/hKFChi2vsX", "KF chi2 vs. conversion point in X;X (cm);KF chi2/NDF", kTH2F, {{200, -100.0f, 100.0f}, {100, 0.f, 100.0f}}, false);
     fRegistry.add("V0/hKFChi2vsY", "KF chi2 vs. conversion point in Y;Y (cm);KF chi2/NDF", kTH2F, {{200, -100.0f, 100.0f}, {100, 0.f, 100.0f}}, false);
     fRegistry.add("V0/hKFChi2vsZ", "KF chi2 vs. conversion point in Z;Z (cm);KF chi2/NDF", kTH2F, {{200, -100.0f, 100.0f}, {100, 0.f, 100.0f}}, false);
-    fRegistry.add("V0/hPResolution", "p resolution;p_{#gamma} (GeV/c);#Deltap/p", kTH2F, {{1000, 0.0f, 10}, {100, 0, 0.1}}, false);
-    fRegistry.add("V0/hPtResolution", "p_{T} resolution;p_{#gamma} (GeV/c);#Deltap_{T}/p_{T}", kTH2F, {{1000, 0.0f, 10}, {100, 0, 0.1}}, false);
-    fRegistry.add("V0/hEtaResolution", "#eta resolution;p_{#gamma} (GeV/c);#Delta#eta", kTH2F, {{1000, 0.0f, 10}, {100, 0, 0.01}}, false);
-    fRegistry.add("V0/hThetaResolution", "#theta resolution;p_{#gamma} (GeV/c);#Delta#theta (rad.)", kTH2F, {{1000, 0.0f, 10}, {100, 0, 0.01}}, false);
-    fRegistry.add("V0/hPhiResolution", "#varphi resolution;p_{#gamma} (GeV/c);#Delta#varphi (rad.)", kTH2F, {{1000, 0.0f, 10}, {100, 0, 0.01}}, false);
-    fRegistry.add("V0/hsConvPoint", "photon conversion point;r_{xy} (cm);#varphi (rad.);#eta;", kTHnSparseF, {{100, 0.0f, 100}, {90, 0, 2 * M_PI}, {40, -2, +2}}, false);
+    fRegistry.add("V0/hsConvPoint", "photon conversion point;r_{xy} (cm);#varphi (rad.);#eta;", kTHnSparseF, {{100, 0.0f, 100}, {90, 0, o2::constants::math::TwoPI}, {80, -2, +2}}, false);
     fRegistry.add("V0/hNgamma", "Number of #gamma candidates per collision", kTH1F, {{101, -0.5f, 100.5f}});
+
+    if (pcmcuts.cfg_apply_ml_cuts) {
+      if (pcmcuts.cfg_nclasses_ml == 2) {
+        fRegistry.add("V0/hBDTBackgroundScoreVsPt", "BDT background score vs pT; pT (GeV/c); BDT background score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hBDTSignalScoreVsPt", "BDT signal score vs pT; pT (GeV/c); BDT signal score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hPhiVPsi", "#varphi vs. #psi angle;#psi (rad.); #varphi (rad.)", kTH2F, {{200, -o2::constants::math::PI, o2::constants::math::PI}, {200, 0, o2::constants::math::TwoPI}}, false);
+      } else if (pcmcuts.cfg_nclasses_ml == 3) {
+        fRegistry.add("V0/hBDTBackgroundScoreVsPt", "BDT background score vs pT; pT (GeV/c); BDT background score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hBDTPrimaryPhotonScoreVsPt", "BDT primary photon score vs pT; pT (GeV/c); BDT primary photon score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hBDTSecondaryPhotonScoreVsPt", "BDT secondary photon score vs pT; pT (GeV/c); BDT secondary photon score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hPhiVPsi", "#varphi vs. #psi angle;#psi (rad.); #varphi (rad.)", kTH2F, {{200, -o2::constants::math::PI, o2::constants::math::PI}, {200, 0, o2::constants::math::TwoPI}}, false);
+      } else {
+        fRegistry.add("V0/hBDTScoreVsPt", "BDT score vs pT; pT (GeV/c); BDT score", {HistType::kTH2F, {{1000, 0.0f, 20.0f}, {1000, 0.0f, 1.0f}}});
+        fRegistry.add("V0/hPhiVPsi", "#varphi vs. #psi angle;#psi (rad.); #varphi (rad.)", kTH2F, {{200, -o2::constants::math::PI, o2::constants::math::PI}, {200, 0, o2::constants::math::TwoPI}}, false);
+      }
+    }
 
     // v0leg info
     fRegistry.add("V0Leg/hPt", "pT;p_{T,e} (GeV/c)", kTH1F, {{1000, 0.0f, 10}}, false);
     fRegistry.add("V0Leg/hQoverPt", "q/pT;q/p_{T} (GeV/c)^{-1}", kTH1F, {{1000, -50, 50}}, false);
-    fRegistry.add("V0Leg/hEtaPhi", "#eta vs. #varphi;#varphi (rad.);#eta", kTH2F, {{90, 0, 2 * M_PI}, {200, -1.0f, 1.0f}}, false);
+    fRegistry.add("V0Leg/hEtaPhi", "#eta vs. #varphi;#varphi (rad.);#eta", kTH2F, {{90, 0, o2::constants::math::TwoPI}, {200, -1.0f, 1.0f}}, false);
     fRegistry.add("V0Leg/hDCAxyz", "DCA xy vs. z;DCA_{xy} (cm);DCA_{z} (cm)", kTH2F, {{200, -50.0f, 50.0f}, {200, -50.0f, 50.0f}}, false);
     fRegistry.add("V0Leg/hNclsTPC", "number of TPC clusters", kTH1F, {{161, -0.5, 160.5}}, false);
     fRegistry.add("V0Leg/hNcrTPC", "number of TPC crossed rows", kTH1F, {{161, -0.5, 160.5}}, false);
@@ -177,9 +288,13 @@ struct PCMQC {
     fRegistry.add("V0Leg/hChi2ITS", "chi2/number of ITS clusters", kTH1F, {{100, 0, 10}}, false);
     fRegistry.add("V0Leg/hITSClusterMap", "ITS cluster map", kTH1F, {{128, -0.5, 127.5}}, false);
     fRegistry.add("V0Leg/hMeanClusterSizeITS", "mean cluster size ITS;<cluster size> on ITS #times cos(#lambda)", kTH2F, {{1000, 0, 10}, {160, 0, 16}}, false);
-    fRegistry.add("V0Leg/hXY", "X vs. Y;X (cm);Y (cm)", kTH2F, {{100, 0, 100}, {80, -20, 20}}, false);
-    fRegistry.add("V0Leg/hZX", "Z vs. X;Z (cm);X (cm)", kTH2F, {{200, -100, 100}, {100, 0, 100}}, false);
-    fRegistry.add("V0Leg/hZY", "Z vs. Y;Z (cm);Y (cm)", kTH2F, {{200, -100, 100}, {80, -20, 20}}, false);
+    if (pcmcuts.cfg_dEdx_postcalibration) {
+      fRegistry.add("V0Leg/hPvsConvPointvsTPCNsigmaElvsEta_Pos", "momentum of pos leg vs. conversion point of V0 vs. TPC n sigma pos vs. eta of pos leg; p (GeV/c); r_{xy} (cm); n #sigma_{e}^{TPC}; #eta", kTHnSparseF, {{200, 0, 20}, {100, 0, 100}, {500, -5, 5}, {200, -1, +1}}, false);
+      fRegistry.add("V0Leg/hPvsConvPointvsTPCNsigmaElvsEta_Ele", "momentum of neg leg vs. conversion point of V0 vs. TPC n sigma el vs. eta of neg leg; p (GeV/c); r_{xy} (cm); n #sigma_{e}^{TPC}; #eta", kTHnSparseF, {{200, 0, 20}, {100, 0, 100}, {500, -5, 5}, {200, -1, +1}}, false);
+    }
+    // fRegistry.add("V0Leg/hXY", "X vs. Y;X (cm);Y (cm)", kTH2F, {{100, 0, 100}, {80, -20, 20}}, false);
+    // fRegistry.add("V0Leg/hZX", "Z vs. X;Z (cm);X (cm)", kTH2F, {{200, -100, 100}, {100, 0, 100}}, false);
+    // fRegistry.add("V0Leg/hZY", "Z vs. Y;Z (cm);Y (cm)", kTH2F, {{200, -100, 100}, {80, -20, 20}}, false);
   }
 
   void DefineEMEventCut()
@@ -210,13 +325,11 @@ struct PCMQC {
     fV0PhotonCut.SetMinCosPA(pcmcuts.cfg_min_cospa);
     fV0PhotonCut.SetMaxPCA(pcmcuts.cfg_max_pca);
     fV0PhotonCut.SetMaxChi2KF(pcmcuts.cfg_max_chi2kf);
-    fV0PhotonCut.SetRxyRange(pcmcuts.cfg_min_v0radius, pcmcuts.cfg_max_v0radius);
+    fV0PhotonCut.SetRxyRange(pcmcuts.cfg_min_v0radius, pcmcuts.cfg_max_v0radius, pcmcuts.cfg_midL_v0radius, pcmcuts.cfg_midH_v0radius);
     fV0PhotonCut.SetAPRange(pcmcuts.cfg_max_alpha_ap, pcmcuts.cfg_max_qt_ap);
     fV0PhotonCut.RejectITSib(pcmcuts.cfg_reject_v0_on_itsib);
 
     // for track
-    fV0PhotonCut.SetTrackPtRange(pcmcuts.cfg_min_pt_v0 * 0.4, 1e+10f);
-    fV0PhotonCut.SetTrackEtaRange(pcmcuts.cfg_min_eta_v0, pcmcuts.cfg_max_eta_v0);
     fV0PhotonCut.SetMinNClustersTPC(pcmcuts.cfg_min_ncluster_tpc);
     fV0PhotonCut.SetMinNCrossedRowsTPC(pcmcuts.cfg_min_ncrossedrows);
     fV0PhotonCut.SetMinNCrossedRowsOverFindableClustersTPC(0.8);
@@ -226,12 +339,35 @@ struct PCMQC {
     fV0PhotonCut.SetChi2PerClusterITS(-1e+10, pcmcuts.cfg_max_chi2its);
     fV0PhotonCut.SetNClustersITS(0, 7);
     fV0PhotonCut.SetMeanClusterSizeITSob(0.0, 16.0);
-    fV0PhotonCut.SetIsWithinBeamPipe(pcmcuts.cfg_require_v0_with_correct_xz);
     fV0PhotonCut.SetDisableITSonly(pcmcuts.cfg_disable_itsonly_track);
     fV0PhotonCut.SetDisableTPConly(pcmcuts.cfg_disable_tpconly_track);
     fV0PhotonCut.SetRequireITSTPC(pcmcuts.cfg_require_v0_with_itstpc);
     fV0PhotonCut.SetRequireITSonly(pcmcuts.cfg_require_v0_with_itsonly);
     fV0PhotonCut.SetRequireTPConly(pcmcuts.cfg_require_v0_with_tpconly);
+
+    // for ML
+    fV0PhotonCut.SetApplyMlCuts(pcmcuts.cfg_apply_ml_cuts);
+    fV0PhotonCut.SetUse2DBinning(pcmcuts.cfg_use_2d_binning);
+    fV0PhotonCut.SetLoadMlModelsFromCCDB(pcmcuts.cfg_load_ml_models_from_ccdb);
+    fV0PhotonCut.SetNClassesMl(pcmcuts.cfg_nclasses_ml);
+    fV0PhotonCut.SetMlTimestampCCDB(pcmcuts.cfg_timestamp_ccdb);
+    fV0PhotonCut.SetCcdbUrl(ccdburl);
+    auto mCentralityTypeMlEnum = static_cast<CentType>(cfgCentEstimator.value);
+    fV0PhotonCut.SetCentralityTypeMl(mCentralityTypeMlEnum);
+    fV0PhotonCut.SetCutDirMl(pcmcuts.cfg_cut_dir_ml);
+    fV0PhotonCut.SetMlModelPathsCCDB(pcmcuts.cfg_model_paths_ccdb);
+    fV0PhotonCut.SetMlOnnxFileNames(pcmcuts.cfg_onnx_file_names);
+    fV0PhotonCut.SetBinsPtMl(pcmcuts.cfg_bins_pt_ml);
+    fV0PhotonCut.SetBinsCentMl(pcmcuts.cfg_bins_cent_ml);
+    fV0PhotonCut.SetCutsMl(pcmcuts.cfg_cuts_ml_flat);
+    fV0PhotonCut.SetNamesInputFeatures(pcmcuts.cfg_input_feature_names);
+    fV0PhotonCut.SetLabelsBinsMl(pcmcuts.cfg_labels_bins_ml);
+    fV0PhotonCut.SetLabelsCutScoresMl(pcmcuts.cfg_labels_cut_scores_ml);
+    fV0PhotonCut.SetD_Bz(0.0f); // dummy value -> only for psi_pair calculation
+
+    if (pcmcuts.cfg_apply_ml_cuts) {
+      fV0PhotonCut.initV0MlModels(ccdbApi);
+    }
   }
 
   template <const int ev_id, typename TCollision>
@@ -274,36 +410,53 @@ struct PCMQC {
     fRegistry.fill(HIST("Event/") + HIST(event_types[ev_id]) + HIST("hMultFT0MvsMultNTracksPV"), collision.multFT0A() + collision.multFT0C(), collision.multNTracksPV());
   }
 
-  template <typename TCollision, typename TV0>
-  void fillV0Info(TCollision const& collision, TV0 const& v0)
+  template <typename TV0>
+  void fillV0Info(TV0 const& v0)
   {
     fRegistry.fill(HIST("V0/hPt"), v0.pt());
     fRegistry.fill(HIST("V0/hEtaPhi"), v0.phi(), v0.eta());
-    fRegistry.fill(HIST("V0/hRadius"), v0.vz(), v0.v0radius());
+    fRegistry.fill(HIST("V0/hXY"), v0.vx(), v0.vy());
+    fRegistry.fill(HIST("V0/hRZ"), v0.vz(), v0.v0radius());
     fRegistry.fill(HIST("V0/hCosPA"), v0.cospa());
-    fRegistry.fill(HIST("V0/hCosPAXY"), v0.cosPAXY(collision.posX(), collision.posY()));
-    fRegistry.fill(HIST("V0/hCosPARZ"), v0.cosPARZ(collision.posX(), collision.posY(), collision.posZ()));
+    fRegistry.fill(HIST("V0/hCosPAXY"), v0.cospaXY());
+    fRegistry.fill(HIST("V0/hCosPARZ"), v0.cospaRZ());
     fRegistry.fill(HIST("V0/hPCA"), v0.pca());
     fRegistry.fill(HIST("V0/hDCAxyz"), v0.dcaXYtopv(), v0.dcaZtopv());
     fRegistry.fill(HIST("V0/hDCAz_Pt"), v0.dcaZtopv(), v0.pt());
     fRegistry.fill(HIST("V0/hAPplot"), v0.alpha(), v0.qtarm());
     fRegistry.fill(HIST("V0/hMassGamma"), v0.v0radius(), v0.mGamma());
-    fRegistry.fill(HIST("V0/hGammaRxy"), v0.vx(), v0.vy());
     fRegistry.fill(HIST("V0/hKFChi2vsM"), v0.mGamma(), v0.chiSquareNDF());
     fRegistry.fill(HIST("V0/hKFChi2vsR"), v0.v0radius(), v0.chiSquareNDF());
     fRegistry.fill(HIST("V0/hKFChi2vsX"), v0.vx(), v0.chiSquareNDF());
     fRegistry.fill(HIST("V0/hKFChi2vsY"), v0.vy(), v0.chiSquareNDF());
     fRegistry.fill(HIST("V0/hKFChi2vsZ"), v0.vz(), v0.chiSquareNDF());
-    fRegistry.fill(HIST("V0/hPResolution"), v0.p(), getPResolution(v0) / v0.p());
-    fRegistry.fill(HIST("V0/hPtResolution"), v0.p(), getPtResolution(v0) / v0.pt());
-    fRegistry.fill(HIST("V0/hEtaResolution"), v0.p(), getEtaResolution(v0));
-    fRegistry.fill(HIST("V0/hThetaResolution"), v0.p(), getThetaResolution(v0));
-    fRegistry.fill(HIST("V0/hPhiResolution"), v0.p(), getPhiResolution(v0));
 
-    float phi_cp = atan2(v0.vy(), v0.vx());
+    float phi_cp = std::atan2(v0.vy(), v0.vx());
     o2::math_utils::bringTo02Pi(phi_cp);
     float eta_cp = std::atanh(v0.vz() / std::sqrt(std::pow(v0.vx(), 2) + std::pow(v0.vy(), 2) + std::pow(v0.vz(), 2)));
     fRegistry.fill(HIST("V0/hsConvPoint"), v0.v0radius(), phi_cp, eta_cp);
+
+    // BDT response histogram can be filled here when apply BDT is true
+    if (pcmcuts.cfg_apply_ml_cuts) {
+      const std::span<const float>& bdtValue = fV0PhotonCut.getBDTValue();
+      float psipair = 999.f;
+      float phiv = 999.f;
+      if constexpr (requires { v0.psipair(); v0.phiv(); }) {
+        psipair = v0.psipair();
+        phiv = v0.phiv();
+      }
+      fRegistry.fill(HIST("V0/hPhiVPsi"), psipair, phiv);
+      if (pcmcuts.cfg_nclasses_ml == 2 && bdtValue.size() == 2) {
+        fRegistry.fill(HIST("V0/hBDTBackgroundScoreVsPt"), v0.pt(), bdtValue[0]);
+        fRegistry.fill(HIST("V0/hBDTSignalScoreVsPt"), v0.pt(), bdtValue[1]);
+      } else if (pcmcuts.cfg_nclasses_ml == 3 && bdtValue.size() == 3) {
+        fRegistry.fill(HIST("V0/hBDTBackgroundScoreVsPt"), v0.pt(), bdtValue[0]);
+        fRegistry.fill(HIST("V0/hBDTPrimaryPhotonScoreVsPt"), v0.pt(), bdtValue[1]);
+        fRegistry.fill(HIST("V0/hBDTSecondaryPhotonScoreVsPt"), v0.pt(), bdtValue[2]);
+      } else if (bdtValue.size() == 1) {
+        fRegistry.fill(HIST("V0/hBDTCutVsPt"), v0.pt(), bdtValue[0]);
+      }
+    }
   }
 
   template <typename TLeg>
@@ -328,21 +481,24 @@ struct PCMQC {
     fRegistry.fill(HIST("V0Leg/hTPCdEdx"), leg.tpcInnerParam(), leg.tpcSignal());
     fRegistry.fill(HIST("V0Leg/hTPCNsigmaEl"), leg.tpcInnerParam(), leg.tpcNSigmaEl());
     fRegistry.fill(HIST("V0Leg/hTPCNsigmaPi"), leg.tpcInnerParam(), leg.tpcNSigmaPi());
-    fRegistry.fill(HIST("V0Leg/hXY"), leg.x(), leg.y());
-    fRegistry.fill(HIST("V0Leg/hZX"), leg.z(), leg.x());
-    fRegistry.fill(HIST("V0Leg/hZY"), leg.z(), leg.y());
+    // fRegistry.fill(HIST("V0Leg/hXY"), leg.x(), leg.y());
+    // fRegistry.fill(HIST("V0Leg/hZX"), leg.z(), leg.x());
+    // fRegistry.fill(HIST("V0Leg/hZY"), leg.z(), leg.y());
   }
 
-  Preslice<MyV0Photons> perCollision = aod::v0photonkf::emeventId;
+  Preslice<MyV0Photons> perCollisionV0 = aod::v0photonkf::pmeventId;
+  Preslice<MyV0PhotonsML> perCollisionV0ML = aod::v0photonkf::pmeventId;
   Filter collisionFilter_centrality = (cfgCentMin < o2::aod::cent::centFT0M && o2::aod::cent::centFT0M < cfgCentMax) || (cfgCentMin < o2::aod::cent::centFT0A && o2::aod::cent::centFT0A < cfgCentMax) || (cfgCentMin < o2::aod::cent::centFT0C && o2::aod::cent::centFT0C < cfgCentMax);
   Filter collisionFilter_occupancy_track = eventcuts.cfgTrackOccupancyMin <= o2::aod::evsel::trackOccupancyInTimeRange && o2::aod::evsel::trackOccupancyInTimeRange < eventcuts.cfgTrackOccupancyMax;
   Filter collisionFilter_occupancy_ft0c = eventcuts.cfgFT0COccupancyMin <= o2::aod::evsel::ft0cOccupancyInTimeRange && o2::aod::evsel::ft0cOccupancyInTimeRange < eventcuts.cfgFT0COccupancyMax;
   using FilteredMyCollisions = soa::Filtered<MyCollisions>;
 
-  void processQC(FilteredMyCollisions const& collisions, MyV0Photons const& v0photons, aod::V0Legs const&)
+  template <typename TV0Photon, typename TPerCollision>
+  void process(FilteredMyCollisions const& collisions, TV0Photon const& v0photons, aod::V0Legs const&, TPerCollision const& perCollision)
   {
-    for (auto& collision : collisions) {
-      const float centralities[3] = {collision.centFT0M(), collision.centFT0A(), collision.centFT0C()};
+    for (const auto& collision : collisions) {
+      initCCDB(collision);
+      const std::array<float, 3> centralities = {collision.centFT0M(), collision.centFT0A(), collision.centFT0C()};
       if (centralities[cfgCentEstimator] < cfgCentMin || cfgCentMax < centralities[cfgCentEstimator]) {
         continue;
       }
@@ -355,33 +511,47 @@ struct PCMQC {
       fRegistry.fill(HIST("Event/before/hCollisionCounter"), 10.0); // accepted
       fRegistry.fill(HIST("Event/after/hCollisionCounter"), 10.0);  // accepted
 
+      fV0PhotonCut.SetCentrality(centralities[cfgCentEstimator]);
       int nv0 = 0;
       auto v0photons_coll = v0photons.sliceBy(perCollision, collision.globalIndex());
-      for (auto& v0 : v0photons_coll) {
-        auto pos = v0.posTrack_as<aod::V0Legs>();
-        auto ele = v0.negTrack_as<aod::V0Legs>();
-
-        if (!fV0PhotonCut.IsSelected<aod::V0Legs>(v0)) {
+      for (const auto& v0 : v0photons_coll) {
+        auto pos = v0.template posTrack_as<aod::V0Legs>();
+        auto ele = v0.template negTrack_as<aod::V0Legs>();
+        if (!fV0PhotonCut.IsSelected<decltype(v0), aod::V0Legs>(v0)) {
           continue;
         }
-        fillV0Info(collision, v0);
-        for (auto& leg : {pos, ele}) {
+        fillV0Info(v0);
+        for (const auto& leg : {pos, ele}) {
           fillV0LegInfo(leg);
+        }
+        if (pcmcuts.cfg_dEdx_postcalibration) {
+          fRegistry.fill(HIST("V0Leg/hPvsConvPointvsTPCNsigmaElvsEta_Pos"), pos.p(), v0.v0radius(), pos.tpcNSigmaEl(), pos.eta());
+          fRegistry.fill(HIST("V0Leg/hPvsConvPointvsTPCNsigmaElvsEta_Ele"), ele.p(), v0.v0radius(), ele.tpcNSigmaEl(), ele.eta());
         }
         nv0++;
       } // end of v0 loop
       fRegistry.fill(HIST("V0/hNgamma"), nv0);
     } // end of collision loop
+  }
+  void processQC(FilteredMyCollisions const& collisions, MyV0Photons const& v0photons, aod::V0Legs const& v0legs)
+  {
+    process(collisions, v0photons, v0legs, perCollisionV0);
   } // end of process
+
+  void processQCML(FilteredMyCollisions const& collisions, MyV0PhotonsML const& v0photonsML, aod::V0Legs const& v0legs)
+  {
+    process(collisions, v0photonsML, v0legs, perCollisionV0ML);
+  } // end of ML process
 
   void processDummy(MyCollisions const&) {}
 
   PROCESS_SWITCH(PCMQC, processQC, "run PCM QC", true);
+  PROCESS_SWITCH(PCMQC, processQCML, "run PCM QC with ML", false);
   PROCESS_SWITCH(PCMQC, processDummy, "Dummy function", false);
 };
 
-WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
+WorkflowSpec defineDataProcessing(ConfigContext const& context)
 {
   return WorkflowSpec{
-    adaptAnalysisTask<PCMQC>(cfgc, TaskName{"pcm-qc"})};
+    adaptAnalysisTask<PCMQC>(context, TaskName{"pcm-qc"})};
 }

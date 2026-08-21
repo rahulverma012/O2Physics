@@ -10,27 +10,30 @@
 // or submit itself to any jurisdiction.
 
 //
-// Class for dimuon selection
+// Class for dimuon selection // dummy comment
 //
 
 #ifndef PWGEM_DILEPTON_CORE_DIMUONCUT_H_
 #define PWGEM_DILEPTON_CORE_DIMUONCUT_H_
 
-#include <algorithm>
-#include <set>
-#include <vector>
-#include <utility>
-#include <string>
-#include "TNamed.h"
-#include "Math/Vector4D.h"
-
-#include "MathUtils/Utils.h"
-#include "Framework/Logger.h"
-#include "Framework/DataTypes.h"
-#include "CommonConstants/PhysicsConstants.h"
 #include "PWGEM/Dilepton/Utils/EMTrackUtilities.h"
 
-using namespace o2::aod::pwgem::dilepton::utils::emtrackutil;
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/DataTypes.h>
+#include <MathUtils/Utils.h>
+
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
+#include <Math/Vector4Dfwd.h>
+#include <TNamed.h>
+
+#include <Rtypes.h>
+
+#include <cmath>
+#include <cstdint>
+#include <functional>
+#include <vector>
+
+#include <math.h>
 
 class DimuonCut : public TNamed
 {
@@ -57,27 +60,32 @@ class DimuonCut : public TNamed
     kChi2,
     kMatchingChi2MCHMFT,
     kMatchingChi2MCHMID,
+    kChi2MFT,
     kRabs,
     kPDCA,
+    kMFTHitMap,
+    kDPtDEtaDPhiwrtMCHMID,
+    kDiffMatchingChi2MCHMFT,
+    kTTCA,
     kNCuts
   };
 
-  template <typename TPair>
-  bool IsSelected(TPair const& pair) const
-  {
-    auto t1 = std::get<0>(pair);
-    auto t2 = std::get<1>(pair);
+  // template <typename TPair>
+  // bool IsSelected(TPair const& pair) const
+  // {
+  //   auto t1 = std::get<0>(pair);
+  //   auto t2 = std::get<1>(pair);
 
-    if (!IsSelectedTrack(t1) || !IsSelectedTrack(t2)) {
-      return false;
-    }
+  //   if (!IsSelectedTrack(t1) || !IsSelectedTrack(t2)) {
+  //     return false;
+  //   }
 
-    if (!IsSelectedPair(t1, t2)) {
-      return false;
-    }
+  //   if (!IsSelectedPair(t1, t2)) {
+  //     return false;
+  //   }
 
-    return true;
-  }
+  //   return true;
+  // }
 
   template <bool dont_require_rapidity = false, typename TTrack1, typename TTrack2>
   bool IsSelectedPair(TTrack1 const& t1, TTrack2 const& t2) const
@@ -86,11 +94,15 @@ class DimuonCut : public TNamed
     ROOT::Math::PtEtaPhiMVector v2(t2.pt(), t2.eta(), t2.phi(), o2::constants::physics::MassMuon);
     ROOT::Math::PtEtaPhiMVector v12 = v1 + v2;
 
-    float dca_xy_t1 = fwdDcaXYinSigma(t1);
-    float dca_xy_t2 = fwdDcaXYinSigma(t2);
+    float dca_xy_t1 = o2::aod::pwgem::dilepton::utils::emtrackutil::fwdDcaXYinSigma(t1);
+    float dca_xy_t2 = o2::aod::pwgem::dilepton::utils::emtrackutil::fwdDcaXYinSigma(t2);
     float pair_dca_xy = std::sqrt((dca_xy_t1 * dca_xy_t1 + dca_xy_t2 * dca_xy_t2) / 2.);
 
     if (v12.M() < mMinMass || mMaxMass < v12.M()) {
+      return false;
+    }
+
+    if (v12.Pt() < mMinPairPt || mMaxPairPt < v12.Pt()) {
       return false;
     }
 
@@ -148,47 +160,25 @@ class DimuonCut : public TNamed
     if (!IsSelectedTrack(track, DimuonCuts::kMatchingChi2MCHMID)) {
       return false;
     }
-    if (!IsSelectedTrack(track, DimuonCuts::kPDCA)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kRabs)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  template <typename TTrack>
-  bool IsSelectedTrackWoPtEta(TTrack const& track) const
-  {
-    if (!IsSelectedTrack(track, DimuonCuts::kTrackType)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kTrackPhiRange)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kDCAxy)) {
-      return false;
-    }
-    if (track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kMFTNCls)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kMCHMIDNCls)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kChi2)) {
-      return false;
-    }
-    if (track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kMatchingChi2MCHMFT)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kMatchingChi2MCHMID)) {
+    if (track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kChi2MFT)) {
       return false;
     }
     if (!IsSelectedTrack(track, DimuonCuts::kPDCA)) {
       return false;
     }
     if (!IsSelectedTrack(track, DimuonCuts::kRabs)) {
+      return false;
+    }
+    if (!IsSelectedTrack(track, DimuonCuts::kTTCA)) {
+      return false;
+    }
+    if (mApplyMFTHitMap && track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kMFTHitMap)) {
+      return false;
+    }
+    if (track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kDPtDEtaDPhiwrtMCHMID)) {
+      return false;
+    }
+    if (track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) && !IsSelectedTrack(track, DimuonCuts::kDiffMatchingChi2MCHMFT)) {
       return false;
     }
 
@@ -221,19 +211,42 @@ class DimuonCut : public TNamed
         return track.nClusters() >= mMinNClustersMCHMID;
 
       case DimuonCuts::kChi2:
-        return track.chi2() < mMaxChi2;
+        return track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) ? 0.f < track.chi2() / (2.f * (track.nClusters() + track.nClustersMFT()) - 5.f) && track.chi2() / (2.f * (track.nClusters() + track.nClustersMFT()) - 5.f) < mMaxChi2 : 0.f < track.chi2() && track.chi2() < mMaxChi2;
+
+      case DimuonCuts::kChi2MFT:
+        return track.trackType() == static_cast<uint8_t>(o2::aod::fwdtrack::ForwardTrackTypeEnum::GlobalMuonTrack) ? 0.f < track.chi2MFT() / (2.f * track.nClustersMFT() - 5.f) && track.chi2MFT() / (2.f * track.nClustersMFT() - 5.f) < mMaxChi2MFT : true;
 
       case DimuonCuts::kMatchingChi2MCHMFT:
-        return track.chi2MatchMCHMFT() < mMaxMatchingChi2MCHMFT;
+        // return 0.f < track.chi2MatchMCHMFT() && track.chi2MatchMCHMFT() < mMaxMatchingChi2MCHMFT;
+        return 0.f < track.chi2MatchMCHMFT() && track.chi2MatchMCHMFT() < mMaxMatchingChi2MCHMFTPtDep(track.pt());
 
       case DimuonCuts::kMatchingChi2MCHMID:
-        return track.chi2MatchMCHMID() < mMaxMatchingChi2MCHMID;
+        return 0.f < track.chi2MatchMCHMID() && track.chi2MatchMCHMID() < mMaxMatchingChi2MCHMID;
 
       case DimuonCuts::kPDCA:
         return track.pDca() < mMaxPDCARabsDep(track.rAtAbsorberEnd());
 
       case DimuonCuts::kRabs:
         return mMinRabs < track.rAtAbsorberEnd() && track.rAtAbsorberEnd() < mMaxRabs;
+
+      case DimuonCuts::kTTCA:
+        return mEnableTTCA ? true : track.isAssociatedToMPC();
+
+      case DimuonCuts::kMFTHitMap: {
+        std::vector<bool> mftHitMap{o2::aod::pwgem::dilepton::utils::emtrackutil::checkMFTHitMap<0, 1>(track), o2::aod::pwgem::dilepton::utils::emtrackutil::checkMFTHitMap<2, 3>(track), o2::aod::pwgem::dilepton::utils::emtrackutil::checkMFTHitMap<4, 5>(track), o2::aod::pwgem::dilepton::utils::emtrackutil::checkMFTHitMap<6, 7>(track), o2::aod::pwgem::dilepton::utils::emtrackutil::checkMFTHitMap<8, 9>(track)};
+        for (const auto& iDisk : mRequiredMFTDisks) {
+          if (!mftHitMap[iDisk]) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      case DimuonCuts::kDPtDEtaDPhiwrtMCHMID:
+        return std::fabs(track.ptMatchedMCHMID() - track.pt()) / track.pt() < mMaxReldPtwrtMCHMID && std::sqrt(std::pow((track.etaMatchedMCHMID() - track.eta()) / mMaxdEtawrtMCHMID, 2) + std::pow((track.phiMatchedMCHMID() - track.phi()) / mMaxdPhiwrtMCHMID, 2)) < 1.f;
+
+      case DimuonCuts::kDiffMatchingChi2MCHMFT:
+        return track.diffChi2MatchingMCHMFT() > mMaxDiffMatchingChi2MCHMFT;
 
       default:
         return false;
@@ -254,11 +267,17 @@ class DimuonCut : public TNamed
   void SetNClustersMFT(int min, int max);
   void SetNClustersMCHMID(int min, int max);
   void SetChi2(float min, float max);
+  void SetChi2MFT(float min, float max);
   void SetMatchingChi2MCHMFT(float min, float max);
   void SetMatchingChi2MCHMID(float min, float max);
   void SetDCAxy(float min, float max); // in cm
   void SetRabs(float min, float max);  // in cm
   void SetMaxPDCARabsDep(std::function<float(float)> RabsDepCut);
+  void SetMFTHitMap(bool flag, std::vector<int> hitMap);
+  void SetMaxdPtdEtadPhiwrtMCHMID(float reldPtMax, float dEtaMax, float dPhiMax); // this is relevant for global muons
+  void SetMaxMatchingChi2MCHMFTPtDep(std::function<float(float)> PtDepCut);
+  void SetMaxDiffMatchingChi2MCHMFT(float diff);
+  void EnableTTCA(bool flag);
 
  private:
   // pair cuts
@@ -269,6 +288,7 @@ class DimuonCut : public TNamed
   bool mApplydEtadPhi{false};                     // flag to apply deta, dphi cut between 2 tracks
   float mMinDeltaEta{0.f};
   float mMinDeltaPhi{0.f};
+  bool mEnableTTCA{true};
 
   // kinematic cuts
   float mMinTrackPt{0.f}, mMaxTrackPt{1e10f};        // range in pT
@@ -277,15 +297,21 @@ class DimuonCut : public TNamed
 
   // track quality cuts
   int mTrackType{3};
-  int mMinNClustersMFT{0}, mMaxNClustersMFT{10};                    // min number of TPC clusters
-  int mMinNClustersMCHMID{0}, mMaxNClustersMCHMID{16};              // min number of TPC clusters
-  float mMinChi2{0.f}, mMaxChi2{1e10f};                             // max tpc fit chi2 per TPC cluster
-  float mMinMatchingChi2MCHMFT{0.f}, mMaxMatchingChi2MCHMFT{1e10f}; // max tpc fit chi2 per TPC cluster
-  float mMinMatchingChi2MCHMID{0.f}, mMaxMatchingChi2MCHMID{1e10f}; // max tpc fit chi2 per TPC cluster
+  int mMinNClustersMFT{0}, mMaxNClustersMFT{10};                    // min number of MFT clusters
+  int mMinNClustersMCHMID{0}, mMaxNClustersMCHMID{20};              // min number of MCH-MID clusters
+  float mMinChi2{0.f}, mMaxChi2{1e10f};                             // max chi2 per MFT + MCH cluster
+  float mMinChi2MFT{0.f}, mMaxChi2MFT{1e10f};                       // max chi2 per MFT cluster
+  float mMinMatchingChi2MCHMFT{0.f}, mMaxMatchingChi2MCHMFT{1e10f}; // max matching chi2 between MCH-MFT
+  float mMinMatchingChi2MCHMID{0.f}, mMaxMatchingChi2MCHMID{1e10f}; // max matching chi2 between MCH-MID
   std::function<float(float)> mMaxPDCARabsDep{};                    // max pdca in xy plane as function of Rabs
+  std::function<float(float)> mMaxMatchingChi2MCHMFTPtDep{};        // max matching chi2 between MCH-MFT as function of pt
 
   float mMinRabs{17.6}, mMaxRabs{89.5};
   float mMinDcaXY{0.0f}, mMaxDcaXY{1e10f};
+  float mMaxReldPtwrtMCHMID{1e10f}, mMaxdEtawrtMCHMID{1e10f}, mMaxdPhiwrtMCHMID{1e10f};
+  float mMaxDiffMatchingChi2MCHMFT{-1.f};
+  bool mApplyMFTHitMap{false};
+  std::vector<int> mRequiredMFTDisks{};
 
   ClassDef(DimuonCut, 1);
 };

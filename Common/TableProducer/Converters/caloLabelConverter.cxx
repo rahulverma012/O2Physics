@@ -8,9 +8,13 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdint>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -23,6 +27,7 @@ struct caloLabelConverter {
   {
     std::vector<float> amplitude = {0};
     std::vector<int32_t> particleId = {0};
+    McCaloLabels_001.reserve(mccalolabelTable.size());
     for (auto& mccalolabel : mccalolabelTable) {
       particleId[0] = mccalolabel.mcParticleId();
       // Repopulate new table

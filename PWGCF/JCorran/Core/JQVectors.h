@@ -15,8 +15,12 @@
 #ifndef PWGCF_JCORRAN_CORE_JQVECTORS_H_
 #define PWGCF_JCORRAN_CORE_JQVECTORS_H_
 
-#include <experimental/type_traits>
 #include <TMath.h>
+
+#include <RtypesCore.h>
+
+#include <experimental/type_traits>
+#include <type_traits>
 
 template <class Q, UInt_t nh, UInt_t nk>
 class JQVectorsGapBase
@@ -84,7 +88,7 @@ class JQVectors : public std::conditional_t<gap, JQVectorsGapBase<Q, nh, nk>, JQ
           if constexpr (std::experimental::is_detected<hasWeightNUA, const JInputClassIter>::value)
             tf /= track.weightNUA();
           if constexpr (std::experimental::is_detected<hasWeightEff, const JInputClassIter>::value)
-            tf /= track.weightEff();
+            tf *= track.weightEff();
         }
       }
     }

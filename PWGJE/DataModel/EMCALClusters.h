@@ -16,10 +16,14 @@
 #ifndef PWGJE_DATAMODEL_EMCALCLUSTERS_H_
 #define PWGJE_DATAMODEL_EMCALCLUSTERS_H_
 
+#include "EMCALClusterDefinition.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include "Framework/AnalysisDataModel.h"
-#include "EMCALClusterDefinition.h"
 
 namespace o2::aod
 {
@@ -45,11 +49,14 @@ const EMCALClusterDefinition kV3SmallestTimeDiff(ClusterAlgorithm_t::kV3, 42, 1,
 const EMCALClusterDefinition kV3MostSplitSmallTimeDiff(ClusterAlgorithm_t::kV3, 43, 1, "kV3MostSplitSmallTimeDiff", 0.5, 0.1, -10000, 10000, 500, true, 0., false);
 const EMCALClusterDefinition kV3MostSplitSmallerTimeDiff(ClusterAlgorithm_t::kV3, 44, 1, "kV3MostSplitSmallerTimeDiff", 0.5, 0.1, -10000, 10000, 100, true, 0., false);
 const EMCALClusterDefinition kV3MostSplitSmallestTimeDiff(ClusterAlgorithm_t::kV3, 45, 1, "kV3MostSplitSmallestTimeDiff", 0.5, 0.1, -10000, 10000, 50, true, 0., false);
+const EMCALClusterDefinition kV3MostSplitSmallestTimeDiffLowestSeed(ClusterAlgorithm_t::kV3, 50, 1, "kV3MostSplitSmallestTimeDiffLowestSeed", 0.1, 0.1, -10000, 10000, 50, true, 0., false);
+const EMCALClusterDefinition kV3MostSplitSmallestTimeDiffLowSeed(ClusterAlgorithm_t::kV3, 51, 1, "kV3MostSplitSmallestTimeDiffLowSeed", 0.3, 0.1, -10000, 10000, 50, true, 0., false);
+const EMCALClusterDefinition kV3MostSplitSmallestTimeDiffLowerSeed(ClusterAlgorithm_t::kV3, 52, 1, "kV3MostSplitSmallestTimeDiffLowerSeed", 0.2, 0.1, -10000, 10000, 50, true, 0., false);
 
 /// \brief function returns EMCALClusterDefinition for the given name
 /// \param name name of the cluster definition
 /// \return EMCALClusterDefinition for the given name
-const EMCALClusterDefinition getClusterDefinitionFromString(const std::string& clusterDefinitionName)
+inline const EMCALClusterDefinition getClusterDefinitionFromString(const std::string& clusterDefinitionName)
 {
   if (clusterDefinitionName == "kV3NoSplit") {
     return kV3NoSplit;
@@ -85,6 +92,12 @@ const EMCALClusterDefinition getClusterDefinitionFromString(const std::string& c
     return kV3MostSplitSmallerTimeDiff;
   } else if (clusterDefinitionName == "kV3MostSplitSmallestTimeDiff") {
     return kV3MostSplitSmallestTimeDiff;
+  } else if (clusterDefinitionName == "kV3MostSplitSmallestTimeDiffLowestSeed") {
+    return kV3MostSplitSmallestTimeDiffLowestSeed;
+  } else if (clusterDefinitionName == "kV3MostSplitSmallestTimeDiffLowSeed") {
+    return kV3MostSplitSmallestTimeDiffLowSeed;
+  } else if (clusterDefinitionName == "kV3MostSplitSmallestTimeDiffLowerSeed") {
+    return kV3MostSplitSmallestTimeDiffLowerSeed;
   } else {
     throw std::invalid_argument("Cluster definition name not recognized");
   }
@@ -135,6 +148,12 @@ DECLARE_SOA_TABLE(EMCALMCClusters, "AOD", "EMCALMCCLUSTERS", //!
 
 using EMCALMCCluster = EMCALMCClusters::iterator;
 
+// table of cluster MC info that could not be matched to a collision
+DECLARE_SOA_TABLE(EMCALAmbiguousMCClusters, "AOD", "EMCALAMBMCCLS", //!
+                  emcalclustermc::McParticleIds, emcalclustermc::AmplitudeA);
+
+using EMCALAmbiguousMCCluster = EMCALAmbiguousMCClusters::iterator;
+
 namespace emcalclustercell
 {
 // declare index column pointing to cluster table
@@ -152,10 +171,19 @@ using EMCALClusterCell = EMCALClusterCells::iterator;
 using EMCALAmbiguousClusterCell = EMCALAmbiguousClusterCells::iterator;
 namespace emcalmatchedtrack
 {
-DECLARE_SOA_INDEX_COLUMN(Track, track); //! linked to Track table only for tracks that were matched
+DECLARE_SOA_INDEX_COLUMN(Track, track);        //! linked to Track table only for tracks that were matched
+DECLARE_SOA_COLUMN(DeltaPhi, deltaPhi, float); //! difference between matched track and cluster azimuthal angle
+DECLARE_SOA_COLUMN(DeltaEta, deltaEta, float); //! difference between matched track and cluster pseudorapidity
 } // namespace emcalmatchedtrack
-DECLARE_SOA_TABLE(EMCALMatchedTracks, "AOD", "EMCMATCHTRACKS",                                     //!
-                  o2::soa::Index<>, emcalclustercell::EMCALClusterId, emcalmatchedtrack::TrackId); //!
+DECLARE_SOA_TABLE(EMCALMatchedTracks, "AOD", "EMCMATCHTRACKS", //!
+                  o2::soa::Index<>, emcalclustercell::EMCALClusterId, emcalmatchedtrack::TrackId,
+                  emcalmatchedtrack::DeltaPhi, emcalmatchedtrack::DeltaEta); //!
 using EMCALMatchedTrack = EMCALMatchedTracks::iterator;
+
+// table for matched secondary tracks
+DECLARE_SOA_TABLE(EMCMatchSecs, "AOD", "EMCMATCHSEC", //!
+                  o2::soa::Index<>, emcalclustercell::EMCALClusterId, emcalmatchedtrack::TrackId,
+                  emcalmatchedtrack::DeltaPhi, emcalmatchedtrack::DeltaEta); //!
+using EMCMatchSec = EMCMatchSecs::iterator;
 } // namespace o2::aod
 #endif // PWGJE_DATAMODEL_EMCALCLUSTERS_H_

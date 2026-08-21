@@ -17,13 +17,26 @@
 /// \author Nicolo' Jacazio <nicolo.jacazio@cern.ch>, CERN
 /// \author Andrea Tavira García <tavira-garcia@ijclab.in2p3.fr>, IJCLab
 
-#include "CommonConstants/PhysicsConstants.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-
+#include "PWGHF/Core/DecayChannels.h"
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
+
+#include "Common/Core/RecoDecay.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/runDataProcessing.h>
+
+#include <array>
+#include <cstdint>
+#include <numeric>
 
 using namespace o2;
 using namespace o2::framework;
@@ -72,6 +85,8 @@ DECLARE_SOA_COLUMN(Ct, ct, float);
 DECLARE_SOA_COLUMN(ImpactParameterProduct, impactParameterProduct, float);
 DECLARE_SOA_COLUMN(CosThetaStar, cosThetaStar, float);
 DECLARE_SOA_COLUMN(FlagMc, flagMc, int8_t);
+DECLARE_SOA_COLUMN(FlagMcDecayChanRec, flagMcDecayChanRec, int8_t);
+DECLARE_SOA_COLUMN(FlagMcDecayChanGen, flagMcDecayChanGen, int8_t);
 DECLARE_SOA_COLUMN(OriginMcRec, originMcRec, int8_t); // is prompt or non-prompt, reco level
 DECLARE_SOA_COLUMN(OriginMcGen, originMcGen, int8_t); // is prompt or non-prompt, Gen level
 DECLARE_SOA_INDEX_COLUMN_FULL(Candidate, candidate, int, HfCand2Prong, "_0");
@@ -123,10 +138,11 @@ DECLARE_SOA_TABLE(HfCandD0Lites, "AOD", "HFCANDD0LITE",
                   full::Phi,
                   full::Y,
                   full::FlagMc,
-                  full::OriginMcRec)
+                  full::FlagMcDecayChanRec,
+                  full::OriginMcRec,
+                  hf_cand_mc_flag::PdgBhadMotherPart)
 
 DECLARE_SOA_TABLE(HfCandD0Fulls, "AOD", "HFCANDD0FULL",
-                  full::CollisionId,
                   collision::PosX,
                   collision::PosY,
                   collision::PosZ,
@@ -185,11 +201,11 @@ DECLARE_SOA_TABLE(HfCandD0Fulls, "AOD", "HFCANDD0FULL",
                   full::Y,
                   full::E,
                   full::FlagMc,
+                  full::FlagMcDecayChanRec,
                   full::OriginMcRec,
-                  full::CandidateId);
+                  hf_cand_mc_flag::PdgBhadMotherPart);
 
 DECLARE_SOA_TABLE(HfCandD0FullEvs, "AOD", "HFCANDD0FULLEV",
-                  full::CollisionId,
                   collision::NumContrib,
                   collision::PosX,
                   collision::PosY,
@@ -198,14 +214,13 @@ DECLARE_SOA_TABLE(HfCandD0FullEvs, "AOD", "HFCANDD0FULLEV",
                   full::RunNumber);
 
 DECLARE_SOA_TABLE(HfCandD0FullPs, "AOD", "HFCANDD0FULLP",
-                  full::McCollisionId,
                   full::Pt,
                   full::Eta,
                   full::Phi,
                   full::Y,
                   full::FlagMc,
-                  full::OriginMcGen,
-                  full::McParticleId);
+                  full::FlagMcDecayChanGen,
+                  full::OriginMcGen);
 
 DECLARE_SOA_TABLE(HfCandD0Mls, "AOD", "HFCANDD0ML",
                   ml::BdtOutputBkg,
@@ -226,8 +241,7 @@ struct HfTreeCreatorD0ToKPi {
   // parameters for production of training samples
   Configurable<float> downSampleBkgFactor{"downSampleBkgFactor", 1., "Fraction of background candidates to keep for ML trainings"};
   Configurable<float> ptMaxForDownSample{"ptMaxForDownSample", 10., "Maximum pt for the application of the downsampling factor"};
-
-  HfHelper hfHelper;
+  Configurable<bool> fillCorrBkgs{"fillCorrBkgs", false, "Flag to fill derived tables with correlated background candidates"};
 
   // using TracksWPid = soa::Join<aod::Tracks, aod::TracksPidPi, aod::PidTpcTofFullPi, aod::TracksPidKa, aod::PidTpcTofFullKa>;
   using SelectedCandidatesMc = soa::Filtered<soa::Join<aod::HfCand2ProngWPid, aod::HfCand2ProngMcRec, aod::HfSelD0>>;
@@ -237,17 +251,17 @@ struct HfTreeCreatorD0ToKPi {
   using MatchedGenCandidatesMc = soa::Filtered<soa::Join<aod::McParticles, aod::HfCand2ProngMcGen>>;
 
   Filter filterSelectCandidates = aod::hf_sel_candidate_d0::isSelD0 >= 1 || aod::hf_sel_candidate_d0::isSelD0bar >= 1;
-  Filter filterMcGenMatching = nabs(aod::hf_cand_2prong::flagMcMatchGen) == static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
+  Filter filterMcGenMatching = nabs(aod::hf_cand_mc_flag::flagMcMatchGen) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && (nabs(aod::hf_cand_mc_flag::flagMcMatchGen) != 0));
 
-  Partition<SelectedCandidatesMc> reconstructedCandSig = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMc> reconstructedCandBkg = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMcKf> reconstructedCandSigKF = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMcKf> reconstructedCandBkgKF = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
+  Partition<SelectedCandidatesMc> reconstructedCandSig = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != 0);
+  Partition<SelectedCandidatesMc> reconstructedCandBkg = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKf> reconstructedCandSigKF = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != 0);
+  Partition<SelectedCandidatesMcKf> reconstructedCandBkgKF = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
 
-  Partition<SelectedCandidatesMcMl> reconstructedCandSigMl = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMcMl> reconstructedCandBkgMl = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMcKfMl> reconstructedCandSigKFMl = nabs(aod::hf_cand_2prong::flagMcMatchRec) == static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
-  Partition<SelectedCandidatesMcKfMl> reconstructedCandBkgKFMl = nabs(aod::hf_cand_2prong::flagMcMatchRec) != static_cast<int8_t>(BIT(aod::hf_cand_2prong::DecayType::D0ToPiK));
+  Partition<SelectedCandidatesMcMl> reconstructedCandSigMl = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != 0);
+  Partition<SelectedCandidatesMcMl> reconstructedCandBkgMl = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
+  Partition<SelectedCandidatesMcKfMl> reconstructedCandSigKFMl = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) == static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != 0);
+  Partition<SelectedCandidatesMcKfMl> reconstructedCandBkgKFMl = nabs(aod::hf_cand_mc_flag::flagMcMatchRec) != static_cast<int8_t>(o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK);
 
   void init(InitContext const&)
   {
@@ -264,7 +278,6 @@ struct HfTreeCreatorD0ToKPi {
   void fillEvent(const T& collision, int isEventReject, int runNumber)
   {
     rowCandidateFullEvents(
-      collision.globalIndex(),
       collision.numContrib(),
       collision.posX(),
       collision.posY(),
@@ -273,9 +286,9 @@ struct HfTreeCreatorD0ToKPi {
       runNumber);
   }
 
-  template <bool applyMl, typename T>
+  template <bool ApplyMl, typename T>
   auto fillTable(const T& candidate, int candFlag, double invMass, double topoChi2,
-                 double ct, double y, double e, int8_t flagMc, int8_t origin)
+                 double ct, double y, double e, int8_t flagMc, int8_t flagMcDecay, int8_t origin, int pdgBmother)
   {
     if (fillCandidateLiteTable) {
       rowCandidateLite(
@@ -313,11 +326,12 @@ struct HfTreeCreatorD0ToKPi {
         candidate.phi(),
         y,
         flagMc,
-        origin);
+        flagMcDecay,
+        origin,
+        pdgBmother);
     } else {
-      double cosThetaStar = candFlag == 0 ? hfHelper.cosThetaStarD0(candidate) : hfHelper.cosThetaStarD0bar(candidate);
+      double cosThetaStar = candFlag == 0 ? HfHelper::cosThetaStarD0(candidate) : HfHelper::cosThetaStarD0bar(candidate);
       rowCandidateFull(
-        candidate.collisionId(),
         candidate.posX(),
         candidate.posY(),
         candidate.posZ(),
@@ -376,10 +390,11 @@ struct HfTreeCreatorD0ToKPi {
         y,
         e,
         flagMc,
+        flagMcDecay,
         origin,
-        candidate.globalIndex());
+        pdgBmother);
     }
-    if constexpr (applyMl) {
+    if constexpr (ApplyMl) {
       if (candFlag == 0) {
         rowCandidateMl(
           candidate.mlProbD0()[0],
@@ -394,7 +409,7 @@ struct HfTreeCreatorD0ToKPi {
     }
   }
 
-  template <int reconstructionType, bool applyMl, typename CandType>
+  template <int ReconstructionType, bool ApplyMl, typename CandType>
   void processData(aod::Collisions const& collisions,
                    CandType const& candidates,
                    aod::Tracks const&, aod::BCs const&)
@@ -407,38 +422,40 @@ struct HfTreeCreatorD0ToKPi {
 
     // Filling candidate properties
     if (fillCandidateLiteTable) {
-      rowCandidateLite.reserve(candidates.size());
+      // Account for candidates passing both D0 and D0bar
+      // selection, which will be stored twice in the lite table
+      rowCandidateLite.reserve(candidates.size() * 2);
     } else {
-      rowCandidateFull.reserve(candidates.size());
+      rowCandidateFull.reserve(candidates.size() * 2);
     }
-    if constexpr (applyMl) {
-      rowCandidateMl.reserve(candidates.size());
+    if constexpr (ApplyMl) {
+      rowCandidateMl.reserve(candidates.size() * 2);
     }
     for (const auto& candidate : candidates) {
       if (downSampleBkgFactor < 1.) {
-        float pseudoRndm = candidate.ptProng0() * 1000. - static_cast<int64_t>(candidate.ptProng0() * 1000);
+        float const pseudoRndm = candidate.ptProng0() * 1000. - static_cast<int64_t>(candidate.ptProng0() * 1000);
         if (candidate.pt() < ptMaxForDownSample && pseudoRndm >= downSampleBkgFactor) {
           continue;
         }
       }
-      double yD = hfHelper.yD0(candidate);
-      double eD = hfHelper.eD0(candidate);
-      double ctD = hfHelper.ctD0(candidate);
-      float massD0, massD0bar;
+      double const yD = HfHelper::yD0(candidate);
+      double const eD = HfHelper::eD0(candidate);
+      double const ctD = HfHelper::ctD0(candidate);
+      float massD0{}, massD0bar{};
       float topolChi2PerNdf = -999.;
-      if constexpr (reconstructionType == aod::hf_cand::VertexerType::KfParticle) {
+      if constexpr (ReconstructionType == aod::hf_cand::VertexerType::KfParticle) {
         massD0 = candidate.kfGeoMassD0();
         massD0bar = candidate.kfGeoMassD0bar();
         topolChi2PerNdf = candidate.kfTopolChi2OverNdf();
       } else {
-        massD0 = hfHelper.invMassD0ToPiK(candidate);
-        massD0bar = hfHelper.invMassD0barToKPi(candidate);
+        massD0 = HfHelper::invMassD0ToPiK(candidate);
+        massD0bar = HfHelper::invMassD0barToKPi(candidate);
       }
       if (candidate.isSelD0()) {
-        fillTable<applyMl>(candidate, 0, massD0, topolChi2PerNdf, ctD, yD, eD, 0, 0);
+        fillTable<ApplyMl>(candidate, 0, massD0, topolChi2PerNdf, ctD, yD, eD, 0, 0, 0, 0);
       }
       if (candidate.isSelD0bar()) {
-        fillTable<applyMl>(candidate, 1, massD0bar, topolChi2PerNdf, ctD, yD, eD, 0, 0);
+        fillTable<ApplyMl>(candidate, 1, massD0bar, topolChi2PerNdf, ctD, yD, eD, 0, 0, 0, 0);
       }
     }
   }
@@ -479,7 +496,7 @@ struct HfTreeCreatorD0ToKPi {
   }
   PROCESS_SWITCH(HfTreeCreatorD0ToKPi, processDataWithKFParticleMl, "Process data with KFParticle and ML", false);
 
-  template <int reconstructionType, bool onlyBkg, bool onlySig, bool applyMl, typename CandType>
+  template <int ReconstructionType, bool OnlyBkg, bool OnlySig, bool ApplyMl, typename CandType>
   void processMc(aod::Collisions const& collisions,
                  aod::McCollisions const&,
                  CandType const& candidates,
@@ -495,64 +512,66 @@ struct HfTreeCreatorD0ToKPi {
 
     // Filling candidate properties
     if (fillCandidateLiteTable) {
-      rowCandidateLite.reserve(candidates.size());
+      rowCandidateLite.reserve(candidates.size() * 2);
     } else {
-      rowCandidateFull.reserve(candidates.size());
+      rowCandidateFull.reserve(candidates.size() * 2);
     }
-    if constexpr (applyMl) {
-      rowCandidateMl.reserve(candidates.size());
+    if constexpr (ApplyMl) {
+      rowCandidateMl.reserve(candidates.size() * 2);
     }
     for (const auto& candidate : candidates) {
-      if constexpr (onlyBkg) {
-        if (TESTBIT(std::abs(candidate.flagMcMatchRec()), aod::hf_cand_2prong::DecayType::D0ToPiK)) {
+      if constexpr (OnlyBkg) {
+        if ((std::abs(candidate.flagMcMatchRec()) == o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && (candidate.flagMcMatchRec() != 0))) {
           continue;
         }
         if (downSampleBkgFactor < 1.) {
-          float pseudoRndm = candidate.ptProng0() * 1000. - static_cast<int64_t>(candidate.ptProng0() * 1000);
+          float const pseudoRndm = candidate.ptProng0() * 1000. - static_cast<int64_t>(candidate.ptProng0() * 1000);
           if (candidate.pt() < ptMaxForDownSample && pseudoRndm >= downSampleBkgFactor) {
             continue;
           }
         }
       }
-      if constexpr (onlySig) {
-        if (!TESTBIT(std::abs(candidate.flagMcMatchRec()), aod::hf_cand_2prong::DecayType::D0ToPiK)) {
+      if constexpr (OnlySig) {
+        if (fillCorrBkgs && candidate.flagMcMatchRec() == 0) {
+          continue;
+        }
+        if (!fillCorrBkgs && std::abs(candidate.flagMcMatchRec()) != o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) {
           continue;
         }
       }
-      double yD = hfHelper.yD0(candidate);
-      double eD = hfHelper.eD0(candidate);
-      double ctD = hfHelper.ctD0(candidate);
-      float massD0, massD0bar;
+      double const yD = HfHelper::yD0(candidate);
+      double const eD = HfHelper::eD0(candidate);
+      double const ctD = HfHelper::ctD0(candidate);
+      float massD0{}, massD0bar{};
       float topolChi2PerNdf = -999.;
-      if constexpr (reconstructionType == aod::hf_cand::VertexerType::KfParticle) {
+      if constexpr (ReconstructionType == aod::hf_cand::VertexerType::KfParticle) {
         massD0 = candidate.kfGeoMassD0();
         massD0bar = candidate.kfGeoMassD0bar();
         topolChi2PerNdf = candidate.kfTopolChi2OverNdf();
       } else {
-        massD0 = hfHelper.invMassD0ToPiK(candidate);
-        massD0bar = hfHelper.invMassD0barToKPi(candidate);
+        massD0 = HfHelper::invMassD0ToPiK(candidate);
+        massD0bar = HfHelper::invMassD0barToKPi(candidate);
       }
       if (candidate.isSelD0()) {
-        fillTable<applyMl>(candidate, 0, massD0, topolChi2PerNdf, ctD, yD, eD, candidate.flagMcMatchRec(), candidate.originMcRec());
+        fillTable<ApplyMl>(candidate, 0, massD0, topolChi2PerNdf, ctD, yD, eD, candidate.flagMcMatchRec(), candidate.flagMcDecayChanRec(), candidate.originMcRec(), candidate.pdgBhadMotherPart());
       }
       if (candidate.isSelD0bar()) {
-        fillTable<applyMl>(candidate, 1, massD0bar, topolChi2PerNdf, ctD, yD, eD, candidate.flagMcMatchRec(), candidate.originMcRec());
+        fillTable<ApplyMl>(candidate, 1, massD0bar, topolChi2PerNdf, ctD, yD, eD, candidate.flagMcMatchRec(), candidate.flagMcDecayChanRec(), candidate.originMcRec(), candidate.pdgBhadMotherPart());
       }
     }
 
     // Filling particle properties
     rowCandidateFullParticles.reserve(mcParticles.size());
     for (const auto& particle : mcParticles) {
-      if (TESTBIT(std::abs(particle.flagMcMatchGen()), aod::hf_cand_2prong::DecayType::D0ToPiK)) {
+      if ((std::abs(particle.flagMcMatchGen()) == o2::hf_decay::hf_cand_2prong::DecayChannelMain::D0ToPiK) || (fillCorrBkgs && particle.flagMcMatchGen() != 0)) {
         rowCandidateFullParticles(
-          particle.mcCollisionId(),
           particle.pt(),
           particle.eta(),
           particle.phi(),
           RecoDecay::y(particle.pVector(), o2::constants::physics::MassD0),
           particle.flagMcMatchGen(),
-          particle.originMcGen(),
-          particle.globalIndex());
+          particle.flagMcDecayChanGen(),
+          particle.originMcGen());
       }
     }
   }

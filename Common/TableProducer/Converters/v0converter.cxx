@@ -8,9 +8,12 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdint>
 
 using namespace o2;
 using namespace o2::framework;
@@ -22,6 +25,7 @@ struct V0Converter {
 
   void process(aod::V0s_001 const& v0s)
   {
+    v0s_002.reserve(v0s.size());
     for (auto& v0 : v0s) {
       uint8_t bitMask = static_cast<uint8_t>(1); // first bit on
       v0s_002(v0.collisionId(), v0.posTrackId(), v0.negTrackId(), bitMask);

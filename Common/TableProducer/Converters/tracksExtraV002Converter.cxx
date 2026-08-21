@@ -9,9 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdint>
 
 using namespace o2;
 using namespace o2::framework;
@@ -31,6 +36,7 @@ struct TracksExtraV002Converter {
 
   void processV000ToV002(aod::TracksExtra_000 const& tracksExtra_000)
   {
+    tracksExtra_002.reserve(tracksExtra_000.size());
 
     for (const auto& track0 : tracksExtra_000) {
 
@@ -70,6 +76,7 @@ struct TracksExtraV002Converter {
 
   void processV001ToV002(aod::TracksExtra_001 const& tracksExtra_001)
   {
+    tracksExtra_002.reserve(tracksExtra_001.size());
 
     for (const auto& track1 : tracksExtra_001) {
 

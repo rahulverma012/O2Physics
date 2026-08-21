@@ -16,24 +16,32 @@
 /// \brief  Header for the trackJetQa task for the analysis of the tracks for jets..
 ///
 
-// O2 includes
-#include "ReconstructionDataFormats/Track.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/AnalysisDataModel.h"
-#include "PWGJE/DataModel/Jet.h"
-#include "Framework/StaticFor.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/EventSelection.h"
+#include "PWGJE/DataModel/TrackJetQa.h"
+
 #include "Common/Core/TrackSelection.h"
 #include "Common/Core/TrackSelectionDefaults.h"
-#include "PWGJE/DataModel/TrackJetQa.h"
 #include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdlib>
+
+#include <stdlib.h>
 
 using namespace o2;
-using namespace o2::track;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
@@ -151,7 +159,7 @@ struct jetspectraDerivedMaker {
     return true;
   }
 
-  Preslice<aod::Track> trackPerColl = aod::track::collisionId;
+  Preslice<aod::Tracks> trackPerColl = aod::track::collisionId;
   Produces<o2::aod::JeTracks> tableTrack;
   Produces<o2::aod::JeColls> tableColl;
   using CollisionCandidate = soa::Join<aod::Collisions, aod::EvSels, aod::Mults, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs>;

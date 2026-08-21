@@ -34,13 +34,23 @@ o2physics_add_dpl_workflow(femtouniverse-pair-track-nucleus
           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
           COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(femtouniverse-pair-track-v0-helicity
+          SOURCES femtoUniversePairTaskTrackV0Helicity.cxx
+          PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+          COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(femtouniverse-pair-track-track-threedrelmom-mult-kt-extended
           SOURCES femtoUniversePairTaskTrackTrack3DMultKtExtended.cxx
           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
           COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(o2-analysis-cf-femtouniverse-pair-track-track-spherhar-mult-kt-extended
+o2physics_add_dpl_workflow(femto-universe-pair-task-track-track-spher-har-mult-kt-extended
           SOURCES femtoUniversePairTaskTrackTrackSpherHarMultKtExtended.cxx
+          PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+          COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(femto-universe-pair-task-track-track-spher-har-mult-kt-extended-its-pid
+          SOURCES femtoUniversePairTaskTrackTrackSpherHarMultKtExtendedItsPid.cxx
           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
           COMPONENT_NAME Analysis)
 
@@ -56,6 +66,11 @@ o2physics_add_dpl_workflow(femtouniverse-pair-track-v0-extended
 
 o2physics_add_dpl_workflow(femtouniverse-pair-track-cascade-extended
           SOURCES femtoUniversePairTaskTrackCascadeExtended.cxx
+          PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+          COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(femtouniverse-pair-v0-cascade-extended
+          SOURCES femtoUniversePairTaskV0CascadeExtended.cxx
           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
           COMPONENT_NAME Analysis)
 

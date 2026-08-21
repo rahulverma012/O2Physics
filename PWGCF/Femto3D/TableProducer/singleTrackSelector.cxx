@@ -13,32 +13,45 @@
 /// \author Sofia Tomassini, Gleb Romanenko, Nicolò Jacazio
 /// \since 31 May 2023
 
-#include <fairlogger/Logger.h>
-#include <Framework/AnalysisDataModel.h>
-
-#include <vector>
-#include <string>
-#include <utility>
-
-#include "EventFiltering/Zorro.h"
-#include "EventFiltering/ZorroSummary.h"
-
 #include "PWGCF/Femto3D/DataModel/singletrackselector.h"
 
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/PIDResponseITS.h"
-#include "Common/CCDB/ctpRateFetcher.h"
+#include "PWGCF/Femto3D/DataModel/PIDutils.h"
 
-#include "DetectorsBase/Propagator.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "CCDB/BasicCCDBManager.h"
+#include "Common/CCDB/RCTSelectionFlags.h"
+#include "Common/CCDB/ctpRateFetcher.h"
+#include "Common/Core/Zorro.h"
+#include "Common/Core/ZorroSummary.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CommonConstants/MathConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DataFormatsParameters/GRPObject.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TH1.h>
+
+#include <array>
+#include <cmath>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -58,6 +71,7 @@ struct singleTrackSelector {
   Configurable<std::string> grpmagPath{"grpmagPath", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object"};
   Configurable<bool> applySkimming{"applySkimming", false, "Skimmed dataset processing"};
   Configurable<std::string> cfgSkimming{"cfgSkimming", "fPD", "Configurable for skimming"};
+  Configurable<bool> CBThadronPID{"CBThadronPID", false, "Apply ev. sel. based on RCT flag `hadronPID`"}; // more in Common/CCDB/RCTSelectionFlags.h
 
   Configurable<int> applyEvSel{"applyEvSel", 2, "Flag to apply rapidity cut: 0 -> no event selection, 1 -> Run 2 event selection, 2 -> Run 3 event selection"};
   // Configurable<int> trackSelection{"trackSelection", 1, "Track selection: 0 -> No Cut, 1 -> kGlobalTrack, 2 -> kGlobalTrackWoPtEta, 3 -> kGlobalTrackWoDCA, 4 -> kQualityTracks, 5 -> kInAcceptanceTracks"};
@@ -73,9 +87,12 @@ struct singleTrackSelector {
   Configurable<std::vector<float>> rejectWithinNsigmaTOF{"rejectWithinNsigmaTOF", std::vector<float>{-5.0f, 5.0f}, "TOF rejection Nsigma range for particles specified with PDG to be rejected"};
 
   Configurable<float> _pRemoveTofOutOfRange{"pRemoveTofOutOfRange", 100.f, "momentum starting from which request TOF nSigma to be within the stored range (-10 < Nsigma < 10)"};
+  Configurable<std::array<float, 3>> _ptRemoveTofOutOfRange{"ptRemoveTofOutOfRange", {100.f, -10.f, 10.f}, "transverse momentum starting from which request TOF nSigma to be within the stored range (-10 < Nsigma < 10)"};
 
   Configurable<float> _min_P{"min_P", 0.f, "lower mometum limit"};
   Configurable<float> _max_P{"max_P", 100.f, "upper mometum limit"};
+  Configurable<float> _min_Pt{"min_Pt", 0.f, "lower trasnverse mometum limit"};
+  Configurable<float> _max_Pt{"max_Pt", 100.f, "upper trasnverse mometum limit"};
   Configurable<float> _eta{"eta", 100.f, "abs eta value limit"};
   Configurable<float> _dcaXY{"dcaXY", 1000.f, "Maximum dca of track in xy"};
   Configurable<float> _dcaZ{"dcaZ", 1000.f, "Maximum dca of track in xy"};
@@ -119,6 +136,7 @@ struct singleTrackSelector {
   Filter trackFilter = ((o2::aod::track::itsChi2NCl <= 36.f) && (o2::aod::track::itsChi2NCl >= 0.f) && (o2::aod::track::tpcChi2NCl >= 0.f) && (o2::aod::track::tpcChi2NCl <= 4.f));
 
   Filter pFilter = o2::aod::track::p > _min_P&& o2::aod::track::p < _max_P;
+  Filter ptFilter = o2::aod::track::pt > _min_Pt&& o2::aod::track::pt < _max_Pt;
   Filter etaFilter = nabs(o2::aod::track::eta) < _eta;
   Filter dcaFilter = ((nabs(o2::aod::track::dcaXY) <= _dcaXY) && (nabs(o2::aod::track::dcaZ) <= _dcaZ)) &&
                      ((nabs(o2::aod::track::dcaXY) >= _dcaXYmin) && (nabs(o2::aod::track::dcaZ) >= _dcaZmin));
@@ -134,6 +152,8 @@ struct singleTrackSelector {
   HistogramRegistry registry{"registry", {}, OutputObjHandlingPolicy::AnalysisObject};
   SliceCache cache;
 
+  rctsel::RCTFlagsChecker myChecker{"CBT_hadronPID"};
+
   void init(InitContext&)
   {
 
@@ -148,6 +168,8 @@ struct singleTrackSelector {
     ccdb->setLocalObjectValidityChecking();
     ccdb->setFatalWhenNull(false);
 
+    myChecker.init("CBT_hadronPID", true);
+
     registry.add("hNEvents", "hNEvents", {HistType::kTH1D, {{2, 0.f, 2.f}}});
     registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(1, "All");
     registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(2, "Skimmed");
@@ -158,12 +180,18 @@ struct singleTrackSelector {
 
     if (enable_gen_info) {
       registry.add("hNEvents_MCGen", "hNEvents_MCGen", {HistType::kTH1F, {{1, 0.f, 1.f}}});
-      registry.add("hGen_EtaPhiPt_Proton", "Gen (anti)protons in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
-      registry.add("hGen_EtaPhiPt_Deuteron", "Gen (anti)deuteron in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
-      registry.add("hGen_EtaPhiPt_Helium3", "Gen (anti)Helium3 in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
-      registry.add("hReco_EtaPhiPt_Proton", "Gen (anti)protons in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
-      registry.add("hReco_EtaPhiPt_Deuteron", "Gen (anti)deuteron in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
-      registry.add("hReco_EtaPhiPt_Helium3", "Gen (anti)Helium3 in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., 2 * TMath::Pi(), "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaPhiPt_Proton", "Gen (anti)protons in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaPhiPt_Deuteron", "Gen (anti)deuteron in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaYPt_Deuteron", "Gen (anti)deuteron in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {100, -1., 1., "y"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaPhiPt_Helium3", "Gen (anti)Helium3 in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaPhiPt_Triton", "Gen (anti)triton in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hGen_EtaYPt_Triton", "Gen (anti)triton in true collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {100, -1., 1., "y"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaPhiPt_Proton", "Gen (anti)protons in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaPhiPt_Deuteron", "Gen (anti)deuteron in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaYPt_Deuteron", "Gen (anti)deuteron in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {100, -1., 1., "y"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaPhiPt_Helium3", "Gen (anti)Helium3 in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaPhiPt_Triton", "Gen (anti)triton in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {157, 0., o2::constants::math::TwoPI, "#phi"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
+      registry.add("hReco_EtaYPt_Triton", "Gen (anti)triton in reco collisions", {HistType::kTH3F, {{100, -1., 1., "#eta"}, {100, -1., 1., "y"}, {100, -5.f, 5.f, "p_{T} GeV/c"}}});
     }
   }
 
@@ -232,6 +260,8 @@ struct singleTrackSelector {
       for (auto ii : particlesToKeep)
         if (o2::aod::singletrackselector::TPCselection<false>(track, std::make_pair(ii, keepWithinNsigmaTPC))) {
           if (track.p() > _pRemoveTofOutOfRange && !o2::aod::singletrackselector::TOFselection(track, std::make_pair(ii, std::vector<float>{-10.0, 10.0}), std::vector<float>{-10.0, 10.0}))
+            continue;
+          if (track.pt() > _ptRemoveTofOutOfRange.value[0] && !o2::aod::singletrackselector::TOFselection(track, std::make_pair(ii, std::vector<float>{_ptRemoveTofOutOfRange.value[1], _ptRemoveTofOutOfRange.value[2]}), std::vector<float>{-10.f, +10.f}))
             continue;
 
           tableRow(tableRowColl.lastIndex(),
@@ -348,6 +378,9 @@ struct singleTrackSelector {
 
     const auto& bc = collision.bc_as<aod::BCsWithTimestamps>();
     initCCDB(bc);
+
+    if (!myChecker(*collision) && CBThadronPID)
+      return;
 
     registry.fill(HIST("hNEvents"), 0.5);
     if (applySkimming) {
@@ -540,8 +573,10 @@ struct singleTrackSelector {
 
         if (mcParticle.pdgCode() == 1000010020) {
           registry.fill(HIST("hReco_EtaPhiPt_Deuteron"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
+          registry.fill(HIST("hReco_EtaYPt_Deuteron"), mcParticle.eta(), mcParticle.y(), mcParticle.pt());
         } else if (mcParticle.pdgCode() == -1000010020) {
           registry.fill(HIST("hReco_EtaPhiPt_Deuteron"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+          registry.fill(HIST("hReco_EtaYPt_Deuteron"), mcParticle.eta(), mcParticle.y(), mcParticle.pt() * -1);
         }
 
         if (mcParticle.pdgCode() == 2212) {
@@ -554,6 +589,15 @@ struct singleTrackSelector {
           registry.fill(HIST("hReco_EtaPhiPt_Helium3"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
         } else if (mcParticle.pdgCode() == -1000020030) {
           registry.fill(HIST("hReco_EtaPhiPt_Helium3"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+        }
+
+        if (mcParticle.pdgCode() == 1000010030) {
+          registry.fill(HIST("hReco_EtaPhiPt_Triton"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
+          registry.fill(HIST("hReco_EtaYPt_Triton"), mcParticle.eta(), mcParticle.y(), mcParticle.pt());
+
+        } else if (mcParticle.pdgCode() == -1000010030) {
+          registry.fill(HIST("hReco_EtaPhiPt_Triton"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+          registry.fill(HIST("hReco_EtaYPt_Triton"), mcParticle.eta(), mcParticle.y(), mcParticle.pt() * -1);
         }
       }
     }
@@ -580,8 +624,10 @@ struct singleTrackSelector {
       }
       if (mcParticle.pdgCode() == 1000010020) {
         registry.fill(HIST("hGen_EtaPhiPt_Deuteron"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
+        registry.fill(HIST("hGen_EtaYPt_Deuteron"), mcParticle.eta(), mcParticle.y(), mcParticle.pt());
       } else if (mcParticle.pdgCode() == -1000010020) {
         registry.fill(HIST("hGen_EtaPhiPt_Deuteron"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+        registry.fill(HIST("hGen_EtaYPt_Deuteron"), mcParticle.eta(), mcParticle.y(), mcParticle.pt() * -1);
       }
 
       if (mcParticle.pdgCode() == 2212) {
@@ -594,6 +640,14 @@ struct singleTrackSelector {
         registry.fill(HIST("hGen_EtaPhiPt_Helium3"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
       } else if (mcParticle.pdgCode() == -1000020030) {
         registry.fill(HIST("hGen_EtaPhiPt_Helium3"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+      }
+
+      if (mcParticle.pdgCode() == 1000010030) {
+        registry.fill(HIST("hGen_EtaPhiPt_Triton"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt());
+        registry.fill(HIST("hGen_EtaYPt_Triton"), mcParticle.eta(), mcParticle.y(), mcParticle.pt());
+      } else if (mcParticle.pdgCode() == -1000010030) {
+        registry.fill(HIST("hGen_EtaPhiPt_Triton"), mcParticle.eta(), mcParticle.phi(), mcParticle.pt() * -1);
+        registry.fill(HIST("hGen_EtaYPt_Triton"), mcParticle.eta(), mcParticle.y(), mcParticle.pt() * -1);
       }
     }
   }

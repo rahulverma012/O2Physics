@@ -15,32 +15,40 @@
 /// \author Abhi Modak (abhi.modak@cern.ch)
 /// \since September 15, 2023
 
-#include <cmath>
-#include <cstdlib>
-#include <TPDGCode.h>
-#include <vector>
-
-#include "PWGMM/Mult/DataModel/bestCollisionTable.h"
-#include "CCDB/BasicCCDBManager.h"
-#include "Common/Core/trackUtilities.h"
-#include "Common/CCDB/EventSelectionParams.h"
-#include "Common/Core/TrackSelection.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "CommonConstants/MathConstants.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/Configurable.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "Framework/runDataProcessing.h"
-#include "ReconstructionDataFormats/GlobalTrackID.h"
-#include "ReconstructionDataFormats/Track.h"
-#include "PWGMM/Mult/DataModel/Index.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "PWGLF/DataModel/LFStrangenessTables.h"
+
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/McCollisionExtra.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CommonConstants/MathConstants.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/O2DatabasePDGPlugin.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TH1.h>
+#include <THnSparse.h>
+#include <TMathBase.h>
+#include <TPDGCode.h>
+#include <TString.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -48,12 +56,12 @@ using namespace o2::framework::expressions;
 using namespace o2::aod::track;
 using namespace o2::aod::evsel;
 
-using CollisionDataTable = soa::Join<aod::Collisions, aod::EvSels, aod::Mults, aod::CentFT0Cs, aod::CentFT0CVariant1s, aod::CentFT0Ms, aod::CentNGlobals, aod::CentMFTs>;
+using CollisionDataTable = soa::Join<aod::Collisions, aod::EvSels, aod::Mults, aod::PVMults, aod::CentFT0Cs, aod::CentFV0As, aod::CentFT0CVariant1s, aod::CentFT0CVariant2s, aod::CentFT0Ms, aod::CentNGlobals, aod::CentMFTs>;
 using TrackDataTable = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection>;
 using FilTrackDataTable = soa::Filtered<TrackDataTable>;
 using CollisionMCTrueTable = aod::McCollisions;
 using TrackMCTrueTable = aod::McParticles;
-using CollisionMCRecTable = soa::SmallGroups<soa::Join<aod::McCollisionLabels, aod::Collisions, aod::EvSels, aod::Mults, aod::CentFT0Cs, aod::CentFT0CVariant1s, aod::CentFT0Ms, aod::CentNGlobals, aod::CentMFTs>>;
+using CollisionMCRecTable = soa::SmallGroups<soa::Join<aod::McCollisionLabels, aod::Collisions, aod::EvSels, aod::Mults, aod::PVMults, aod::CentFT0Cs, aod::CentFV0As, aod::CentFT0CVariant1s, aod::CentFT0CVariant2s, aod::CentFT0Ms, aod::CentNGlobals, aod::CentMFTs>>;
 using TrackMCRecTable = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::McTrackLabels, aod::TrackSelection>;
 using FilTrackMCRecTable = soa::Filtered<TrackMCRecTable>;
 using V0TrackCandidates = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection, aod::pidTPCFullPi, aod::pidTPCFullPr>;
@@ -84,7 +92,32 @@ enum {
   kBkg,
   kSpNotPrimary,
   kSpAll,
+  kFake,
   kSpeciesend
+};
+
+enum {
+  kGenTrkTypebegin = 0,
+  kGenAll = 1,
+  kGenPion,
+  kGenKaon,
+  kGenProton,
+  kGenOther,
+  kGenTrkTypeend
+};
+
+enum {
+  kRecTrkTypebegin = 0,
+  kRecoAll = 1,
+  kRecoPion,
+  kRecoKaon,
+  kRecoProton,
+  kRecoOther,
+  kRecoSecondary,
+  kRecoWeakDecay,
+  kRecoFake,
+  kRecoBkg,
+  kRecTrkTypeend
 };
 
 static constexpr TrackSelectionFlags::flagtype TrackSelectionIts =
@@ -94,23 +127,28 @@ static constexpr TrackSelectionFlags::flagtype TrackSelectionTpc =
   TrackSelectionFlags::kTPCNCls |
   TrackSelectionFlags::kTPCCrossedRowsOverNCls |
   TrackSelectionFlags::kTPCChi2NDF;
-static constexpr TrackSelectionFlags::flagtype TrackSelectionDca =
-  TrackSelectionFlags::kDCAz | TrackSelectionFlags::kDCAxy;
+// static constexpr TrackSelectionFlags::flagtype TrackSelectionDca =  TrackSelectionFlags::kDCAz | TrackSelectionFlags::kDCAxy;
 static constexpr TrackSelectionFlags::flagtype TrackSelectionDcaxyOnly =
   TrackSelectionFlags::kDCAxy;
 
-AxisSpec axisEvent{12, 0.5, 12.5, "#Event", "EventAxis"};
+AxisSpec axisEvent{15, 0.5, 15.5, "#Event", "EventAxis"};
 AxisSpec axisVtxZ{40, -20, 20, "Vertex Z", "VzAxis"};
 AxisSpec axisEta{40, -2, 2, "#eta", "EtaAxis"};
+AxisSpec axisEtaExtended{100, -5, 5, "#eta", "EtaAxisExtended"};
 AxisSpec axisPhi{{0, o2::constants::math::PIQuarter, o2::constants::math::PIHalf, o2::constants::math::PIQuarter * 3., o2::constants::math::PI, o2::constants::math::PIQuarter * 5., o2::constants::math::PIHalf * 3., o2::constants::math::PIQuarter * 7., o2::constants::math::TwoPI}, "#phi", "PhiAxis"};
 AxisSpec axisPhi2{629, 0, o2::constants::math::TwoPI, "#phi"};
-AxisSpec axisCent{100, 0, 100, "#Cent"};
 AxisSpec axisTrackType = {kTrackTypeend - 1, +kTrackTypebegin + 0.5, +kTrackTypeend - 0.5, "", "TrackTypeAxis"};
 AxisSpec axisGenPtVary = {kGenpTend - 1, +kGenpTbegin + 0.5, +kGenpTend - 0.5, "", "GenpTVaryAxis"};
 AxisSpec axisSpecies = {kSpeciesend - 1, +kSpeciesbegin + 0.5, +kSpeciesend - 0.5, "", "SpeciesAxis"};
+AxisSpec axisGenTrkType = {kGenTrkTypeend - 1, +kGenTrkTypebegin + 0.5, +kGenTrkTypeend - 0.5, "", "GenTrackTypeAxis"};
+AxisSpec axisRecTrkType = {kRecTrkTypeend - 1, +kRecTrkTypebegin + 0.5, +kRecTrkTypeend - 0.5, "", "RecTrackTypeAxis"};
 AxisSpec axisMassK0s = {200, 0.4, 0.6, "K0sMass", "K0sMass"};
 AxisSpec axisMassLambda = {200, 1.07, 1.17, "Lambda/AntiLamda Mass", "Lambda/AntiLamda Mass"};
 AxisSpec axisTracks{9, 0.5, 9.5, "#tracks", "TrackAxis"};
+AxisSpec axisDeltaEta{50, -1.0, +1.0, "#Delta(#eta)"};
+auto static constexpr KminCharge = 3.f;
+auto static constexpr KminPtCut = 0.1f;
+auto static constexpr KnItsLayers = 7;
 
 struct HeavyionMultiplicity {
 
@@ -120,14 +158,27 @@ struct HeavyionMultiplicity {
 
   Configurable<float> etaRange{"etaRange", 1.0f, "Eta range to consider"};
   Configurable<float> vtxRange{"vtxRange", 10.0f, "Vertex Z range to consider"};
-  Configurable<float> dcaZ{"dcaZ", 0.2f, "Custom DCA Z cut (ignored if negative)"};
-  Configurable<float> v0radiusCut{"v0radiusCut", 1.2f, "RadiusCut"};
-  Configurable<float> dcapostopvCut{"dcapostopvCut", 0.05f, "dcapostopvCut"};
-  Configurable<float> dcanegtopvCut{"dcanegtopvCut", 0.05f, "dcanegtopvCut"};
-  Configurable<float> v0cospaCut{"v0cospaCut", 0.995f, "v0cospaCut"};
-  Configurable<float> dcav0daughtercut{"dcav0daughtercut", 1.0f, "dcav0daughtercut"};
-  Configurable<float> minTPCnClsCut{"minTPCnClsCut", 50.0f, "minTPCnClsCut"};
-  Configurable<float> nSigmaTpcCut{"nSigmaTpcCut", 5.0f, "nSigmaTpcCut"};
+  Configurable<float> dcaZ{"dcaZ", 0.2f, "Custom DCA Z cut"};
+  Configurable<float> v0radiusK0SCut{"v0radiusK0SCut", 1.2f, "K0S RadiusCut"};
+  Configurable<float> dcapostopvK0SCut{"dcapostopvK0SCut", 0.05f, "K0S dcapostopvCut"};
+  Configurable<float> dcanegtopvK0SCut{"dcanegtopvK0SCut", 0.05f, "K0S dcanegtopvCut"};
+  Configurable<float> v0cospaK0SCut{"v0cospaK0SCut", 0.995f, "K0S v0cospaCut"};
+  Configurable<float> dcav0daughterK0Scut{"dcav0daughterK0Scut", 1.0f, "K0S dcav0daughtercut"};
+  Configurable<float> minTPCnClsK0SCut{"minTPCnClsK0SCut", 50.0f, "K0S minTPCnClsCut"};
+  Configurable<float> nSigmaTpcK0SCut{"nSigmaTpcK0SCut", 5.0f, "K0S nSigmaTpcCut"};
+  Configurable<float> v0etaK0SCut{"v0etaK0SCut", 0.9f, "K0S v0etaCut"};
+  Configurable<float> v0radiusLambdaCut{"v0radiusLambdaCut", 1.2f, "Lambda RadiusCut"};
+  Configurable<float> dcapostopvLambdaCut{"dcapostopvLambdaCut", 0.05f, "Lambda dcapostopvCut"};
+  Configurable<float> dcanegtopvLambdaCut{"dcanegtopvLambdaCut", 0.05f, "Lambda dcanegtopvCut"};
+  Configurable<float> v0cospaLambdaCut{"v0cospaLambdaCut", 0.995f, "Lambda v0cospaCut"};
+  Configurable<float> dcav0daughterLambdacut{"dcav0daughterLambdacut", 1.0f, "Lambda dcav0daughtercut"};
+  Configurable<float> minTPCnClsLambdaCut{"minTPCnClsLambdaCut", 50.0f, "Lambda minTPCnClsCut"};
+  Configurable<float> nSigmaTpcLambdaCut{"nSigmaTpcLambdaCut", 5.0f, "Lambda nSigmaTpcCut"};
+  Configurable<float> v0etaLambdaCut{"v0etaLambdaCut", 0.9f, "Lambda v0etaCut"};
+  Configurable<float> extraphicut1{"extraphicut1", 3.07666f, "Extra Phi cut 1"};
+  Configurable<float> extraphicut2{"extraphicut2", 3.12661f, "Extra Phi cut 2"};
+  Configurable<float> extraphicut3{"extraphicut3", 0.03f, "Extra Phi cut 3"};
+  Configurable<float> extraphicut4{"extraphicut4", 6.253f, "Extra Phi cut 4"};
   ConfigurableAxis multHistBin{"multHistBin", {501, -0.5, 500.5}, ""};
   ConfigurableAxis pvHistBin{"pvHistBin", {501, -0.5, 500.5}, ""};
   ConfigurableAxis fv0aMultHistBin{"fv0aMultHistBin", {501, -0.5, 500.5}, ""};
@@ -136,25 +187,44 @@ struct HeavyionMultiplicity {
   ConfigurableAxis ptHistBin{"ptHistBin", {200, 0., 20.}, ""};
   ConfigurableAxis centralityBinning{"centralityBinning", {VARIABLE_WIDTH, 0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}, ""};
   ConfigurableAxis occupancyBin{"occupancyBin", {VARIABLE_WIDTH, 0, 500, 1000, 2000, 5000, 10000}, ""};
+  ConfigurableAxis centBinGen{"centBinGen", {VARIABLE_WIDTH, 0, 500, 1000, 2000, 5000, 10000}, ""};
+  ConfigurableAxis binsImpactPar{"binsImpactPar", {VARIABLE_WIDTH, 0.0, 3.00065, 4.28798, 6.14552, 7.6196, 8.90942, 10.0897, 11.2002, 12.2709, 13.3167, 14.4173, 23.2518}, "Binning of the impact parameter axis"};
+  ConfigurableAxis binsMult{"binsMult", {500, 0.0f, +500.0f}, ""};
+  ConfigurableAxis binsDCA{"binsDCA", {500, -10.0f, 10.0f}, ""};
 
+  Configurable<bool> isApplyTFcut{"isApplyTFcut", true, "Enable TimeFrameBorder cut"};
+  Configurable<bool> isApplyITSROcut{"isApplyITSROcut", true, "Enable ITS ReadOutFrameBorder cut"};
   Configurable<bool> isApplySameBunchPileup{"isApplySameBunchPileup", true, "Enable SameBunchPileup cut"};
   Configurable<bool> isApplyGoodZvtxFT0vsPV{"isApplyGoodZvtxFT0vsPV", true, "Enable GoodZvtxFT0vsPV cut"};
-  Configurable<bool> isApplyVertexITSTPC{"isApplyVertexITSTPC", true, "Enable VertexITSTPC cut"};
-  Configurable<bool> isApplyVertexTOFmatched{"isApplyVertexTOFmatched", true, "Enable VertexTOFmatched cut"};
-  Configurable<bool> isApplyVertexTRDmatched{"isApplyVertexTRDmatched", true, "Enable VertexTRDmatched cut"};
-  Configurable<bool> isApplyExtraCorrCut{"isApplyExtraCorrCut", false, "Enable extra NPVtracks vs FTOC correlation cut"};
-  Configurable<bool> isApplyExtraPhiCut{"isApplyExtraPhiCut", false, "Enable extra phi cut"};
-  Configurable<float> npvTracksCut{"npvTracksCut", 1.0f, "Apply extra NPVtracks cut"};
-  Configurable<float> ft0cCut{"ft0cCut", 1.0f, "Apply extra FT0C cut"};
   Configurable<bool> isApplyNoCollInTimeRangeStandard{"isApplyNoCollInTimeRangeStandard", true, "Enable NoCollInTimeRangeStandard cut"};
-  Configurable<bool> isApplyNoCollInRofStandard{"isApplyNoCollInRofStandard", true, "Enable NoCollInRofStandard cut"};
-  Configurable<bool> isApplyNoHighMultCollInPrevRof{"isApplyNoHighMultCollInPrevRof", true, "Enable NoHighMultCollInPrevRof cut"};
-  Configurable<bool> isApplyFT0CbasedOccupancy{"isApplyFT0CbasedOccupancy", true, "Enable FT0CbasedOccupancy cut"};
-  Configurable<bool> isApplyCentFT0C{"isApplyCentFT0C", false, "Centrality based on FT0C"};
+  Configurable<bool> isApplyNoCollInRofStandard{"isApplyNoCollInRofStandard", false, "Enable NoCollInRofStandard cut"};
+  Configurable<bool> isApplyNoHighMultCollInPrevRof{"isApplyNoHighMultCollInPrevRof", false, "Enable NoHighMultCollInPrevRof cut"};
+  Configurable<bool> isApplyInelgt0{"isApplyInelgt0", false, "Enable INEL > 0 condition"};
+  Configurable<bool> isApplyVtxCut{"isApplyVtxCut", false, "Enable vertex cut condition"};
+  Configurable<bool> isApplyFT0CbasedOccupancy{"isApplyFT0CbasedOccupancy", false, "Enable FT0CbasedOccupancy cut"};
+  Configurable<bool> isApplyCentFT0C{"isApplyCentFT0C", true, "Centrality based on FT0C"};
+  Configurable<bool> isApplyCentFV0A{"isApplyCentFV0A", false, "Centrality based on FV0A"};
   Configurable<bool> isApplyCentFT0CVariant1{"isApplyCentFT0CVariant1", false, "Centrality based on FT0C variant1"};
+  Configurable<bool> isApplyCentFT0CVariant2{"isApplyCentFT0CVariant2", false, "Centrality based on FT0C variant2 (Run2 like truncation)"};
   Configurable<bool> isApplyCentFT0M{"isApplyCentFT0M", false, "Centrality based on FT0A + FT0C"};
   Configurable<bool> isApplyCentNGlobal{"isApplyCentNGlobal", false, "Centrality based on global tracks"};
   Configurable<bool> isApplyCentMFT{"isApplyCentMFT", false, "Centrality based on MFT tracks"};
+  Configurable<bool> isApplyTVX{"isApplyTVX", false, "Enable TVX trigger sel"};
+  Configurable<bool> isApplyExtraPhiCut{"isApplyExtraPhiCut", false, "Enable extra phi cut"};
+  Configurable<bool> isApplyBestCollIndex{"isApplyBestCollIndex", true, ""};
+  Configurable<bool> isApplyGenMult{"isApplyGenMult", false, "Enable MultMC in ProcessMC for MC closure"};
+
+  Configurable<bool> selectCollidingBCs{"selectCollidingBCs", true, "BC analysis: select colliding BCs"};
+  Configurable<bool> selectTVX{"selectTVX", true, "BC analysis: select TVX"};
+  Configurable<bool> selectFV0OrA{"selectFV0OrA", true, "BC analysis: select FV0OrA"};
+  Configurable<bool> isApplyDCAstandardcuts{"isApplyDCAstandardcuts", true, "Apply DCA standard run 2 cuts"};
+  Configurable<bool> isApplyDCAcustomcuts{"isApplyDCAcustomcuts", false, "Apply DCA custom cuts"};
+  Configurable<float> cDcazP0{"cDcazP0", 1.0f, "dcaz parameter0"};
+  Configurable<float> cDcazP1{"cDcazP1", 1.0f, "dcaz parameter1"};
+  Configurable<float> cDcazP2{"cDcazP2", 1.0f, "dcaz parameter2"};
+  Configurable<float> cDcaxyP0{"cDcaxyP0", 1.0f, "dcaxy parameter0"};
+  Configurable<float> cDcaxyP1{"cDcaxyP1", 1.0f, "dcaxy parameter1"};
+  Configurable<float> cDcaxyP2{"cDcaxyP2", 1.0f, "dcaxy parameter2"};
 
   void init(InitContext const&)
   {
@@ -166,6 +236,10 @@ struct HeavyionMultiplicity {
     AxisSpec centAxis = {centralityBinning, "Centrality", "CentralityAxis"};
     AxisSpec axisPt = {ptHistBin, "pT", "pTAxis"};
     AxisSpec axisOccupancy = {occupancyBin, "occupancy", "OccupancyAxis"};
+    AxisSpec axisCentBinGen = {centBinGen, "GenCentrality", "CentGenAxis"};
+    AxisSpec impactParAxis = {binsImpactPar, "Impact Parameter"};
+    AxisSpec multAxis = {binsMult, "Multiplicity #eta<0.5"};
+    AxisSpec dcaAxis = {binsDCA, "DCA vs PV"};
 
     histos.add("EventHist", "EventHist", kTH1D, {axisEvent}, false);
     histos.add("VtxZHist", "VtxZHist", kTH1D, {axisVtxZ}, false);
@@ -173,45 +247,51 @@ struct HeavyionMultiplicity {
     auto hstat = histos.get<TH1>(HIST("EventHist"));
     auto* x = hstat->GetXaxis();
     x->SetBinLabel(1, "All events");
-    x->SetBinLabel(2, "sel8");
-    x->SetBinLabel(3, "kNoSameBunchPileup");  // reject collisions in case of pileup with another collision in the same foundBC
-    x->SetBinLabel(4, "kIsGoodZvtxFT0vsPV");  // small difference between z-vertex from PV and from FT0
-    x->SetBinLabel(5, "kIsVertexITSTPC");     // at least one ITS-TPC track (reject vertices built from ITS-only tracks)
-    x->SetBinLabel(6, "kIsVertexTOFmatched"); // at least one of vertex contributors is matched to TOF
-    x->SetBinLabel(7, "kIsVertexTRDmatched"); // at least one of vertex contributors is matched to TRD
-    x->SetBinLabel(8, "Centrality");
-    x->SetBinLabel(9, "ApplyExtraCorrCut");
-    x->SetBinLabel(10, "ApplyNoCollInTimeRangeStandard");
-    x->SetBinLabel(11, "ApplyNoCollInRofStandard");
-    x->SetBinLabel(12, "ApplyNoHighMultCollInPrevRof");
+    x->SetBinLabel(2, "kIsTriggerTVX");
+    x->SetBinLabel(3, "kNoTimeFrameBorder");
+    x->SetBinLabel(4, "kNoITSROFrameBorder");
+    x->SetBinLabel(5, "kNoSameBunchPileup"); // reject collisions in case of pileup with another collision in the same foundBC
+    x->SetBinLabel(6, "kIsGoodZvtxFT0vsPV"); // small difference between z-vertex from PV and from FT0
+    x->SetBinLabel(7, "ApplyNoCollInTimeRangeStandard");
+    x->SetBinLabel(8, "ApplyNoCollInRofStandard");
+    x->SetBinLabel(9, "ApplyNoHighMultCollInPrevRof");
+    x->SetBinLabel(10, "INEL > 0");
 
-    if (doprocessData) {
-      histos.add("CentPercentileHist", "CentPercentileHist", kTH1D, {axisCent}, false);
-      histos.add("hdatamult", "hdatamult", kTHnSparseD, {axisVtxZ, axisMult, centAxis}, false);
-      histos.add("hdatadndeta", "hdatadndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi, axisTrackType}, false);
-      histos.add("hdatazvtxcent", "hdatazvtxcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
-      histos.add("PhiVsEtaHist", "PhiVsEtaHist", kTH2D, {axisPhi2, axisEta}, false);
+    if (doprocessDCAvsptData) {
+      histos.add("hdcaxyvspt", "dca to pv in the xy plane", kTH2D, {dcaAxis, axisPt}, false);
+      histos.add("hdcazvspt", "dca to pv in the z axis", kTH2D, {dcaAxis, axisPt}, false);
     }
 
-    if (doprocessMonteCarlo || doprocessMCpTefficiency || doprocessMCcheckFakeTracks || doprocessMCfillspecies) {
-      histos.add("CentPercentileMCRecHist", "CentPercentileMCRecHist", kTH1D, {axisCent}, false);
+    if (doprocessDCAvsptMC) {
+      histos.add("hdcaxyvsptMC", "dca to pv in the xy plane MC", kTH2D, {dcaAxis, axisPt}, false);
+      histos.add("hdcazvsptMC", "dca to pv in the z axis MC", kTH2D, {dcaAxis, axisPt}, false);
+      histos.add("hdcaxyvsptMCprimary", "dca to pv in the xy plane MC primary particles", kTH2D, {dcaAxis, axisPt}, false);
+      histos.add("hdcazvsptMCprimary", "dca to pv in the z axis MC primary particles", kTH2D, {dcaAxis, axisPt}, false);
+    }
+
+    if (doprocessData) {
+      histos.add("hdcaxy", "dca to pv in the xy plane", kTH1D, {dcaAxis}, false);
+      histos.add("hdcaz", "dca to pv in the z axis", kTH1D, {dcaAxis}, false);
+      histos.add("CentPercentileHist", "CentPercentileHist", kTH1D, {centAxis}, false);
+      histos.add("hdatazvtxcent", "hdatazvtxcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
+      histos.add("PhiVsEtaHist", "PhiVsEtaHist", kTH2D, {axisPhi2, axisEta}, false);
+      histos.add("hdatadndeta", "hdatadndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi, axisTrackType}, false);
+      histos.add("hdatadndetaMB", "hdatadndetaMB", kTHnSparseD, {axisVtxZ, axisEta, axisPhi}, false);
+    }
+
+    if (doprocessMonteCarlo || doprocessMCcheckFakeTracks) {
+      histos.add("CentPercentileMCRecHist", "CentPercentileMCRecHist", kTH1D, {centAxis}, false);
       histos.add("hmczvtxcent", "hmczvtxcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
     }
 
     if (doprocessMonteCarlo) {
+      histos.add("hmcdcaxy", "dca to pv in the xy plane", kTH1D, {dcaAxis}, false);
+      histos.add("hmcdcaz", "dca to pv in the z axis", kTH1D, {dcaAxis}, false);
       histos.add("MCrecPhiVsEtaHist", "MCrecPhiVsEtaHist", kTH2D, {axisPhi2, axisEta}, false);
-      histos.add("hmcrecdndeta", "hmcrecdndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi}, false);
-      histos.add("hmcgendndeta", "hmcgendndeta", kTHnSparseD, {axisVtxZ, centAxis, axisEta, axisPhi, axisGenPtVary}, false);
-    }
-
-    if (doprocessMCfillspecies) {
-      histos.add("FillMCrecSpecies", "FillMCrecSpecies", kTHnSparseD, {centAxis, axisOccupancy, axisEta, axisSpecies}, false);
-      histos.add("FillMCgenSpecies", "FillMCgenSpecies", kTHnSparseD, {centAxis, axisEta, axisSpecies}, false);
-    }
-
-    if (doprocessMCpTefficiency) {
-      histos.add("hmcrecdndpt", "hmcrecdndpt", kTHnSparseD, {centAxis, axisPt}, false);
-      histos.add("hmcgendndpt", "hmcgendndpt", kTHnSparseD, {centAxis, axisPt, axisGenPtVary}, false);
+      histos.add("hmcrecdndeta", "hmcrecdndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi, axisSpecies, axisTrackType}, false);
+      histos.add("hmcrecdndetaMB", "hmcrecdndetaMB", kTHnSparseD, {axisVtxZ, axisEta, axisPhi, axisSpecies}, false);
+      histos.add("hmcgendndeta", "hmcgendndeta", kTHnSparseD, {axisVtxZ, centAxis, axisEta, axisPhi, axisSpecies, axisGenPtVary}, false);
+      histos.add("hmcgendndetaMB", "hmcgendndetaMB", kTHnSparseD, {axisVtxZ, axisEta, axisPhi, axisSpecies}, false);
     }
 
     if (doprocessMCcheckFakeTracks) {
@@ -220,7 +300,7 @@ struct HeavyionMultiplicity {
       auto* x2 = htrack->GetAxis(1);
       x2->SetBinLabel(1, "All tracks");
       x2->SetBinLabel(2, "Non-fake tracks");
-      for (int i = 0; i < 7; i++) {
+      for (int i = 0; i < KnItsLayers; i++) {
         x2->SetBinLabel(i + 3, Form("layer %d", i));
       }
     }
@@ -228,8 +308,11 @@ struct HeavyionMultiplicity {
     if (doprocessCorrelation) {
       histos.add("GlobalMult_vs_FT0A", "GlobalMult_vs_FT0A", kTH2F, {axisMult, axisFt0aMult}, true);
       histos.add("GlobalMult_vs_FT0C", "GlobalMult_vs_FT0C", kTH2F, {axisMult, axisFt0cMult}, true);
+      histos.add("Centrality_vs_FT0C", "Centrality_vs_FT0C", kTH2F, {centAxis, axisFt0cMult}, true);
       histos.add("NPVtracks_vs_FT0C", "NPVtracks_vs_FT0C", kTH2F, {axisPV, axisFt0cMult}, true);
       histos.add("GlobalMult_vs_FV0A", "GlobalMult_vs_FV0A", kTH2F, {axisMult, axisFv0aMult}, true);
+      histos.add("Centrality_vs_FV0A", "Centrality_vs_FV0A", kTH2F, {centAxis, axisFv0aMult}, true);
+      histos.add("CentFT0Ccentrality_vs_GlobalMult", "CentFT0Ccentrality_vs_GlobalMult", kTH2F, {centAxis, axisMult}, true);
       histos.add("NPVtracks_vs_GlobalMult", "NPVtracks_vs_GlobalMult", kTH2F, {axisPV, axisMult}, true);
     }
 
@@ -239,19 +322,202 @@ struct HeavyionMultiplicity {
       histos.add("LambdaCentEtaMass", "LambdaCentEtaMass", kTH3D, {centAxis, axisEta, axisMassLambda}, false);
       histos.add("AntiLambdaCentEtaMass", "AntiLambdaCentEtaMass", kTH3D, {centAxis, axisEta, axisMassLambda}, false);
     }
+
+    if (doprocessGen) {
+      histos.add("MultBarrelEta10_vs_FT0A", "MultBarrelEta10_vs_FT0A", kTH2F, {axisMult, axisFt0aMult}, true);
+      histos.add("MultBarrelEta10_vs_FT0C", "MultBarrelEta10_vs_FT0C", kTH2F, {axisMult, axisFt0cMult}, true);
+      histos.add("MultBarrelEta10", "MultBarrelEta10", kTH1F, {axisMult}, true);
+      histos.add("MultFT0A", "MultFT0A", kTH1F, {axisFt0aMult}, true);
+      histos.add("MultFT0C", "MultFT0C", kTH1F, {axisFt0cMult}, true);
+      histos.add("dndeta10_vs_FT0C", "dndeta10_vs_FT0C", kTH2F, {axisEta, axisCentBinGen}, true);
+      histos.add("dndeta10_vs_FT0A", "dndeta10_vs_FT0A", kTH2F, {axisEta, axisCentBinGen}, true);
+      histos.add("mult10_vs_FT0C", "mult10_vs_FT0C", kTH2F, {axisMult, axisCentBinGen}, true);
+      histos.add("mult10_vs_FT0A", "mult10_vs_FT0A", kTH2F, {axisMult, axisCentBinGen}, true);
+    }
+
+    if (doprocessEvtLossSigLossMC) {
+      histos.add("MCEventHist", "MCEventHist", kTH1F, {axisEvent}, false);
+      auto hstat = histos.get<TH1>(HIST("MCEventHist"));
+      auto* x = hstat->GetXaxis();
+      x->SetBinLabel(1, "All MC events");
+      x->SetBinLabel(2, "MC events with reco event after event selection");
+      x->SetBinLabel(3, "MC events with no reco events");
+      histos.add("hgendndetaVscentGenwithNOreco", "dndeta vs impact parameter, gen events with no reco", kTH2F, {axisEtaExtended, impactParAxis});
+      histos.add("hgendndetaVscentGenwithReco", "dndeta vs impact parameter, gen events with at least one reco", kTH2F, {axisEtaExtended, impactParAxis});
+
+      histos.add("hMultEta05GenwithNoreco", "multiplicity in eta<0.5 of generated MC events, with no recoevent", kTH1F, {multAxis});
+      histos.add("hMultEta05Gen", "multiplicity in eta<0.5 of generated MC events", kTH1F, {multAxis});
+      histos.add("hMultEta05Rec", "multiplicity in eta<0.5 of selected MC events", kTH1F, {multAxis});
+      histos.add("hMultEta05vsCentrRec", "multiplicity in eta<0.5 of selected MC events vs centrality", kTH2F, {centAxis, multAxis});
+      histos.add("hgendndetaVsMultEta05BeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity in eta<0.5", kTH2F, {axisEta, multAxis});
+      histos.add("hgendndetaVsMultEta05AfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity in eta<0.5", kTH2F, {axisEta, multAxis});
+      histos.add("hImpactParameterSplit", "Impact parameter of selected and split MC events", kTH1F, {impactParAxis});
+      histos.add("hMultEta05Split", "multiplicity in eta<0.5 of selected and split MC events", kTH1F, {multAxis});
+      histos.add("hMultSplit", "multiplicity of selected and split MC events", kTH1F, {axisFt0cMult});
+      histos.add("hMultvsCentrSplit", "multiplicity of selected and split MC events vs centrality ", kTH2F, {centAxis, axisFt0cMult});
+
+      histos.add("hMultGen", "multiplicity of generated MC events", kTH1F, {axisFt0cMult});
+      histos.add("hMultRec", "multiplicity of selected MC events", kTH1F, {axisFt0cMult});
+      histos.add("hMultvsCentrRec", "multiplicity of selected MC events vs centrality", kTH2F, {centAxis, axisFt0cMult});
+      histos.add("hgendndetaVsMultBeforeEvtSel", "hgendndetaBeforeEvtSel vs multiplicity", kTH2F, {axisEta, axisFt0cMult});
+      histos.add("hgendndetaVsMultAfterEvtSel", "hgendndetaAfterEvtSel vs multiplicity", kTH2F, {axisEta, axisFt0cMult});
+
+      histos.add("hImpactParameterGenwithNoreco", "Impact parameter of generated MC events, with no recoevent", kTH1F, {impactParAxis});
+      histos.add("hImpactParameterGen", "Impact parameter of generated MC events", kTH1F, {impactParAxis});
+      histos.add("hImpactParameterRec", "Impact parameter of selected MC events", kTH1F, {impactParAxis});
+      histos.add("hImpactParvsCentrRec", "Impact parameter of selected MC events vs centrality", kTH2F, {centAxis, impactParAxis});
+      histos.add("hgendndetaBeforeEvtSel", "Eta of all generated particles", kTH1F, {axisEta});
+      histos.add("hgendndetaAfterEvtSel", "Eta of generated particles after EvtSel", kTH1F, {axisEta});
+      histos.add("hgendndetaVscentBeforeEvtSel", "hgendndetaBeforeEvtSel vs centrality", kTH2F, {axisEta, impactParAxis});
+      histos.add("hgendndetaVscentAfterEvtSel", "hgendndetaAfterEvtSel vs centrality", kTH2F, {axisEta, impactParAxis});
+    }
+
+    if (doprocessMCeff) {
+      histos.add("hGenMCvertexZ", "hGenMCvertexZ", kTH1D, {axisVtxZ}, false);
+      histos.add("hGenMCvtxzcent", "hGenMCvtxzcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
+      histos.add("hGenMCAssoRecvertexZ", "hGenMCAssoRecvertexZ", kTH1D, {axisVtxZ}, false);
+      histos.add("hGenMCAssoRecvtxzcent", "hGenMCAssoRecvtxzcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
+      histos.add("hGenMCdndeta", "hGenMCdndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi}, false);
+      histos.add("hGenMCAssoRecdndeta", "hGenMCAssoRecdndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi, axisGenTrkType, axisGenPtVary}, false);
+
+      histos.add("hRecMCvertexZ", "hRecMCvertexZ", kTH1D, {axisVtxZ}, false);
+      histos.add("hRecMCvtxzcent", "hRecMCvtxzcent", kTH3D, {axisVtxZ, centAxis, axisOccupancy}, false);
+      histos.add("hRecMCcentrality", "hRecMCcentrality", kTH1D, {centAxis}, false);
+      histos.add("MCCentrality_vs_FT0C", "MCCentrality_vs_FT0C", kTH2F, {centAxis, axisFt0cMult}, true);
+      histos.add("hRecMCphivseta", "hRecMCphivseta", kTH2D, {axisPhi2, axisEta}, false);
+      histos.add("hRecMCdndeta", "hRecMCdndeta", kTHnSparseD, {axisVtxZ, centAxis, axisOccupancy, axisEta, axisPhi, axisRecTrkType}, false);
+      histos.add("etaResolution", "etaResolution", kTH2D, {axisEta, axisDeltaEta});
+    }
+
+    if (doprocessBcData) {
+      histos.add("BcHist", "BcHist", kTH1D, {axisEvent}, false);
+      auto hstat = histos.get<TH1>(HIST("BcHist"));
+      auto* x = hstat->GetXaxis();
+      x->SetBinLabel(1, "All BCs");
+      x->SetBinLabel(2, "Colliding BCs");
+      x->SetBinLabel(3, "TVX");
+      x->SetBinLabel(4, "FV0OrA");
+      x->SetBinLabel(5, "VtxZ");
+      histos.add("BcCentFT0CHist", "BcCentFT0CHist", kTH1D, {centAxis}, false);
+      histos.add("BcCentFT0MHist", "BcCentFT0MHist", kTH1D, {centAxis}, false);
+      histos.add("VtxZHistBC", "VtxZHistBC", kTH1D, {axisVtxZ}, false);
+    }
+  }
+
+  template <typename CheckCol>
+  bool isEventSelected(CheckCol const& col)
+  {
+    histos.fill(HIST("EventHist"), 1);
+    if (!col.selection_bit(o2::aod::evsel::kIsTriggerTVX)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 2);
+    if (isApplyTFcut && !col.selection_bit(o2::aod::evsel::kNoTimeFrameBorder)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 3);
+    if (isApplyITSROcut && !col.selection_bit(o2::aod::evsel::kNoITSROFrameBorder)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 4);
+    if (isApplySameBunchPileup && !col.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 5);
+    if (isApplyGoodZvtxFT0vsPV && !col.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 6);
+    if (isApplyNoCollInTimeRangeStandard && !col.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 7);
+    if (isApplyNoCollInRofStandard && !col.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 8);
+    if (isApplyNoHighMultCollInPrevRof && !col.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 9);
+    if (isApplyInelgt0 && !col.isInelGt0()) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 10);
+    if (isApplyVtxCut && std::abs(col.posZ()) >= vtxRange) {
+      return false;
+    }
+    histos.fill(HIST("EventHist"), 11);
+    return true;
+  }
+
+  template <typename CheckColCent>
+  float selColCent(CheckColCent const& col)
+  {
+    auto cent = -1;
+    if (isApplyCentFT0C) {
+      cent = col.centFT0C();
+    }
+    if (isApplyCentFV0A) {
+      cent = col.centFV0A();
+    }
+    if (isApplyCentFT0CVariant1) {
+      cent = col.centFT0CVariant1();
+    }
+    if (isApplyCentFT0CVariant2) {
+      cent = col.centFT0CVariant2();
+    }
+    if (isApplyCentFT0M) {
+      cent = col.centFT0M();
+    }
+    if (isApplyCentNGlobal) {
+      cent = col.centNGlobal();
+    }
+    if (isApplyCentMFT) {
+      cent = col.centMFT();
+    }
+    return cent;
+  }
+
+  template <typename CheckColCent>
+  float selColMultMC(CheckColCent const& col)
+  {
+    auto cent = -1;
+    if (isApplyCentFT0C) {
+      cent = col.multMCFT0C();
+    } else if (isApplyCentFT0M) {
+      cent = col.multMCFT0C() + col.multMCFT0A();
+    } else if (isApplyCentFV0A) {
+      cent = col.multMCFV0A();
+    }
+    return cent;
+  }
+
+  template <typename CheckColOccu>
+  float selColOccu(CheckColOccu const& col)
+  {
+    auto occu = isApplyFT0CbasedOccupancy ? col.ft0cOccupancyInTimeRange() : col.trackOccupancyInTimeRange();
+    return occu;
   }
 
   template <typename CheckTrack>
   bool isTrackSelected(CheckTrack const& track)
   {
+    if (isApplyDCAcustomcuts) {
+      if (std::abs(track.dcaXY()) > cDcaxyP0 + cDcaxyP1 / pow(track.pt(), cDcaxyP2))
+        return false;
+      if (std::abs(track.dcaZ()) > cDcazP0 + cDcazP1 / pow(track.pt(), cDcazP2))
+        return false;
+    }
     if (std::abs(track.eta()) >= etaRange) {
       return false;
     }
-    if (isApplyExtraPhiCut && ((track.phi() > 3.07666 && track.phi() < 3.12661) || track.phi() <= 0.03 || track.phi() >= 6.253)) {
+    if (isApplyExtraPhiCut && ((track.phi() > extraphicut1 && track.phi() < extraphicut2) || track.phi() <= extraphicut3 || track.phi() >= extraphicut4)) {
       return false;
     }
     return true;
   }
+
   template <typename CheckGenTrack>
   bool isGenTrackSelected(CheckGenTrack const& track)
   {
@@ -265,143 +531,110 @@ struct HeavyionMultiplicity {
     if (pdgTrack == nullptr) {
       return false;
     }
-    if (std::abs(pdgTrack->Charge()) < 3) {
+    if (std::abs(pdgTrack->Charge()) < KminCharge) {
       return false;
     }
     if (std::abs(track.eta()) >= etaRange) {
       return false;
     }
-    if (isApplyExtraPhiCut && ((track.phi() > 3.07666 && track.phi() < 3.12661) || track.phi() <= 0.03 || track.phi() >= 6.253)) {
+    if (isApplyExtraPhiCut && ((track.phi() > extraphicut1 && track.phi() < extraphicut2) || track.phi() <= extraphicut3 || track.phi() >= extraphicut4)) {
       return false;
     }
     return true;
   }
-  template <typename CheckCol>
-  bool isEventSelected(CheckCol const& col)
-  {
-    histos.fill(HIST("EventHist"), 1);
 
-    if (!col.sel8()) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 2);
-
-    if (isApplySameBunchPileup && !col.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 3);
-
-    if (isApplyGoodZvtxFT0vsPV && !col.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 4);
-
-    if (isApplyVertexITSTPC && !col.selection_bit(o2::aod::evsel::kIsVertexITSTPC)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 5);
-
-    if (isApplyVertexTOFmatched && !col.selection_bit(o2::aod::evsel::kIsVertexTOFmatched)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 6);
-
-    if (isApplyVertexTRDmatched && !col.selection_bit(o2::aod::evsel::kIsVertexTRDmatched)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 7);
-
-    if (col.centFT0C() < 0. || col.centFT0C() > 100.) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 8);
-
-    if (isApplyExtraCorrCut && col.multNTracksPV() > npvTracksCut && col.multFT0C() < (10 * col.multNTracksPV() - ft0cCut)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 9);
-
-    if (isApplyNoCollInTimeRangeStandard && !col.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 10);
-
-    if (isApplyNoCollInRofStandard && !col.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 11);
-
-    if (isApplyNoHighMultCollInPrevRof && !col.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
-      return false;
-    }
-    histos.fill(HIST("EventHist"), 12);
-    return true;
-  }
-  template <typename CheckColCent>
-  float selectColCentrality(CheckColCent const& col)
-  {
-    auto cent = -1;
-    if (isApplyCentFT0C) {
-      cent = col.centFT0C();
-    }
-    if (isApplyCentFT0CVariant1) {
-      cent = col.centFT0CVariant1();
-    }
-    if (isApplyCentFT0M) {
-      cent = col.centFT0M();
-    }
-    if (isApplyCentNGlobal) {
-      cent = col.centNGlobal();
-    }
-    if (isApplyCentMFT) {
-      cent = col.centMFT();
-    }
-    return cent;
-  }
   expressions::Filter trackSelectionProperMixed = ncheckbit(aod::track::v001::detectorMap, (uint8_t)o2::aod::track::ITS) &&
                                                   ncheckbit(aod::track::trackCutFlag, TrackSelectionIts) &&
                                                   ifnode(ncheckbit(aod::track::v001::detectorMap, (uint8_t)o2::aod::track::TPC),
                                                          ncheckbit(aod::track::trackCutFlag, TrackSelectionTpc), true) &&
-                                                  ifnode(dcaZ.node() > 0.f, nabs(aod::track::dcaZ) <= dcaZ && ncheckbit(aod::track::trackCutFlag, TrackSelectionDcaxyOnly),
-                                                         ncheckbit(aod::track::trackCutFlag, TrackSelectionDca));
+                                                  ifnode(isApplyDCAstandardcuts.node(), nabs(aod::track::dcaZ) <= dcaZ && ncheckbit(aod::track::trackCutFlag, TrackSelectionDcaxyOnly), true);
 
-  void processData(CollisionDataTable::iterator const& collision, FilTrackDataTable const& tracks)
+  void processDCAvsptData(CollisionDataTable::iterator const& cols, FilTrackDataTable const& tracks)
   {
-    if (!isEventSelected(collision)) {
+    if (!isEventSelected(cols)) {
       return;
     }
-    histos.fill(HIST("VtxZHist"), collision.posZ());
-    histos.fill(HIST("CentPercentileHist"), selectColCentrality(collision));
-    auto occupancyValue = isApplyFT0CbasedOccupancy ? collision.ft0cOccupancyInTimeRange() : collision.trackOccupancyInTimeRange();
-    histos.fill(HIST("hdatazvtxcent"), collision.posZ(), selectColCentrality(collision), occupancyValue);
 
-    auto nchTracks = 0;
+    for (const auto& track : tracks) {
+
+      if (!isTrackSelected(track))
+        continue;
+
+      histos.fill(HIST("hdcaxyvspt"), track.dcaXY(), track.pt());
+      histos.fill(HIST("hdcazvspt"), track.dcaZ(), track.pt());
+    }
+  }
+
+  void processDCAvsptMC(soa::Join<CollisionMCTrueTable, aod::McCollsExtra>::iterator const& mcCollision, CollisionMCRecTable const& RecCols, TrackMCTrueTable const&, FilTrackMCRecTable const& RecTracks)
+  {
+
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
+        continue;
+      }
+      if (RecCol.globalIndex() != mcCollision.bestCollisionIndex()) {
+        continue;
+      }
+
+      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCol.globalIndex());
+
+      for (const auto& Rectrack : recTracksPart) {
+
+        if (!isTrackSelected(Rectrack))
+          continue;
+
+        if (!Rectrack.has_mcParticle())
+          continue;
+
+        histos.fill(HIST("hdcaxyvsptMC"), Rectrack.dcaXY(), Rectrack.pt());
+        histos.fill(HIST("hdcazvsptMC"), Rectrack.dcaZ(), Rectrack.pt());
+
+        auto mcpart = Rectrack.mcParticle();
+
+        if (isGenTrackSelected(mcpart)) {
+          histos.fill(HIST("hdcaxyvsptMCprimary"), Rectrack.dcaXY(), Rectrack.pt());
+          histos.fill(HIST("hdcazvsptMCprimary"), Rectrack.dcaZ(), Rectrack.pt());
+        }
+      }
+    }
+  }
+
+  void processData(CollisionDataTable::iterator const& cols, FilTrackDataTable const& tracks)
+  {
+    if (!isEventSelected(cols)) {
+      return;
+    }
+    histos.fill(HIST("VtxZHist"), cols.posZ());
+    histos.fill(HIST("CentPercentileHist"), selColCent(cols));
+    histos.fill(HIST("hdatazvtxcent"), cols.posZ(), selColCent(cols), selColOccu(cols));
+
     for (const auto& track : tracks) {
       if (!isTrackSelected(track)) {
         continue;
       }
+      histos.fill(HIST("hdcaxy"), track.dcaXY());
+      histos.fill(HIST("hdcaz"), track.dcaZ());
       histos.fill(HIST("PhiVsEtaHist"), track.phi(), track.eta());
-      nchTracks++;
-      histos.fill(HIST("hdatadndeta"), collision.posZ(), selectColCentrality(collision), occupancyValue, track.eta(), track.phi(), kGlobalplusITS);
+      histos.fill(HIST("hdatadndeta"), cols.posZ(), selColCent(cols), selColOccu(cols), track.eta(), track.phi(), kGlobalplusITS);
+      histos.fill(HIST("hdatadndetaMB"), cols.posZ(), track.eta(), track.phi());
+
       if (track.hasTPC()) {
-        histos.fill(HIST("hdatadndeta"), collision.posZ(), selectColCentrality(collision), occupancyValue, track.eta(), track.phi(), kGlobalonly);
+        histos.fill(HIST("hdatadndeta"), cols.posZ(), selColCent(cols), selColOccu(cols), track.eta(), track.phi(), kGlobalonly);
       } else {
-        histos.fill(HIST("hdatadndeta"), collision.posZ(), selectColCentrality(collision), occupancyValue, track.eta(), track.phi(), kITSonly);
+        histos.fill(HIST("hdatadndeta"), cols.posZ(), selColCent(cols), selColOccu(cols), track.eta(), track.phi(), kITSonly);
       }
     }
-    histos.fill(HIST("hdatamult"), collision.posZ(), nchTracks, selectColCentrality(collision));
   }
-  PROCESS_SWITCH(HeavyionMultiplicity, processData, "process data CentFT0C", false);
 
-  void processCorrelation(CollisionDataTable::iterator const& collision, FilTrackDataTable const& tracks)
+  void processCorrelation(CollisionDataTable::iterator const& cols, FilTrackDataTable const& tracks)
   {
-    if (!isEventSelected(collision)) {
+    if (!isEventSelected(cols)) {
       return;
     }
-    if (std::abs(collision.posZ()) >= vtxRange) {
+    if (std::abs(cols.posZ()) >= vtxRange) {
       return;
     }
-    histos.fill(HIST("VtxZHist"), collision.posZ());
+    histos.fill(HIST("VtxZHist"), cols.posZ());
 
     auto nchTracks = 0;
     for (const auto& track : tracks) {
@@ -410,110 +643,142 @@ struct HeavyionMultiplicity {
       }
       nchTracks++;
     }
-    histos.fill(HIST("GlobalMult_vs_FT0A"), nchTracks, collision.multFT0A());
-    histos.fill(HIST("GlobalMult_vs_FT0C"), nchTracks, collision.multFT0C());
-    histos.fill(HIST("NPVtracks_vs_FT0C"), collision.multNTracksPV(), collision.multFT0C());
-    histos.fill(HIST("GlobalMult_vs_FV0A"), nchTracks, collision.multFV0A());
-    histos.fill(HIST("NPVtracks_vs_GlobalMult"), collision.multNTracksPV(), nchTracks);
-  }
-  PROCESS_SWITCH(HeavyionMultiplicity, processCorrelation, "do correlation study in data", false);
 
-  void processMonteCarlo(CollisionMCTrueTable::iterator const&, CollisionMCRecTable const& RecCollisions, TrackMCTrueTable const& GenParticles, FilTrackMCRecTable const& RecTracks)
+    histos.fill(HIST("GlobalMult_vs_FT0A"), nchTracks, cols.multFT0A());
+    histos.fill(HIST("GlobalMult_vs_FT0C"), nchTracks, cols.multFT0C());
+    histos.fill(HIST("Centrality_vs_FT0C"), cols.centFT0C(), cols.multFT0C());
+    histos.fill(HIST("NPVtracks_vs_FT0C"), cols.multNTracksPV(), cols.multFT0C());
+    histos.fill(HIST("GlobalMult_vs_FV0A"), nchTracks, cols.multFV0A());
+    histos.fill(HIST("Centrality_vs_FV0A"), cols.centFV0A(), cols.multFV0A());
+    histos.fill(HIST("CentFT0Ccentrality_vs_GlobalMult"), cols.centFT0C(), nchTracks);
+    histos.fill(HIST("NPVtracks_vs_GlobalMult"), cols.multNTracksPV(), nchTracks);
+  }
+
+  void processMonteCarlo(soa::Join<CollisionMCTrueTable, aod::McCollsExtra, aod::MultMCExtras>::iterator const& mcCollision, CollisionMCRecTable const& RecCols, TrackMCTrueTable const& GenParticles, FilTrackMCRecTable const& RecTracks)
   {
-    for (const auto& RecCollision : RecCollisions) {
-      if (!isEventSelected(RecCollision)) {
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
         continue;
       }
-      histos.fill(HIST("VtxZHist"), RecCollision.posZ());
-      histos.fill(HIST("CentPercentileMCRecHist"), selectColCentrality(RecCollision));
-      auto occupancyValue = isApplyFT0CbasedOccupancy ? RecCollision.ft0cOccupancyInTimeRange() : RecCollision.trackOccupancyInTimeRange();
-      histos.fill(HIST("hmczvtxcent"), RecCollision.posZ(), selectColCentrality(RecCollision), occupancyValue);
+      if (RecCol.globalIndex() != mcCollision.bestCollisionIndex()) {
+        continue;
+      }
+      auto centrality = 0;
+      if (isApplyGenMult)
+        centrality = selColMultMC(mcCollision);
+      else
+        centrality = selColCent(RecCol);
 
-      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCollision.globalIndex());
+      histos.fill(HIST("VtxZHist"), RecCol.posZ());
+      histos.fill(HIST("CentPercentileMCRecHist"), centrality);
+      histos.fill(HIST("hmczvtxcent"), RecCol.posZ(), centrality, selColOccu(RecCol));
+      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCol.globalIndex());
+      std::vector<int> mclabels;
       for (const auto& Rectrack : recTracksPart) {
         if (!isTrackSelected(Rectrack)) {
           continue;
         }
+        if (!Rectrack.has_mcParticle()) {
+          histos.fill(HIST("hmcrecdndeta"), RecCol.posZ(), centrality, selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kBkg), kGlobalplusITS);
+          histos.fill(HIST("hmcrecdndetaMB"), RecCol.posZ(), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kBkg));
+          continue;
+        }
+        auto mcpart = Rectrack.mcParticle();
+        if (RecCol.mcCollisionId() != mcpart.mcCollisionId()) {
+          continue;
+        }
+        histos.fill(HIST("hmcdcaxy"), Rectrack.dcaXY());
+        histos.fill(HIST("hmcdcaz"), Rectrack.dcaZ());
         histos.fill(HIST("MCrecPhiVsEtaHist"), Rectrack.phi(), Rectrack.eta());
-        histos.fill(HIST("hmcrecdndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), occupancyValue, Rectrack.eta(), Rectrack.phi());
+        histos.fill(HIST("hmcrecdndeta"), RecCol.posZ(), centrality, selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kSpAll), kGlobalplusITS);
+        histos.fill(HIST("hmcrecdndetaMB"), RecCol.posZ(), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kSpAll));
+        if (Rectrack.hasTPC()) {
+          histos.fill(HIST("hmcrecdndeta"), RecCol.posZ(), centrality, selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kSpAll), kGlobalonly);
+        } else {
+          histos.fill(HIST("hmcrecdndeta"), RecCol.posZ(), centrality, selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kSpAll), kITSonly);
+        }
+
+        int pid = kFake;
+        if (mcpart.isPhysicalPrimary()) {
+          switch (std::abs(mcpart.pdgCode())) {
+            case PDG_t::kPiPlus:
+              pid = kSpPion;
+              break;
+            case PDG_t::kKPlus:
+              pid = kSpKaon;
+              break;
+            case PDG_t::kProton:
+              pid = kSpProton;
+              break;
+            default:
+              pid = kSpOther;
+              break;
+          }
+        } else {
+          pid = kSpNotPrimary;
+        }
+        if (mcpart.has_mothers()) {
+          auto mcpartMother = mcpart.template mothers_as<aod::McParticles>().front();
+          if (mcpartMother.pdgCode() == PDG_t::kK0Short || std::abs(mcpartMother.pdgCode()) == PDG_t::kLambda0) {
+            pid = kSpStrangeDecay;
+          }
+        }
+        if (find(mclabels.begin(), mclabels.end(), Rectrack.mcParticleId()) != mclabels.end()) {
+          pid = kFake;
+        }
+        mclabels.push_back(Rectrack.mcParticleId());
+        histos.fill(HIST("hmcrecdndeta"), RecCol.posZ(), centrality, selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(pid), kGlobalplusITS);
+        histos.fill(HIST("hmcrecdndetaMB"), RecCol.posZ(), Rectrack.eta(), Rectrack.phi(), static_cast<double>(pid));
       } // track (mcrec) loop
 
       for (const auto& particle : GenParticles) {
         if (!isGenTrackSelected(particle)) {
           continue;
         }
-        histos.fill(HIST("hmcgendndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), particle.eta(), particle.phi(), kNoGenpTVar);
-        if (particle.pt() < 0.1) {
-          histos.fill(HIST("hmcgendndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), particle.eta(), particle.phi(), kGenpTup, -10.0 * particle.pt() + 2);
-          histos.fill(HIST("hmcgendndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), particle.eta(), particle.phi(), kGenpTdown, 5.0 * particle.pt() + 0.5);
+        histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(kSpAll), kNoGenpTVar);
+        histos.fill(HIST("hmcgendndetaMB"), RecCol.posZ(), particle.eta(), particle.phi(), static_cast<double>(kSpAll));
+        if (particle.pt() < KminPtCut) {
+          histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(kSpAll), kGenpTup, -10.0 * particle.pt() + 2);
+          histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(kSpAll), kGenpTdown, 5.0 * particle.pt() + 0.5);
         } else {
-          histos.fill(HIST("hmcgendndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), particle.eta(), particle.phi(), kGenpTup);
-          histos.fill(HIST("hmcgendndeta"), RecCollision.posZ(), selectColCentrality(RecCollision), particle.eta(), particle.phi(), kGenpTdown);
+          histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(kSpAll), kGenpTup);
+          histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(kSpAll), kGenpTdown);
         }
+        int pid = 0;
+        switch (std::abs(particle.pdgCode())) {
+          case PDG_t::kPiPlus:
+            pid = kSpPion;
+            break;
+          case PDG_t::kKPlus:
+            pid = kSpKaon;
+            break;
+          case PDG_t::kProton:
+            pid = kSpProton;
+            break;
+          default:
+            pid = kSpOther;
+            break;
+        }
+        histos.fill(HIST("hmcgendndeta"), RecCol.posZ(), centrality, particle.eta(), particle.phi(), static_cast<double>(pid), kNoGenpTVar);
+        histos.fill(HIST("hmcgendndetaMB"), RecCol.posZ(), particle.eta(), particle.phi(), static_cast<double>(pid));
       } // track (mcgen) loop
     } // collision loop
   }
-  PROCESS_SWITCH(HeavyionMultiplicity, processMonteCarlo, "process MC CentFT0C", false);
 
-  void processMCpTefficiency(CollisionMCTrueTable::iterator const&, CollisionMCRecTable const& RecCollisions, TrackMCTrueTable const& GenParticles, FilTrackMCRecTable const& RecTracks)
+  void processMCcheckFakeTracks(CollisionMCTrueTable::iterator const&, CollisionMCRecTable const& RecCols, FilTrackMCRecTable const& RecTracks)
   {
-    for (const auto& RecCollision : RecCollisions) {
-      if (!isEventSelected(RecCollision)) {
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
         continue;
       }
-      if (std::abs(RecCollision.posZ()) >= vtxRange) {
+      if (std::abs(RecCol.posZ()) >= vtxRange) {
         continue;
       }
-      histos.fill(HIST("VtxZHist"), RecCollision.posZ());
-      histos.fill(HIST("CentPercentileMCRecHist"), selectColCentrality(RecCollision));
-      auto occupancyValue = isApplyFT0CbasedOccupancy ? RecCollision.ft0cOccupancyInTimeRange() : RecCollision.trackOccupancyInTimeRange();
-      histos.fill(HIST("hmczvtxcent"), RecCollision.posZ(), selectColCentrality(RecCollision), occupancyValue);
+      histos.fill(HIST("VtxZHist"), RecCol.posZ());
+      histos.fill(HIST("CentPercentileMCRecHist"), selColCent(RecCol));
+      histos.fill(HIST("hmczvtxcent"), RecCol.posZ(), selColCent(RecCol), selColOccu(RecCol));
 
-      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCollision.globalIndex());
-      for (const auto& Rectrack : recTracksPart) {
-        if (std::abs(Rectrack.eta()) >= etaRange) {
-          continue;
-        }
-        if (Rectrack.has_mcParticle()) {
-          auto mcpart = Rectrack.mcParticle();
-          if (mcpart.isPhysicalPrimary()) {
-            histos.fill(HIST("hmcrecdndpt"), selectColCentrality(RecCollision), mcpart.pt());
-          }
-        }
-      }
-
-      for (const auto& particle : GenParticles) {
-        if (!isGenTrackSelected(particle)) {
-          continue;
-        }
-        histos.fill(HIST("hmcgendndpt"), selectColCentrality(RecCollision), particle.pt(), kNoGenpTVar);
-        if (particle.pt() < 0.1) {
-          histos.fill(HIST("hmcgendndpt"), selectColCentrality(RecCollision), particle.pt(), kGenpTup, -10.0 * particle.pt() + 2);
-          histos.fill(HIST("hmcgendndpt"), selectColCentrality(RecCollision), particle.pt(), kGenpTdown, 5.0 * particle.pt() + 0.5);
-        } else {
-          histos.fill(HIST("hmcgendndpt"), selectColCentrality(RecCollision), particle.pt(), kGenpTup);
-          histos.fill(HIST("hmcgendndpt"), selectColCentrality(RecCollision), particle.pt(), kGenpTdown);
-        }
-      }
-    }
-  }
-  PROCESS_SWITCH(HeavyionMultiplicity, processMCpTefficiency, "process MC pTefficiency", false);
-
-  void processMCcheckFakeTracks(CollisionMCTrueTable::iterator const&, CollisionMCRecTable const& RecCollisions, FilTrackMCRecTable const& RecTracks)
-  {
-    for (const auto& RecCollision : RecCollisions) {
-      if (!isEventSelected(RecCollision)) {
-        continue;
-      }
-      if (std::abs(RecCollision.posZ()) >= vtxRange) {
-        continue;
-      }
-      histos.fill(HIST("VtxZHist"), RecCollision.posZ());
-      histos.fill(HIST("CentPercentileMCRecHist"), selectColCentrality(RecCollision));
-      auto occupancyValue = isApplyFT0CbasedOccupancy ? RecCollision.ft0cOccupancyInTimeRange() : RecCollision.trackOccupancyInTimeRange();
-      histos.fill(HIST("hmczvtxcent"), RecCollision.posZ(), selectColCentrality(RecCollision), occupancyValue);
-
-      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCollision.globalIndex());
+      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCol.globalIndex());
       for (const auto& Rectrack : recTracksPart) {
         if (std::abs(Rectrack.eta()) >= etaRange) {
           continue;
@@ -521,150 +786,338 @@ struct HeavyionMultiplicity {
         if (!Rectrack.hasTPC()) {
           continue;
         }
-        histos.fill(HIST("hTracksCount"), selectColCentrality(RecCollision), 1);
+        histos.fill(HIST("hTracksCount"), selColCent(RecCol), 1);
         bool isFakeItsTracks = false;
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < KnItsLayers; i++) {
           if (Rectrack.mcMask() & 1 << i) {
             isFakeItsTracks = true;
-            histos.fill(HIST("hTracksCount"), selectColCentrality(RecCollision), i + 3);
+            histos.fill(HIST("hTracksCount"), selColCent(RecCol), i + 3);
             break;
           }
         }
         if (isFakeItsTracks) {
           continue;
         }
-        histos.fill(HIST("hTracksCount"), selectColCentrality(RecCollision), 2);
+        histos.fill(HIST("hTracksCount"), selColCent(RecCol), 2);
       }
     }
   }
-  PROCESS_SWITCH(HeavyionMultiplicity, processMCcheckFakeTracks, "Check Fake tracks", false);
 
-  void processMCfillspecies(CollisionMCTrueTable::iterator const&, CollisionMCRecTable const& RecCollisions, TrackMCTrueTable const& GenParticles, FilTrackMCRecTable const& RecTracks)
+  void processStrangeYield(CollisionDataTable::iterator const& cols, V0TrackCandidates const&, aod::V0Datas const& v0data)
   {
-    for (const auto& RecCollision : RecCollisions) {
-      if (!isEventSelected(RecCollision)) {
-        continue;
-      }
-      if (std::abs(RecCollision.posZ()) >= vtxRange) {
-        continue;
-      }
-      histos.fill(HIST("VtxZHist"), RecCollision.posZ());
-      histos.fill(HIST("CentPercentileMCRecHist"), selectColCentrality(RecCollision));
-      auto occupancyValue = isApplyFT0CbasedOccupancy ? RecCollision.ft0cOccupancyInTimeRange() : RecCollision.trackOccupancyInTimeRange();
-      histos.fill(HIST("hmczvtxcent"), RecCollision.posZ(), selectColCentrality(RecCollision), occupancyValue);
+    if (!isEventSelected(cols)) {
+      return;
+    }
+    if (std::abs(cols.posZ()) >= vtxRange) {
+      return;
+    }
+    histos.fill(HIST("hzvtxcent"), cols.posZ(), selColCent(cols));
+    for (const auto& v0track : v0data) {
+      auto v0pTrack = v0track.template posTrack_as<V0TrackCandidates>();
+      auto v0nTrack = v0track.template negTrack_as<V0TrackCandidates>();
+      if (std::abs(v0pTrack.eta()) <= v0etaK0SCut && std::abs(v0nTrack.eta()) <= v0etaK0SCut && v0pTrack.tpcNClsFound() >= minTPCnClsK0SCut && v0nTrack.tpcNClsFound() >= minTPCnClsK0SCut && std::abs(v0track.dcapostopv()) >= dcapostopvK0SCut && std::abs(v0track.dcanegtopv()) >= dcanegtopvK0SCut && v0track.v0radius() >= v0radiusK0SCut && v0track.v0cosPA() >= v0cospaK0SCut && std::abs(v0track.dcaV0daughters()) <= dcav0daughterK0Scut && std::abs(v0pTrack.tpcNSigmaPi()) <= nSigmaTpcK0SCut && std::abs(v0nTrack.tpcNSigmaPi()) <= nSigmaTpcK0SCut) {
 
-      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCollision.globalIndex());
+        histos.fill(HIST("K0sCentEtaMass"), selColCent(cols), v0track.eta(), v0track.mK0Short());
+      }
+      if (std::abs(v0pTrack.eta()) <= v0etaLambdaCut && std::abs(v0nTrack.eta()) <= v0etaLambdaCut && v0pTrack.tpcNClsFound() >= minTPCnClsLambdaCut && v0nTrack.tpcNClsFound() >= minTPCnClsLambdaCut && std::abs(v0track.dcapostopv()) >= dcapostopvLambdaCut && std::abs(v0track.dcanegtopv()) >= dcanegtopvLambdaCut && v0track.v0radius() >= v0radiusLambdaCut && v0track.v0cosPA() >= v0cospaLambdaCut && std::abs(v0track.dcaV0daughters()) <= dcav0daughterLambdacut) {
+
+        if (std::abs(v0pTrack.tpcNSigmaPr()) <= nSigmaTpcLambdaCut && std::abs(v0nTrack.tpcNSigmaPi()) <= nSigmaTpcLambdaCut) {
+          histos.fill(HIST("LambdaCentEtaMass"), selColCent(cols), v0track.eta(), v0track.mLambda());
+        }
+        if (std::abs(v0pTrack.tpcNSigmaPi()) <= nSigmaTpcLambdaCut && std::abs(v0nTrack.tpcNSigmaPr()) <= nSigmaTpcLambdaCut) {
+          histos.fill(HIST("AntiLambdaCentEtaMass"), selColCent(cols), v0track.eta(), v0track.mAntiLambda());
+        }
+      }
+    }
+  }
+
+  void processGen(aod::McCollisions::iterator const&, aod::McParticles const& GenParticles)
+  {
+
+    int multFT0A = 0;
+    int multFT0C = 0;
+    int multBarrelEta10 = 0;
+
+    for (const auto& particle : GenParticles) {
+      if (!isGenTrackSelected(particle)) {
+        continue;
+      }
+      if (std::abs(particle.eta()) < 1.0) {
+        multBarrelEta10++;
+      }
+      if (-3.3 < particle.eta() && particle.eta() < -2.1) {
+        multFT0C++;
+      }
+      if (3.5 < particle.eta() && particle.eta() < 4.9) {
+        multFT0A++;
+      }
+    }
+
+    histos.fill(HIST("MultBarrelEta10_vs_FT0A"), multBarrelEta10, multFT0A);
+    histos.fill(HIST("MultBarrelEta10_vs_FT0C"), multBarrelEta10, multFT0C);
+    histos.fill(HIST("MultBarrelEta10"), multBarrelEta10);
+    histos.fill(HIST("MultFT0A"), multFT0A);
+    histos.fill(HIST("MultFT0C"), multFT0C);
+    histos.fill(HIST("mult10_vs_FT0A"), multBarrelEta10, multFT0A);
+    histos.fill(HIST("mult10_vs_FT0C"), multBarrelEta10, multFT0C);
+
+    for (const auto& particle : GenParticles) {
+      if (!isGenTrackSelected(particle)) {
+        continue;
+      }
+      histos.fill(HIST("dndeta10_vs_FT0A"), particle.eta(), multFT0A);
+      histos.fill(HIST("dndeta10_vs_FT0C"), particle.eta(), multFT0C);
+    }
+  }
+
+  void processEvtLossSigLossMC(soa::Join<CollisionMCTrueTable, aod::MultMCExtras>::iterator const& mcCollision, CollisionMCRecTable const& RecCols, TrackMCTrueTable const& GenParticles)
+  {
+    if (isApplyInelgt0 && !mcCollision.isInelGt0()) {
+      return;
+    }
+
+    if (isApplyTVX && !(mcCollision.multMCFT0C() > 0 && mcCollision.multMCFT0A() > 0)) {
+      return;
+    }
+
+    if (std::abs(mcCollision.posZ()) >= vtxRange) {
+      return;
+    }
+    // All generated events
+    histos.fill(HIST("MCEventHist"), 1);
+    histos.fill(HIST("hImpactParameterGen"), mcCollision.impactParameter());
+    histos.fill(HIST("hMultEta05Gen"), mcCollision.multMCNParticlesEta05());
+    histos.fill(HIST("hMultGen"), selColMultMC(mcCollision));
+
+    if (RecCols.size() == 0) {
+      histos.fill(HIST("MCEventHist"), 3);
+      histos.fill(HIST("hImpactParameterGenwithNoreco"), mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05GenwithNoreco"), mcCollision.multMCNParticlesEta05());
+    }
+
+    bool atLeastOne = false;
+    auto centrality = -999.;
+    auto numcontributors = -999;
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
+        continue;
+      }
+      if (std::abs(RecCol.posZ()) >= vtxRange) {
+        continue;
+      }
+
+      histos.fill(HIST("hImpactParameterSplit"), mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05Split"), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hMultSplit"), selColMultMC(mcCollision));
+      histos.fill(HIST("hMultvsCentrSplit"), selColCent(RecCol), selColMultMC(mcCollision));
+
+      if (RecCol.numContrib() <= numcontributors) {
+        continue;
+      } else {
+        numcontributors = RecCol.numContrib();
+      }
+      centrality = selColCent(RecCol);
+      atLeastOne = true;
+    }
+
+    // Generated events with at least one reconstructed collision (event loss estimation)
+    if (atLeastOne) {
+      histos.fill(HIST("MCEventHist"), 2);
+      histos.fill(HIST("hImpactParameterRec"), mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05Rec"), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hMultRec"), selColMultMC(mcCollision));
+      histos.fill(HIST("hImpactParvsCentrRec"), centrality, mcCollision.impactParameter());
+      histos.fill(HIST("hMultEta05vsCentrRec"), centrality, mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hMultvsCentrRec"), centrality, selColMultMC(mcCollision));
+    }
+
+    for (const auto& particle : GenParticles) {
+
+      if (RecCols.size() == 0) {
+        histos.fill(HIST("hgendndetaVscentGenwithNOreco"), particle.eta(), mcCollision.impactParameter());
+      } else {
+        histos.fill(HIST("hgendndetaVscentGenwithReco"), particle.eta(), mcCollision.impactParameter());
+      }
+
+      if (!isGenTrackSelected(particle)) {
+        continue;
+      }
+
+      // All generated particles
+      histos.fill(HIST("hgendndetaBeforeEvtSel"), particle.eta());
+      histos.fill(HIST("hgendndetaVscentBeforeEvtSel"), particle.eta(), mcCollision.impactParameter());
+      histos.fill(HIST("hgendndetaVsMultEta05BeforeEvtSel"), particle.eta(), mcCollision.multMCNParticlesEta05());
+      histos.fill(HIST("hgendndetaVsMultBeforeEvtSel"), particle.eta(), selColMultMC(mcCollision));
+
+      if (atLeastOne) {
+        // All generated particles with at least one reconstructed collision (signal loss estimation)
+        histos.fill(HIST("hgendndetaAfterEvtSel"), particle.eta());
+        histos.fill(HIST("hgendndetaVscentAfterEvtSel"), particle.eta(), mcCollision.impactParameter());
+        histos.fill(HIST("hgendndetaVsMultEta05AfterEvtSel"), particle.eta(), mcCollision.multMCNParticlesEta05());
+        histos.fill(HIST("hgendndetaVsMultAfterEvtSel"), particle.eta(), selColMultMC(mcCollision));
+      }
+    }
+  }
+
+  void processMCeff(soa::Join<aod::McCollisions, aod::McCollsExtra>::iterator const& mcCollision, CollisionMCRecTable const& RecCols, TrackMCTrueTable const& GenParticles, FilTrackMCRecTable const& RecTracks)
+  {
+    auto gencent = -999;
+    auto genoccu = -999;
+    bool atLeastOne = false;
+
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
+        continue;
+      }
+      if (isApplyBestCollIndex && RecCol.globalIndex() != mcCollision.bestCollisionIndex()) {
+        continue;
+      }
+      atLeastOne = true;
+      gencent = selColCent(RecCol);
+      genoccu = selColOccu(RecCol);
+    }
+
+    histos.fill(HIST("hGenMCvertexZ"), mcCollision.posZ());
+    histos.fill(HIST("hGenMCvtxzcent"), mcCollision.posZ(), gencent, genoccu);
+
+    if (atLeastOne) {
+      histos.fill(HIST("hGenMCAssoRecvertexZ"), mcCollision.posZ());
+      histos.fill(HIST("hGenMCAssoRecvtxzcent"), mcCollision.posZ(), gencent, genoccu);
+    }
+
+    for (const auto& particle : GenParticles) {
+      if (!isGenTrackSelected(particle)) {
+        continue;
+      }
+      histos.fill(HIST("hGenMCdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi());
+      if (atLeastOne) {
+        histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(kGenAll), kNoGenpTVar);
+        if (particle.pt() < KminPtCut) {
+          histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(kGenAll), kGenpTup, -10.0 * particle.pt() + 2);
+          histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(kGenAll), kGenpTdown, 5.0 * particle.pt() + 0.5);
+        } else {
+          histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(kGenAll), kGenpTup);
+          histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(kGenAll), kGenpTdown);
+        }
+        int pid = 0;
+        switch (std::abs(particle.pdgCode())) {
+          case PDG_t::kPiPlus:
+            pid = kGenPion;
+            break;
+          case PDG_t::kKPlus:
+            pid = kGenKaon;
+            break;
+          case PDG_t::kProton:
+            pid = kGenProton;
+            break;
+          default:
+            pid = kGenOther;
+            break;
+        }
+        histos.fill(HIST("hGenMCAssoRecdndeta"), mcCollision.posZ(), gencent, genoccu, particle.eta(), particle.phi(), static_cast<double>(pid), kNoGenpTVar);
+      } // Associated with reco col
+    } // track (mcgen) loop
+
+    for (const auto& RecCol : RecCols) {
+      if (!isEventSelected(RecCol)) {
+        continue;
+      }
+      if (isApplyBestCollIndex && RecCol.globalIndex() != mcCollision.bestCollisionIndex()) {
+        continue;
+      }
+      histos.fill(HIST("hRecMCvertexZ"), RecCol.posZ());
+      histos.fill(HIST("hRecMCcentrality"), selColCent(RecCol));
+      histos.fill(HIST("MCCentrality_vs_FT0C"), RecCol.centFT0C(), RecCol.multFT0C());
+      histos.fill(HIST("hRecMCvtxzcent"), RecCol.posZ(), selColCent(RecCol), selColOccu(RecCol));
+
+      auto recTracksPart = RecTracks.sliceBy(perCollision, RecCol.globalIndex());
       std::vector<int> mclabels;
       for (const auto& Rectrack : recTracksPart) {
         if (!isTrackSelected(Rectrack)) {
           continue;
         }
-        histos.fill(HIST("FillMCrecSpecies"), selectColCentrality(RecCollision), occupancyValue, Rectrack.eta(), static_cast<double>(kSpAll));
-        if (Rectrack.has_mcParticle()) {
-          int pid = kBkg;
-          auto mcpart = Rectrack.template mcParticle_as<aod::McParticles>();
-          if (mcpart.isPhysicalPrimary()) {
-            switch (std::abs(mcpart.pdgCode())) {
-              case 211:
-                pid = kSpPion;
-                break;
-              case 321:
-                pid = kSpKaon;
-                break;
-              case 2212:
-                pid = kSpProton;
-                break;
-              default:
-                pid = kSpOther;
-                break;
-            }
-          } else {
-            pid = kSpNotPrimary;
-          }
-          if (mcpart.has_mothers()) {
-            auto mcpartMother = mcpart.template mothers_as<aod::McParticles>().front();
-            if (mcpartMother.pdgCode() == 310 || std::abs(mcpartMother.pdgCode()) == 3122) {
-              pid = kSpStrangeDecay;
-            }
-          }
-          if (find(mclabels.begin(), mclabels.end(), Rectrack.mcParticleId()) != mclabels.end()) {
-            pid = kBkg;
-          }
-          mclabels.push_back(Rectrack.mcParticleId());
-          histos.fill(HIST("FillMCrecSpecies"), selectColCentrality(RecCollision), occupancyValue, Rectrack.eta(), static_cast<double>(pid));
-        } else {
-          histos.fill(HIST("FillMCrecSpecies"), selectColCentrality(RecCollision), occupancyValue, Rectrack.eta(), static_cast<double>(kBkg));
-        }
-      } // rec track loop
-
-      for (const auto& particle : GenParticles) {
-        if (!isGenTrackSelected(particle)) {
+        if (!Rectrack.has_mcParticle()) {
+          histos.fill(HIST("hRecMCdndeta"), RecCol.posZ(), selColCent(RecCol), selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kRecoBkg));
           continue;
         }
-        histos.fill(HIST("FillMCgenSpecies"), selectColCentrality(RecCollision), particle.eta(), static_cast<double>(kSpAll));
-        int pid = 0;
-        switch (std::abs(particle.pdgCode())) {
-          case 211:
-            pid = kSpPion;
-            break;
-          case 321:
-            pid = kSpKaon;
-            break;
-          case 2212:
-            pid = kSpProton;
-            break;
-          default:
-            pid = kSpOther;
-            break;
+        auto mcpart = Rectrack.mcParticle();
+        if (RecCol.mcCollisionId() != mcpart.mcCollisionId()) {
+          continue;
         }
-        histos.fill(HIST("FillMCgenSpecies"), selectColCentrality(RecCollision), particle.eta(), static_cast<double>(pid));
-      } // gen track loop
+        histos.fill(HIST("hRecMCphivseta"), Rectrack.phi(), Rectrack.eta());
+        histos.fill(HIST("hRecMCdndeta"), RecCol.posZ(), selColCent(RecCol), selColOccu(RecCol), Rectrack.eta(), Rectrack.phi(), static_cast<double>(kRecoAll));
+
+        int pid = 0;
+        histos.fill(HIST("etaResolution"), Rectrack.eta(), Rectrack.eta() - mcpart.eta());
+        if (mcpart.isPhysicalPrimary()) {
+          switch (std::abs(mcpart.pdgCode())) {
+            case PDG_t::kPiPlus:
+              pid = kRecoPion;
+              break;
+            case PDG_t::kKPlus:
+              pid = kRecoKaon;
+              break;
+            case PDG_t::kProton:
+              pid = kRecoProton;
+              break;
+            default:
+              pid = kRecoOther;
+              break;
+          }
+        } else {
+          pid = kRecoSecondary;
+        }
+        if (mcpart.has_mothers()) {
+          auto mcpartMother = mcpart.template mothers_as<aod::McParticles>().front();
+          if (mcpartMother.pdgCode() == PDG_t::kK0Short || std::abs(mcpartMother.pdgCode()) == PDG_t::kLambda0) {
+            pid = kRecoWeakDecay;
+          }
+        }
+        if (find(mclabels.begin(), mclabels.end(), Rectrack.mcParticleId()) != mclabels.end()) {
+          pid = kRecoFake;
+        }
+        mclabels.push_back(Rectrack.mcParticleId());
+        histos.fill(HIST("hRecMCdndeta"), RecCol.posZ(), selColCent(RecCol), selColOccu(RecCol), mcpart.eta(), mcpart.phi(), static_cast<double>(pid));
+      } // track (mcrec) loop
     } // collision loop
   }
-  PROCESS_SWITCH(HeavyionMultiplicity, processMCfillspecies, "Fill particle species in MC", false);
 
-  void processStrangeYield(CollisionDataTable::iterator const& collision, V0TrackCandidates const&, aod::V0Datas const& v0data)
+  void processBcData(soa::Join<aod::BC2Mults, aod::MultBCs, aod::BCCentFT0Cs, aod::BCCentFT0Ms, aod::MultBcSel>::iterator const& multbc)
   {
-    if (!isEventSelected(collision)) {
+    histos.fill(HIST("BcHist"), 1); // all BCs
+    if (selectCollidingBCs && !multbc.multCollidingBC())
       return;
-    }
-    if (std::abs(collision.posZ()) >= vtxRange) {
+    histos.fill(HIST("BcHist"), 2); // colliding
+    if (selectTVX && !multbc.multTVX())
       return;
+    histos.fill(HIST("BcHist"), 3); // TVX
+    if (selectFV0OrA && !multbc.multFV0OrA())
+      return;
+    histos.fill(HIST("BcHist"), 4); // FV0OrA
+    if (vtxRange < 100.0f) {
+      if (!multbc.multFT0PosZValid())
+        return;
+      if (TMath::Abs(multbc.multFT0PosZ()) > vtxRange)
+        return;
+      histos.fill(HIST("VtxZHistBC"), multbc.multFT0PosZ());
     }
-    histos.fill(HIST("hzvtxcent"), collision.posZ(), selectColCentrality(collision));
-    for (const auto& v0track : v0data) {
-      auto v0pTrack = v0track.template posTrack_as<V0TrackCandidates>();
-      auto v0nTrack = v0track.template negTrack_as<V0TrackCandidates>();
-      if (std::abs(v0pTrack.eta()) > 0.9 || std::abs(v0nTrack.eta()) > 0.9) {
-        continue;
-      }
-      if (v0pTrack.tpcNClsFound() < minTPCnClsCut) {
-        continue;
-      }
-      if (v0nTrack.tpcNClsFound() < minTPCnClsCut) {
-        continue;
-      }
-      if (std::abs(v0pTrack.tpcNSigmaPi()) > nSigmaTpcCut) {
-        continue;
-      }
-      if (std::abs(v0nTrack.tpcNSigmaPi()) > nSigmaTpcCut) {
-        continue;
-      }
-      if (std::abs(v0pTrack.tpcNSigmaPr()) > nSigmaTpcCut) {
-        continue;
-      }
-      if (std::abs(v0nTrack.tpcNSigmaPr()) > nSigmaTpcCut) {
-        continue;
-      }
-      if (std::abs(v0track.dcapostopv()) < dcapostopvCut || std::abs(v0track.dcanegtopv()) < dcanegtopvCut || v0track.v0radius() < v0radiusCut || v0track.v0cosPA() < v0cospaCut || std::abs(v0track.dcaV0daughters()) > dcav0daughtercut) {
-        continue;
-      }
-      histos.fill(HIST("K0sCentEtaMass"), selectColCentrality(collision), v0track.eta(), v0track.mK0Short());
-      histos.fill(HIST("LambdaCentEtaMass"), selectColCentrality(collision), v0track.eta(), v0track.mLambda());
-      histos.fill(HIST("AntiLambdaCentEtaMass"), selectColCentrality(collision), v0track.eta(), v0track.mAntiLambda());
-    }
+    histos.fill(HIST("BcHist"), 5); // FT0PosZ
+
+    histos.fill(HIST("BcCentFT0CHist"), multbc.centFT0C());
+    histos.fill(HIST("BcCentFT0MHist"), multbc.centFT0M());
   }
+
+  PROCESS_SWITCH(HeavyionMultiplicity, processDCAvsptData, "process DCA data", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processDCAvsptMC, "process DCA MC", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processData, "process data CentFT0C", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processCorrelation, "do correlation study in data", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processMonteCarlo, "process MC CentFT0C", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processMCcheckFakeTracks, "Check Fake tracks", false);
   PROCESS_SWITCH(HeavyionMultiplicity, processStrangeYield, "Strange particle yield", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processGen, "process pure MC gen", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processEvtLossSigLossMC, "process Signal Loss, Event Loss", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processMCeff, "process extra efficiency function", false);
+  PROCESS_SWITCH(HeavyionMultiplicity, processBcData, "process BC Centrality", false);
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)

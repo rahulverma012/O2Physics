@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -16,10 +16,16 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSESOFTPIONREMOVAL_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSESOFTPIONREMOVAL_H_
 
-#include <vector>
-
 #include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
-#include "Framework/HistogramRegistry.h"
+
+#include "Common/Core/RecoDecay.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+
+#include <vector>
 
 namespace o2::analysis::femto_universe
 {
@@ -36,12 +42,12 @@ class FemtoUniverseSoftPionRemoval
   virtual ~FemtoUniverseSoftPionRemoval() = default;
 
   /// Initialization of the QA histograms
-  /// \param registry HistogramRegistry
-  void init(HistogramRegistry* registry)
+  /// \param registry o2::framework::HistogramRegistry
+  void init(framework::HistogramRegistry* registry)
   {
     if (registry) {
       mHistogramRegistry = registry;
-      mHistogramRegistry->add("SoftPion/softPionMassVsPt", "; M(K#pi#pi-K#pi); p_{T}", kTH2F, {{200, 0.0, 0.2}, {36, 0., 36.}});
+      mHistogramRegistry->add("SoftPion/softPionMassVsPt", "; M(K#pi#pi-K#pi); p_{T}", framework::kTH2F, {{200, 0.0, 0.2}, {36, 0., 36.}});
     }
   }
 
@@ -111,7 +117,7 @@ class FemtoUniverseSoftPionRemoval
   }
 
  private:
-  HistogramRegistry* mHistogramRegistry;                                                ///< For QA output
+  framework::HistogramRegistry* mHistogramRegistry;                                     ///< For QA output
   static constexpr o2::aod::femtouniverseparticle::ParticleType kPartOneType = partOne; ///< Type of particle 1
   static constexpr o2::aod::femtouniverseparticle::ParticleType kPartTwoType = partTwo; ///< Type of particle 2
 };

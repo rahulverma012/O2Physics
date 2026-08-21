@@ -8,31 +8,47 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-// O2 includes
-
-#include <fmt/format.h>
-#include <rapidjson/document.h>
-#include <rapidjson/filereadstream.h>
-
-#include <cstdio>
-#include <random>
-#include <string>
-#include <string_view>
-#include <vector>
-#include <unordered_map>
-#include <utility>
 
 #include "filterTables.h"
 
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/HistogramRegistry.h"
 #include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "CommonConstants/LHCConstants.h"
-#include "CommonDataFormat/InteractionRecord.h"
-#include "DataFormatsCTP/Scalers.h"
+
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataProcessorSpec.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/InputSpec.h>
+#include <Framework/Lifetime.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/ProcessingContext.h>
+#include <Framework/TableConsumer.h>
+#include <Framework/Variant.h>
+
+#include <TH1.h>
+#include <TH2.h>
+
+#include <arrow/array/array_primitive.h>
+#include <arrow/type.h>
+#include <rapidjson/document.h>
+#include <rapidjson/filereadstream.h>
+
+#include <Rtypes.h>
+
+#include <array>
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <random>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 // we need to add workflow options before including Framework/runDataProcessing
 void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
@@ -43,7 +59,7 @@ void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
   std::swap(workflowOptions, options);
 }
 
-#include "Framework/runDataProcessing.h"
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::aod;
@@ -217,6 +233,7 @@ struct centralEventFilterTask {
   Configurable<bool> cfgSkipUntriggeredEvents{"cfgSkipUntriggeredEvents", false, "Skip untriggered events"};
 
   FILTER_CONFIGURABLE(F1ProtonFilters);
+  FILTER_CONFIGURABLE(DoublePhiFilters);
   FILTER_CONFIGURABLE(NucleiFilters);
   FILTER_CONFIGURABLE(DiffractionFilters);
   FILTER_CONFIGURABLE(DqFilters);
@@ -227,6 +244,7 @@ struct centralEventFilterTask {
   FILTER_CONFIGURABLE(MultFilters);
   FILTER_CONFIGURABLE(FullJetFilters);
   FILTER_CONFIGURABLE(PhotonFilters);
+  FILTER_CONFIGURABLE(HeavyNeutralMesonFilters);
 
   void init(o2::framework::InitContext& initc)
   {
@@ -358,21 +376,24 @@ struct centralEventFilterTask {
     mFiltered->SetBinContent(1, mFiltered->GetBinContent(1) + nEvents - startCollision);
 
     for (uint64_t iE{0}; iE < outTrigger.size(); ++iE) {
+      const auto& triggerWord{outTrigger[iE]};
       bool triggered{false}, selected{false};
-      for (uint64_t iD{0}; iD < outTrigger[0].size(); ++iD) {
+      for (uint64_t iD{0}; iD < triggerWord.size(); ++iD) {
         for (int iB{0}; iB < 64; ++iB) {
-          if (!(outTrigger[iE][iD] & BIT(iB))) {
+          if (!(triggerWord[iD] & BIT(iB))) {
             continue;
           }
-          for (uint64_t jD{0}; jD < outTrigger[0].size(); ++jD) {
-            for (int iC{iB}; iC < 64; ++iC) {
-              if (outTrigger[iE][iD] & BIT(iC)) {
-                mCovariance->Fill(iD * 64 + iB, jD * 64 + iC);
+          uint64_t xIndex{iD * 64 + iB};
+          for (uint64_t jD{0}; jD < triggerWord.size(); ++jD) {
+            for (int jB{0}; jB < 64; ++jB) {
+              uint64_t yIndex{jD * 64 + jB};
+              if (xIndex <= yIndex && triggerWord[jD] & BIT(jB)) {
+                mCovariance->Fill(iD * 64 + iB, jD * 64 + jB);
               }
             }
           }
         }
-        triggered = triggered || outTrigger[iE][iD];
+        triggered = triggered || triggerWord[iD];
         selected = selected || outDecision[iE][iD];
       }
       if (triggered) {

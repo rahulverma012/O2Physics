@@ -14,35 +14,29 @@
 /// \author Nima Zardoshti <nima.zardoshti@cern.ch>
 //
 
-#include <vector>
-#include <algorithm>
-#include <utility>
-#include <map>
-
-#include "Framework/ASoA.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "TDatabasePDG.h"
-
-#include "Common/Core/TrackSelection.h"
-#include "Common/Core/TrackSelectionDefaults.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/CCDB/EventSelectionParams.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-
-#include "PWGJE/Core/JetFinder.h"
 #include "PWGJE/Core/JetFindingUtilities.h"
 #include "PWGJE/DataModel/Jet.h"
 #include "PWGJE/DataModel/JetSubstructure.h"
-#include "PWGJE/Core/JetDerivedDataUtilities.h"
+#include "PWGJE/DataModel/JetSubtraction.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <iterator>
+#include <map>
+#include <utility>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
-
-// NB: runDataProcessing.h must be included after customize!
-#include "Framework/runDataProcessing.h"
 
 struct JetSubstructureOutputTask {
 
@@ -191,17 +185,18 @@ struct JetSubstructureOutputTask {
     std::copy(pairPerpCone1PerpCone2EnergySpan.begin(), pairPerpCone1PerpCone2EnergySpan.end(), std::back_inserter(pairPerpCone1PerpCone2EnergyVec));
     std::copy(pairPerpCone1PerpCone2ThetaSpan.begin(), pairPerpCone1PerpCone2ThetaSpan.end(), std::back_inserter(pairPerpCone1PerpCone2ThetaVec));
 
-    std::vector<int> splittingMatchesGeoVec;
-    std::vector<int> splittingMatchesPtVec;
-    std::vector<int> splittingMatchesHFVec;
-    std::vector<int> pairMatchesVec;
+    std::vector<int32_t> splittingMatchesGeoVec;
+    std::vector<int32_t> splittingMatchesPtVec;
+    std::vector<int32_t> splittingMatchesHFVec;
+    std::vector<int32_t> pairMatchesVec;
+    std::vector<int32_t> dummyVec;
     if (doprocessOutputSubstructureMatchingData || doprocessOutputSubstructureMatchingMC) {
       splittingMatchesGeoVec = splittingMatchesGeoVecVec[jet.globalIndex()];
       splittingMatchesPtVec = splittingMatchesPtVecVec[jet.globalIndex()];
       splittingMatchesHFVec = splittingMatchesHFVecVec[jet.globalIndex()];
       pairMatchesVec = pairMatchesVecVec[jet.globalIndex()];
     }
-    jetOutputTable(collisionIndex, collisionIndex, jet.pt(), jet.phi(), jet.eta(), jet.y(), jet.r(), jet.area(), rho, jet.perpConeRho(), jet.tracksIds().size()); // second collision index is a dummy coloumn mirroring the hf candidate
+    jetOutputTable(collisionIndex, dummyVec, jet.pt(), jet.phi(), jet.eta(), jet.y(), jet.r(), jet.area(), rho, jet.perpConeRho(), jet.tracksIds().size()); // second collision index is a dummy coloumn mirroring the hf candidate
     jetSubstructureOutputTable(jetOutputTable.lastIndex(), energyMotherVec, ptLeadingVec, ptSubLeadingVec, thetaVec, jet.nSub2DR(), jet.nSub1(), jet.nSub2(), pairJetPtVec, pairJetEnergyVec, pairJetThetaVec, pairJetPerpCone1PtVec, pairJetPerpCone1EnergyVec, pairJetPerpCone1ThetaVec, pairPerpCone1PerpCone1PtVec, pairPerpCone1PerpCone1EnergyVec, pairPerpCone1PerpCone1ThetaVec, pairPerpCone1PerpCone2PtVec, pairPerpCone1PerpCone2EnergyVec, pairPerpCone1PerpCone2ThetaVec, jet.angularity(), jet.ptLeadingConstituent(), splittingMatchesGeoVec, splittingMatchesPtVec, splittingMatchesHFVec, pairMatchesVec);
     jetMapping.insert(std::make_pair(jet.globalIndex(), jetOutputTable.lastIndex()));
   }
@@ -224,7 +219,7 @@ struct JetSubstructureOutputTask {
             float centrality = -1.0;
             uint8_t eventSel = 0.0;
             if constexpr (!isMCP) {
-              centrality = collision.centrality();
+              centrality = collision.centFT0M();
               eventSel = collision.eventSel();
             }
             collisionOutputTable(collision.posZ(), centrality, eventSel, eventWeight);
@@ -381,10 +376,10 @@ struct JetSubstructureOutputTask {
   }
   PROCESS_SWITCH(JetSubstructureOutputTask, processOutputSubstructureMatchingMC, "substructure matching output MC", false);
 
-  void processOutputMCD(soa::Join<aod::JetCollisionsMCD, aod::BkgChargedRhos>::iterator const& collision, aod::JetMcCollisions const&,
+  void processOutputMCD(soa::Join<aod::JetCollisionsMCD, aod::BkgChargedRhos>::iterator const& collision,
                         soa::Join<aod::ChargedMCDetectorLevelJets, aod::ChargedMCDetectorLevelJetConstituents, aod::CMCDJetSSs> const& jets)
   {
-    analyseCharged<false>(collision, jets, collisionOutputTableMCD, jetOutputTableMCD, jetSubstructureOutputTableMCD, splittingMatchesGeoVecVecMCD, splittingMatchesPtVecVecMCD, splittingMatchesHFVecVecMCD, pairMatchesVecVecMCD, jetMappingMCD, jetPtMinMCD, collision.mcCollision().weight());
+    analyseCharged<false>(collision, jets, collisionOutputTableMCD, jetOutputTableMCD, jetSubstructureOutputTableMCD, splittingMatchesGeoVecVecMCD, splittingMatchesPtVecVecMCD, splittingMatchesHFVecVecMCD, pairMatchesVecVecMCD, jetMappingMCD, jetPtMinMCD, collision.weight());
   }
   PROCESS_SWITCH(JetSubstructureOutputTask, processOutputMCD, "jet substructure output MCD", false);
 

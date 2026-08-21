@@ -12,10 +12,14 @@
 // ZDC converter to new format
 // to be used with Run 2 converted data and older AO2Ds
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "ZDCBase/Constants.h"
+#include <CommonConstants/ZDCConstants.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+
+#include <cstdint>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -26,6 +30,7 @@ struct zdcConverter {
 
   void process(aod::Zdcs_000 const& zdcLegacy, aod::BCs const&)
   {
+    Zdcs_001.reserve(zdcLegacy.size());
     for (auto& zdcData : zdcLegacy) {
       // Get legacy information, please
       auto bc = zdcData.bc();

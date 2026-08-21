@@ -12,10 +12,14 @@
 /// \author Jasper Parkkila (jparkkil@cern.ch)
 /// \since Sep 2022
 
-#include <TMath.h>
-#include <TComplex.h>
-#include <algorithm>
 #include "JFFlucAnalysis.h"
+
+#include <TComplex.h>
+#include <TNamed.h>
+
+#include <RtypesCore.h>
+
+#include <algorithm>
 
 JFFlucAnalysis::JFFlucAnalysis() : TNamed(),
                                    fVertex(0),

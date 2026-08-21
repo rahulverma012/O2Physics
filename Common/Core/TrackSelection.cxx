@@ -13,24 +13,31 @@
 // Class for track selection
 //
 
-#include "Framework/Logger.h"
 #include "Common/Core/TrackSelection.h"
+
+#include <Framework/DataTypes.h>
+#include <Framework/Logger.h>
+
+#include <cstdint>
+#include <functional>
+#include <set>
+#include <string>
+#include <utility>
 
 bool TrackSelection::FulfillsITSHitRequirements(uint8_t itsClusterMap) const
 {
-  constexpr uint8_t bit = 1;
-  for (auto& itsRequirement : mRequiredITSHits) {
-    auto hits = std::count_if(itsRequirement.second.begin(), itsRequirement.second.end(), [&](auto&& requiredLayer) { return itsClusterMap & (bit << requiredLayer); });
-    if ((itsRequirement.first == -1) && (hits > 0)) {
+  for (const auto& [minHits, layerMask] : mRequiredITSHits) {
+    int hits = __builtin_popcount(itsClusterMap & layerMask);
+    if ((minHits == -1) && (hits > 0)) {
       return false; // no hits were required in specified layers
-    } else if (hits < itsRequirement.first) {
+    } else if (hits < minHits) {
       return false; // not enough hits found in specified layers
     }
   }
   return true;
 }
 
-const std::string TrackSelection::mCutNames[static_cast<int>(TrackSelection::TrackCuts::kNCuts)] = {"TrackType", "PtRange", "EtaRange", "TPCNCls", "TPCCrossedRows", "TPCCrossedRowsOverNCls", "TPCChi2NDF", "TPCRefit", "ITSNCls", "ITSChi2NDF", "ITSRefit", "ITSHits", "GoldenChi2", "DCAxy", "DCAz"};
+const std::string TrackSelection::mCutNames[static_cast<int>(TrackSelection::TrackCuts::kNCuts)] = {"TrackType", "PtRange", "EtaRange", "TPCNCls", "TPCCrossedRows", "TPCCrossedRowsOverNCls", "TPCChi2NDF", "TPCRefit", "ITSNCls", "ITSChi2NDF", "ITSRefit", "ITSHits", "GoldenChi2", "DCAxy", "DCAz", "TPCFracSharedCls"};
 
 void TrackSelection::SetTrackType(o2::aod::track::TrackTypeEnum trackType)
 {
@@ -79,6 +86,11 @@ void TrackSelection::SetMinNCrossedRowsOverFindableClustersTPC(float minNCrossed
   mMinNCrossedRowsOverFindableClustersTPC = minNCrossedRowsOverFindableClustersTPC;
   LOG(info) << "Track selection, set min N crossed rows over findable clusters TPC: " << mMinNCrossedRowsOverFindableClustersTPC;
 }
+void TrackSelection::SetMaxTPCFractionSharedCls(float maxTPCFractionSharedCls)
+{
+  mMaxTPCFractionSharedCls = maxTPCFractionSharedCls;
+  LOG(info) << "Track selection, set max fraction of shared clusters TPC: " << mMaxTPCFractionSharedCls;
+}
 void TrackSelection::SetMinNClustersITS(int minNClustersITS)
 {
   mMinNClustersITS = minNClustersITS;
@@ -114,12 +126,20 @@ void TrackSelection::SetMaxDcaXYPtDep(std::function<float(float)> ptDepCut)
 void TrackSelection::SetRequireHitsInITSLayers(int8_t minNRequiredHits, std::set<uint8_t> requiredLayers)
 {
   // layer 0 corresponds to the the innermost ITS layer
-  mRequiredITSHits.push_back(std::make_pair(minNRequiredHits, requiredLayers));
+  uint8_t mask = 0;
+  for (const auto& layer : requiredLayers) {
+    mask |= (1u << layer);
+  }
+  mRequiredITSHits.push_back(std::make_pair(minNRequiredHits, mask));
   LOG(info) << "Track selection, set require hits in ITS layers: " << static_cast<int>(minNRequiredHits);
 }
 void TrackSelection::SetRequireNoHitsInITSLayers(std::set<uint8_t> excludedLayers)
 {
-  mRequiredITSHits.push_back(std::make_pair(-1, excludedLayers));
+  uint8_t mask = 0;
+  for (const auto& layer : excludedLayers) {
+    mask |= (1u << layer);
+  }
+  mRequiredITSHits.push_back(std::make_pair(-1, mask));
   LOG(info) << "Track selection, set require no hits in ITS layers";
 }
 
@@ -162,7 +182,7 @@ void TrackSelection::print() const
         LOG(info) << mCutNames[i] << " == " << mRequireITSRefit;
         break;
       case TrackCuts::kITSHits:
-        for (auto& itsRequirement : mRequiredITSHits) {
+        for (const auto& itsRequirement : mRequiredITSHits) {
           LOG(info) << mCutNames[i] << " == " << itsRequirement.first;
         }
         break;
@@ -174,6 +194,9 @@ void TrackSelection::print() const
         break;
       case TrackCuts::kDCAz:
         LOG(info) << mCutNames[i] << " < " << mMaxDcaZ;
+        break;
+      case TrackCuts::kTPCFracSharedCls:
+        LOG(info) << mCutNames[i] << " < " << mMaxTPCFractionSharedCls;
         break;
       default:
         LOG(fatal) << "Cut unknown!";

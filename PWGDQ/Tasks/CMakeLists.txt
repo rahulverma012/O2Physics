@@ -9,14 +9,71 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
+# tableReader_withAssoc.cxx is 5000 lines of task definitions, and seven
+# workflow variants below #include it verbatim -- differing only in which
+# adaptAnalysisTask<> entries they list, with identical preprocessor state and
+# identical link libraries. Without this it is parsed and instantiated seven
+# times, and it is the heaviest thing in the PWG: a cc1plus compiling one of
+# these was OOM-killed at ~8 GB RSS.
+#
+# Skipped under recc, which caches compilations remotely instead.
+add_library(TableReaderWithAssocPCH OBJECT tableReaderWithAssocPCH.cxx)
+target_link_libraries(TableReaderWithAssocPCH PUBLIC O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore)
+if(NOT DEFINED ENV{USE_RECC})
+  target_precompile_headers(TableReaderWithAssocPCH PRIVATE
+    [["PWGDQ/Tasks/tableReader_withAssoc.cxx"]])
+endif()
+
 o2physics_add_dpl_workflow(table-reader
                     SOURCES tableReader.cxx
-                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore O2Physics::MLCore
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(table-reader-with-assoc
-                    SOURCES tableReader_withAssoc.cxx
-                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore
+                    SOURCES tableReader_withAssoc_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-same-event-pairing-barrel-only
+                    SOURCES tableReader_withAssoc_SameEventPairingBarrelOnly_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-same-event-pairing-muon-only
+                    SOURCES tableReader_withAssoc_SameEventPairingMuonOnly_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-same-event-pairing
+                    SOURCES tableReader_withAssoc_SameEventPairing_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-asymmetric-pairing
+                    SOURCES tableReader_withAssoc_AsymmetricPairing_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-dilepton-track-pairing
+                    SOURCES tableReader_withAssoc_DileptonTrackPairing_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-dilepton-track-track-pairing
+                    SOURCES tableReader_withAssoc_DileptonTrackTrackPairing_workflowSpec.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore
+                    REUSE_FROM TableReaderWithAssocPCH
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(table-reader-with-assoc-direct
+                    SOURCES tableReader_withAssoc_direct.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore O2Physics::MLCore O2::ReconstructionDataFormats O2::DetectorsCommonDataFormats O2::DetectorsVertexing O2Physics::EventFilteringUtils
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(efficiency
@@ -26,6 +83,16 @@ o2physics_add_dpl_workflow(efficiency
 
 o2physics_add_dpl_workflow(efficiency-with-assoc
                     SOURCES dqEfficiency_withAssoc.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(efficiency-with-assoc-direct
+                    SOURCES dqEfficiency_withAssoc_direct.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore O2::ReconstructionDataFormats O2::DetectorsCommonDataFormats O2::DetectorsVertexing
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(energy-correlator-direct
+                    SOURCES dqEnergyCorrelator_direct.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore
                     COMPONENT_NAME Analysis)
 
@@ -111,10 +178,50 @@ o2physics_add_dpl_workflow(task-fwd-track-pid
 
 o2physics_add_dpl_workflow(quarkonia-to-hyperons
                     SOURCES quarkoniaToHyperons.cxx
-                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::MLCore O2Physics::EventFilteringUtils
+                    PUBLIC_LINK_LIBRARIES O2::DetectorsBase O2::Framework O2::DCAFitter KFParticle::KFParticle O2Physics::AnalysisCore O2Physics::MLCore O2Physics::EventFilteringUtils
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(model-converter-mult-pv
                     SOURCES ModelConverterMultPv.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(model-converter-event-extended
+                    SOURCES ModelConverterEventExtended.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(model-converter-mc-reduced-event
+                    SOURCES ModelConverterReducedMCEvents.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(tag-and-probe
+                    SOURCES TagAndProbe.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(qa-matching
+                    SOURCES qaMatching.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(mft-mch-matcher
+                    SOURCES mftMchMatcher.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(muon-global-alignment
+                    SOURCES muonGlobalAlignment.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore O2::MCHGeometryTransformer
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(j-psi-muon-correlations
+                    SOURCES jPsiMuonCorrelations.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore O2::MCHGeometryTransformer
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(global-muon-matcher
+                    SOURCES global-muon-matcher.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGDQCore O2::MCHGeometryTransformer
                     COMPONENT_NAME Analysis)

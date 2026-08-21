@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -16,12 +16,13 @@
 #ifndef PWGCF_FEMTODREAM_CORE_FEMTODREAMSELECTION_H_
 #define PWGCF_FEMTODREAM_CORE_FEMTODREAMSELECTION_H_
 
-#include <cmath>
-#include "Framework/HistogramRegistry.h"
 #include "PWGCF/DataModel/FemtoDerived.h"
 
-using namespace o2;
-using namespace o2::framework;
+#include <Framework/HistogramRegistry.h>
+
+#include <cmath>
+#include <cstddef>
+#include <string_view>
 
 namespace o2::analysis::femtoDream
 {
@@ -35,6 +36,9 @@ enum SelectionType { kUpperLimit,    ///< simple upper limit for the value, e.g.
                      kAbsLowerLimit, ///< lower limit of the absolute value, e.g. |DCA_xyz| > 0.05 cm
                      kEqual          ///< values need to be equal, e.g. sign = 1
 };
+
+static constexpr int kNcutStages = 2;
+static constexpr std::string_view mCutStage[kNcutStages] = {"BeforeSel", "AfterSel"};
 
 } // namespace femtoDreamSelection
 
@@ -105,7 +109,7 @@ class FemtoDreamSelection
   /// \param cutContainer Bit-wise container for the systematic variations
   /// \param counter Position in the bit-wise container for the systematic variations to be modified
   template <typename T>
-  void checkSelectionSetBit(selValDataType observable, T& cutContainer, size_t& counter, HistogramRegistry* registry)
+  void checkSelectionSetBit(selValDataType observable, T& cutContainer, size_t& counter, framework::HistogramRegistry* registry)
   {
     /// If the selection is fulfilled the bit at the specified position (counter) within the bit-wise container is set to 1
     if (isSelected(observable)) {

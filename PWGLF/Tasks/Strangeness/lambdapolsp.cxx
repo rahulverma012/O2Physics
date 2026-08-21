@@ -11,89 +11,105 @@
 // Lambda polarisation task
 // prottay.das@cern.ch
 
-#include <TH1F.h>
-#include <TDirectory.h>
-#include <THn.h>
-#include <TLorentzVector.h>
-#include <TMath.h>
-#include <TObjArray.h>
-#include <TFile.h>
-#include <TH2F.h>
-#include <TLorentzVector.h>
-#include <TPDGCode.h>
-#include <TDatabasePDG.h>
-#include <cmath>
-#include <array>
-#include <cstdlib>
-
-#include "TRandom3.h"
-#include "Math/Vector3D.h"
-#include "Math/Vector4D.h"
-#include "Math/GenVector/Boost.h"
-#include "TF1.h"
-
-// #include "Common/DataModel/Qvectors.h"
-#include "PWGLF/DataModel/SPCalibrationTables.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/StepTHn.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/Core/trackUtilities.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "Common/Core/TrackSelection.h"
-#include "Framework/ASoAHelpers.h"
-#include "ReconstructionDataFormats/Track.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "CCDB/BasicCCDBManager.h"
-#include "PWGLF/DataModel/LFStrangenessTables.h"
 #include "PWGLF/DataModel/LFStrangenessPIDTables.h"
-#include "Common/DataModel/FT0Corrected.h"
+#include "PWGLF/DataModel/LFStrangenessTables.h"
+#include "PWGLF/DataModel/SPCalibrationTables.h"
+
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/CCDB/RCTSelectionFlags.h"
+#include "Common/Core/RecoDecay.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CCDB/CcdbApi.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/O2DatabasePDGPlugin.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <Math/GenVector/Boost.h>
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
+#include <Math/Vector4Dfwd.h>
+#include <TF1.h>
+#include <THn.h>
+#include <THnSparse.h>
+#include <TMath.h>
+#include <TProfile2D.h>
+#include <TRandom3.h>
+
+#include <RtypesCore.h>
+
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
-using std::array;
+using namespace o2::aod::rctsel;
 
 using dauTracks = soa::Join<aod::DauTrackExtras, aod::DauTrackTPCPIDs>;
 using v0Candidates = soa::Join<aod::V0CollRefs, aod::V0Cores, aod::V0Extras>;
 
 struct lambdapolsp {
 
+  struct : ConfigurableGroup {
+    Configurable<std::string> cfgURL{"cfgURL", "http://alice-ccdb.cern.ch", "Address of the CCDB to browse"};
+    Configurable<int64_t> nolaterthan{"ccdb-no-later-than", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(), "Latest acceptable timestamp of creation for the object"};
+  } cfgCcdbParam;
+
   int mRunNumber;
-  int multEstimator;
-  float d_bz;
   Service<o2::ccdb::BasicCCDBManager> ccdb;
   Service<o2::framework::O2DatabasePDG> pdg;
-
+  o2::ccdb::CcdbApi ccdbApi;
+  TH1D* hwgtAL;
+  TH1D* heffL;
+  TH1D* heffAL;
+  TH1D* hwgtRESO;
   // fill output
-  Configurable<bool> additionalEvSel{"additionalEvSel", false, "additionalEvSel"};
-  Configurable<bool> additionalEvSel2{"additionalEvSel2", false, "additionalEvSel2"};
-  Configurable<bool> additionalEvSel3{"additionalEvSel3", false, "additionalEvSel3"};
-  Configurable<bool> additionalEvSel4{"additionalEvSel4", false, "additionalEvSel4"};
+  struct : ConfigurableGroup {
+    Configurable<bool> additionalEvSel{"additionalEvSel", false, "additionalEvSel"};
+    Configurable<bool> additionalEvSel2{"additionalEvSel2", false, "additionalEvSel2"};
+    Configurable<bool> additionalEvSel4{"additionalEvSel4", false, "additionalEvSel4"};
+    Configurable<int> cfgMaxOccupancy{"cfgMaxOccupancy", 1000, "maximum occupancy of tracks in neighbouring collisions in a given time range"};
+    Configurable<int> cfgMinOccupancy{"cfgMinOccupancy", 0, "maximum occupancy of tracks in neighbouring collisions in a given time range"};
+  } evselGrp;
   Configurable<bool> globalpt{"globalpt", true, "select tracks based on pt global vs tpc"};
   Configurable<bool> cqvas{"cqvas", false, "change q vectors after shift correction"};
-  Configurable<bool> useonlypsis{"useonlypsis", true, "use only psis to calculate total spectator plane angle"};
+  Configurable<bool> normbymag{"normbymag", false, "normalize by magnitude of q vectors for SP"};
   Configurable<int> useprofile{"useprofile", 3, "flag to select profile vs Sparse"};
-  Configurable<int> QxyNbins{"QxyNbins", 100, "Number of bins in QxQy histograms"};
-  Configurable<float> lbinQxy{"lbinQxy", -5.0, "lower bin value in QxQy histograms"};
-  Configurable<float> hbinQxy{"hbinQxy", 5.0, "higher bin value in QxQy histograms"};
-  Configurable<int> cfgMaxOccupancy{"cfgMaxOccupancy", 1000, "maximum occupancy of tracks in neighbouring collisions in a given time range"};
-  Configurable<int> cfgMinOccupancy{"cfgMinOccupancy", 0, "maximum occupancy of tracks in neighbouring collisions in a given time range"};
+  Configurable<int> centestim{"centestim", 0, "flag to select centrality estimator"};
+  Configurable<bool> needetaaxis{"needetaaxis", false, "flag to use last axis"};
 
+  struct : ConfigurableGroup {
+    Configurable<bool> doRandomPsi{"doRandomPsi", true, "randomize psi"};
+    Configurable<bool> doRandomPsiAC{"doRandomPsiAC", true, "randomize psiAC"};
+    Configurable<bool> doRandomPhi{"doRandomPhi", true, "randomize phi"};
+    Configurable<double> etaMix{"etaMix", 0.1, "eta difference in mixing"};
+    Configurable<double> ptMix{"ptMix", 0.1, "pt difference in mixing"};
+    Configurable<double> phiMix{"phiMix", 0.1, "phi difference in mixing"};
+    Configurable<bool> useSP{"useSP", false, "use scalar product"};
+  } randGrp;
   // events
   Configurable<float> cfgCutVertex{"cfgCutVertex", 10.0f, "Accepted z-vertex range"};
   Configurable<float> cfgCutCentralityMax{"cfgCutCentralityMax", 50.0f, "Accepted maximum Centrality"};
   Configurable<float> cfgCutCentralityMin{"cfgCutCentralityMin", 30.0f, "Accepted minimum Centrality"};
   // proton track cut
-  Configurable<float> confRapidity{"confRapidity", 0.8, "cut on Rapidity"};
   Configurable<float> cfgCutPT{"cfgCutPT", 0.15, "PT cut on daughter track"};
   Configurable<float> cfgCutEta{"cfgCutEta", 0.8, "Eta cut on daughter track"};
   Configurable<float> cfgCutDCAxy{"cfgCutDCAxy", 0.1f, "DCAxy range for tracks"};
@@ -114,163 +130,345 @@ struct lambdapolsp {
   Configurable<double> cMinV0DCAPr{"cMinV0DCAPr", 0.05, "Minimum V0 daughters DCA to PV for Pr"};
   Configurable<double> cMinV0DCAPi{"cMinV0DCAPi", 0.05, "Minimum V0 daughters DCA to PV for Pi"};
   Configurable<float> cMaxV0LifeTime{"cMaxV0LifeTime", 20, "Maximum V0 life time"};
+  Configurable<bool> analyzeLambda{"analyzeLambda", true, "flag for lambda analysis"};
+  Configurable<bool> analyzeK0s{"analyzeK0s", false, "flag for K0s analysis"};
+  Configurable<float> qtArmenterosMinForK0{"qtArmenterosMinForK0", 0.2, "Armenterous cut for K0s"};
 
   // config for V0 daughters
   Configurable<float> ConfDaughEta{"ConfDaughEta", 0.8f, "V0 Daugh sel: max eta"};
   Configurable<float> cfgDaughPrPt{"cfgDaughPrPt", 0.4, "minimum daughter proton pt"};
   Configurable<float> cfgDaughPiPt{"cfgDaughPiPt", 0.2, "minimum daughter pion pt"};
+  Configurable<float> rcrfc{"rcrfc", 0.8f, "Ratio of CR to FC"};
   Configurable<float> ConfDaughTPCnclsMin{"ConfDaughTPCnclsMin", 50.f, "V0 Daugh sel: Min. nCls TPC"};
-  Configurable<double> ConfDaughDCAMin{"ConfDaughDCAMin", 0.08f, "V0 Daugh sel:  Max. DCA Daugh to PV (cm)"};
   Configurable<float> ConfDaughPIDCuts{"ConfDaughPIDCuts", 3, "PID selections for Lambda daughters"};
+  Configurable<bool> usesubdet{"usesubdet", false, "use subdet"};
+  Configurable<bool> useAccCorr{"useAccCorr", false, "use acceptance correction"};
+  Configurable<bool> useResoRBR{"useResoRBR", false, "use resolution correction RBR"};
+  Configurable<bool> useyldwgt{"useyldwgt", false, "use yield weight"};
+  Configurable<bool> useeffwgt{"useeffwgt", false, "use eff weight"};
+  Configurable<bool> usepsisubbeforeshift{"usepsisubbeforeshift", false, "use psi for sub detectors before shift modification"};
+  Configurable<std::string> ConfAccPathL{"ConfAccPathL", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_28032025/acccorrL", "Path to acceptance correction for Lambda"};
+  Configurable<std::string> ConfAccPathAL{"ConfAccPathAL", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_28032025/acccorrAL", "Path to acceptance correction for AntiLambda"};
+  Configurable<std::string> ConfWgtPathAL{"ConfWgtPathAL", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_10082025/yieldweight2050", "Path to yield weight correction for AntiLambda"};
+  Configurable<std::string> ConfEffWgtPathL{"ConfEffWgtPathL", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_10082025/yieldweight2050", "Path to eff weight correction for Lambda"};
+  Configurable<std::string> ConfEffWgtPathAL{"ConfEffWgtPathAL", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_10082025/yieldweight2050", "Path to eff weight correction for AntiLambda"};
+  Configurable<std::string> ConfResoPath{"ConfResoPath", "Users/p/prottay/My/Object/From379780/Fulldata/NewPbPbpass4_28032025/acccorrL", "Path to resolution correction run by run"};
 
-  Configurable<int> CentNbins{"CentNbins", 16, "Number of bins in cent histograms"};
-  Configurable<float> lbinCent{"lbinCent", 0.0, "lower bin value in cent histograms"};
-  Configurable<float> hbinCent{"hbinCent", 80.0, "higher bin value in cent histograms"};
-  Configurable<int> SANbins{"SANbins", 20, "Number of bins in costhetastar"};
-  Configurable<float> lbinSA{"lbinSA", -1.0, "lower bin value in costhetastar histograms"};
-  Configurable<float> hbinSA{"hbinSA", 1.0, "higher bin value in costhetastar histograms"};
-  Configurable<int> PolNbins{"PolNbins", 20, "Number of bins in polarisation"};
-  Configurable<float> lbinPol{"lbinPol", -1.0, "lower bin value in #phi-#psi histograms"};
-  Configurable<float> hbinPol{"hbinPol", 1.0, "higher bin value in #phi-#psi histograms"};
-  Configurable<int> IMNbins{"IMNbins", 100, "Number of bins in invariant mass"};
-  Configurable<float> lbinIM{"lbinIM", 1.0, "lower bin value in IM histograms"};
-  Configurable<float> hbinIM{"hbinIM", 1.2, "higher bin value in IM histograms"};
-  Configurable<int> ptNbins{"ptNbins", 50, "Number of bins in pt"};
-  Configurable<float> lbinpt{"lbinpt", 0.0, "lower bin value in pt histograms"};
-  Configurable<float> hbinpt{"hbinpt", 10.0, "higher bin value in pt histograms"};
-  Configurable<int> resNbins{"resNbins", 50, "Number of bins in reso"};
-  Configurable<float> lbinres{"lbinres", 0.0, "lower bin value in reso histograms"};
-  Configurable<float> hbinres{"hbinres", 10.0, "higher bin value in reso histograms"};
-  Configurable<int> etaNbins{"etaNbins", 20, "Number of bins in eta"};
-  Configurable<float> lbineta{"lbineta", -1.0, "lower bin value in eta histograms"};
-  Configurable<float> hbineta{"hbineta", 1.0, "higher bin value in eta histograms"};
-  Configurable<int> spNbins{"spNbins", 2000, "Number of bins in sp"};
-  Configurable<float> lbinsp{"lbinsp", -1.0, "lower bin value in sp histograms"};
-  Configurable<float> hbinsp{"hbinsp", 1.0, "higher bin value in sp histograms"};
-  Configurable<int> pxNbins{"pxNbins", 500, "Number of bins in px"};
+  struct : ConfigurableGroup {
+    Configurable<int> QxyNbins{"QxyNbins", 100, "Number of bins in QxQy histograms"};
+    Configurable<float> lbinQxy{"lbinQxy", -5.0, "lower bin value in QxQy histograms"};
+    Configurable<float> hbinQxy{"hbinQxy", 5.0, "higher bin value in QxQy histograms"};
+    Configurable<int> PolNbins{"PolNbins", 20, "Number of bins in polarisation"};
+    Configurable<float> lbinPol{"lbinPol", -1.0, "lower bin value in #phi-#psi histograms"};
+    Configurable<float> hbinPol{"hbinPol", 1.0, "higher bin value in #phi-#psi histograms"};
+    Configurable<int> IMNbins{"IMNbins", 100, "Number of bins in invariant mass"};
+    Configurable<float> lbinIM{"lbinIM", 1.0, "lower bin value in IM histograms"};
+    Configurable<float> hbinIM{"hbinIM", 1.2, "higher bin value in IM histograms"};
+    Configurable<int> resNbins{"resNbins", 50, "Number of bins in reso"};
+    Configurable<float> lbinres{"lbinres", 0.0, "lower bin value in reso histograms"};
+    Configurable<float> hbinres{"hbinres", 10.0, "higher bin value in reso histograms"};
+    Configurable<int> spNbins{"spNbins", 2000, "Number of bins in sp"};
+    Configurable<float> lbinsp{"lbinsp", -1.0, "lower bin value in sp histograms"};
+    Configurable<float> hbinsp{"hbinsp", 1.0, "higher bin value in sp histograms"};
+  } binGrp;
 
-  ConfigurableAxis configcentAxis{"configcentAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "Cent V0M"};
-  ConfigurableAxis configthnAxispT{"configthnAxisPt", {VARIABLE_WIDTH, 0.2, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.5, 8.0, 10.0, 100.0}, "#it{p}_{T} (GeV/#it{c})"};
-  ConfigurableAxis configetaAxis{"configetaAxis", {VARIABLE_WIDTH, -0.8, -0.4, -0.2, 0, 0.2, 0.4, 0.8}, "Eta"};
-  ConfigurableAxis configthnAxisPol{"configthnAxisPol", {VARIABLE_WIDTH, -1.0, -0.6, -0.2, 0, 0.2, 0.4, 0.8}, "Pol"};
-  ConfigurableAxis configphiAxis{"configphiAxis", {VARIABLE_WIDTH, 0.0, 0.2, 0.4, 0.8, 1.0, 2.0, 2.5, 3.0, 4.0, 5.0, 5.5, 6.28}, "PhiAxis"};
+  struct : ConfigurableGroup {
+    Configurable<bool> isQA{"isQA", true, "Flag to fill QA"};
+    ConfigurableAxis centfineAxis{"centfineAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "Cent V0M"};
+    ConfigurableAxis vxfineAxis{"vxfineAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "vx fine axis"};
+    ConfigurableAxis vyfineAxis{"vyfineAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "vy fine axis"};
+    ConfigurableAxis vzfineAxis{"vzfineAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "vz fine axis"};
+    ConfigurableAxis qxZDCAxis{"qxZDCAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "qx axis"};
+    ConfigurableAxis psiAxis{"psiAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "psi axis"};
+
+    Configurable<bool> fillNUA{"fillNUA", true, "fillNUA"};
+    Configurable<bool> useNUA{"useNUA", true, "useNUA"};
+    ConfigurableAxis nuacentAxis{"nuaCentAxis", {4, 10.f, 50.f}, "centrality (%)"};
+    ConfigurableAxis nuavzAxis{"nuaVzAxis", {5, -10.f, 10.f}, "V_{z} (cm)"};
+    ConfigurableAxis nuaetaAxis{"nuaEtaAxis", {4, -0.8f, 0.8f}, "#eta"};
+    ConfigurableAxis nuasignAxis{"nuaSignAxis", {2, -1.5f, 1.5f}, "charge sign"};
+    ConfigurableAxis nuaphiAxis{"nuaPhiAxis", {72, 0.f, static_cast<float>(TMath::TwoPi())}, "#varphi"};
+    Configurable<std::string> ConfNUA{"ConfNUA", "Users/p/prottay/My/Object/NUAwgtschk", "Path to NUA"};
+  } QAgrp;
+
+  struct : ConfigurableGroup {
+    Configurable<bool> requireRCTFlagChecker{"requireRCTFlagChecker", true, "Check event quality in run condition table"};
+    Configurable<std::string> cfgEvtRCTFlagCheckerLabel{"cfgEvtRCTFlagCheckerLabel", "CBT_hadronPID", "Evt sel: RCT flag checker label"};
+    Configurable<bool> cfgEvtRCTFlagCheckerZDCCheck{"cfgEvtRCTFlagCheckerZDCCheck", true, "Evt sel: RCT flag checker ZDC check"};
+    Configurable<bool> cfgEvtRCTFlagCheckerLimitAcceptAsBad{"cfgEvtRCTFlagCheckerLimitAcceptAsBad", false, "Evt sel: RCT flag checker treat Limited Acceptance As Bad"};
+  } rctCut;
+  struct : ConfigurableGroup {
+    ConfigurableAxis configcentAxis{"configcentAxis", {VARIABLE_WIDTH, 0.0, 10.0, 40.0, 80.0}, "Cent V0M"};
+    ConfigurableAxis configthnAxispT{"configthnAxisPt", {VARIABLE_WIDTH, 0.2, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.5, 8.0, 10.0, 100.0}, "#it{p}_{T} (GeV/#it{c})"};
+    ConfigurableAxis configetaAxis{"configetaAxis", {VARIABLE_WIDTH, -0.8, -0.4, -0.2, 0, 0.2, 0.4, 0.8}, "Eta"};
+    ConfigurableAxis configthnAxisPol{"configthnAxisPol", {VARIABLE_WIDTH, -1.0, -0.6, -0.2, 0, 0.2, 0.4, 0.8}, "Pol"};
+    ConfigurableAxis configbinAxis{"configbinAxis", {VARIABLE_WIDTH, -0.8, -0.4, -0.2, 0, 0.2, 0.4, 0.8}, "BA"};
+  } axisGrp;
+  /*
+  struct : ConfigurableGroup {
+    ConfigurableAxis axisVertex{"axisVertex", {5, -10, 10}, "vertex axis for bin"};
+    ConfigurableAxis axisMultiplicityClass{"axisMultiplicityClass", {8, 0, 80}, "multiplicity percentile for bin"};
+    Configurable<int> nMix{"nMix", 5, "number of event mixing"};
+  } meGrp;
+  */
+  struct : ConfigurableGroup {
+    ConfigurableAxis axisCosine{"axisCosine", {100, 0, 1}, "cosine axis"};
+    ConfigurableAxis axisRadius{"axisRadius", {200, 0, 100}, "radius axis"};
+    ConfigurableAxis axisDca{"axisDca", {100, -5, 5}, "dca axis"};
+    ConfigurableAxis axisLT{"axisLT", {50, 0, 50}, "lifetime axis"};
+    ConfigurableAxis axisCR{"axisCR", {40, 0, 200}, "CR axis"};
+    ConfigurableAxis axisnsig{"axisnsig", {100, -10, 10}, "nsigma axis"};
+    ConfigurableAxis axispt{"axispt", {100, 0, 10}, "pt axis"};
+    Configurable<bool> filldist{"filldist", true, "fill topo distr"};
+    Configurable<float> lowmasscut{"lowmasscut", 1.11, "low mass cut"};
+    Configurable<float> highmasscut{"highmasscut", 1.12, "high mass cut"};
+    ConfigurableAxis axiscosphiminuspsi{"axiscosphiminuspsi", {200, -1, 1}, "cosphiminuspsi"};
+    ConfigurableAxis axiseta{"axiseta", {16, -0.8, 0.8}, "eta axis"};
+  } distGrp;
+
+  struct : ConfigurableGroup {
+
+    Configurable<bool> doTopoSyst{
+      "doTopoSyst", false,
+      "Run randomized topology systematic variations"};
+
+    Configurable<int> nTopoSyst{
+      "nTopoSyst", 400,
+      "Number of randomized topological selections"};
+
+    Configurable<int> topoSystSeed{
+      "topoSystSeed", 12345,
+      "Random seed for topology systematics"};
+
+    // ----------------------------------------------------
+    // Range of the CUT VALUE that will be randomized.
+    //
+    // Set min/max to the desired systematic ranges in JSON.
+    // ----------------------------------------------------
+
+    Configurable<float> systLifeCutMin{
+      "systLifeCutMin", 20.f,
+      "Minimum value from which lifetime upper cut is sampled"};
+
+    Configurable<float> systLifeCutMax{
+      "systLifeCutMax", 20.f,
+      "Maximum value from which lifetime upper cut is sampled"};
+
+    Configurable<float> systCPACutMin{
+      "systCPACutMin", 0.9998f,
+      "Minimum value from which CPA lower cut is sampled"};
+
+    Configurable<float> systCPACutMax{
+      "systCPACutMax", 0.9998f,
+      "Maximum value from which CPA lower cut is sampled"};
+
+    Configurable<float> systDCADaughCutMin{
+      "systDCADaughCutMin", 0.2f,
+      "Minimum value from which DCA daughters upper cut is sampled"};
+
+    Configurable<float> systDCADaughCutMax{
+      "systDCADaughCutMax", 0.2f,
+      "Maximum value from which DCA daughters upper cut is sampled"};
+
+    Configurable<float> systDCAPrCutMin{
+      "systDCAPrCutMin", 0.05f,
+      "Minimum value from which proton DCA-to-PV lower cut is sampled"};
+
+    Configurable<float> systDCAPrCutMax{
+      "systDCAPrCutMax", 0.05f,
+      "Maximum value from which proton DCA-to-PV lower cut is sampled"};
+
+    Configurable<float> systDCAPiCutMin{
+      "systDCAPiCutMin", 0.05f,
+      "Minimum value from which pion DCA-to-PV lower cut is sampled"};
+
+    Configurable<float> systDCAPiCutMax{
+      "systDCAPiCutMax", 0.05f,
+      "Maximum value from which pion DCA-to-PV lower cut is sampled"};
+
+    Configurable<float> systRadiusCutMin{
+      "systRadiusCutMin", 0.8f,
+      "Minimum value from which V0 minimum-radius cut is sampled"};
+
+    Configurable<float> systRadiusCutMax{
+      "systRadiusCutMax", 4.0f,
+      "Maximum value from which V0 minimum-radius cut is sampled"};
+
+  } systGrp;
+
+  RCTFlagsChecker rctChecker;
 
   SliceCache cache;
   HistogramRegistry histos{"histos", {}, OutputObjHandlingPolicy::AnalysisObject};
 
+  struct TopoSystCuts {
+    float lifeMax;
+    float cpaMin;
+    float dcaDaughtersMax;
+    float dcaPrMin;
+    float dcaPiMin;
+    float radiusMin;
+  };
+  std::vector<TopoSystCuts> topoSystCuts;
+
   void init(o2::framework::InitContext&)
   {
-    AxisSpec thnAxispT{ptNbins, lbinpt, hbinpt, "#it{p}_{T} (GeV/#it{c})"};
-    AxisSpec thnAxisRap{100, -0.5, 0.5, "Rapidity"};
-    AxisSpec thnAxisres{resNbins, lbinres, hbinres, "Reso"};
-    AxisSpec thnAxisInvMass{IMNbins, lbinIM, hbinIM, "#it{M} (GeV/#it{c}^{2})"};
-    AxisSpec thnAxisCosThetaStar{SANbins, lbinSA, hbinSA, "SA"};
-    AxisSpec centAxis = {CentNbins, lbinCent, hbinCent, "V0M (%)"};
-    AxisSpec pxAxis = {pxNbins, -10.0, 10.0, "Px"};
-    AxisSpec spAxis = {spNbins, lbinsp, hbinsp, "Sp"};
-    AxisSpec qxZDCAxis = {QxyNbins, lbinQxy, hbinQxy, "Qx"};
+
+    rctChecker.init(rctCut.cfgEvtRCTFlagCheckerLabel, rctCut.cfgEvtRCTFlagCheckerZDCCheck, rctCut.cfgEvtRCTFlagCheckerLimitAcceptAsBad);
+
+    AxisSpec thnAxisres{binGrp.resNbins, binGrp.lbinres, binGrp.hbinres, "Reso"};
+    AxisSpec thnAxisInvMass{binGrp.IMNbins, binGrp.lbinIM, binGrp.hbinIM, "#it{M} (GeV/#it{c}^{2})"};
+    AxisSpec spAxis = {binGrp.spNbins, binGrp.lbinsp, binGrp.hbinsp, "Sp"};
+    // AxisSpec qxZDCAxis = {binGrp.QxyNbins, binGrp.lbinQxy, binGrp.hbinQxy, "Qx"};
+    //  AxisSpec centAxis = {CentNbins, lbinCent, hbinCent, "V0M (%)"};
+
+    std::vector<AxisSpec> runaxes = {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configthnAxisPol, axisGrp.configcentAxis};
+    if (needetaaxis)
+      runaxes.insert(runaxes.end(), {axisGrp.configbinAxis});
+
+    AxisSpec systIDAxis{systGrp.nTopoSyst.value, -0.5, static_cast<double>(systGrp.nTopoSyst.value) - 0.5, "systID"};
+    std::vector<AxisSpec> runaxesSyst = {
+      thnAxisInvMass,
+      axisGrp.configthnAxispT,
+      axisGrp.configthnAxisPol,
+      axisGrp.configcentAxis};
+
+    if (needetaaxis) {
+      runaxesSyst.push_back(axisGrp.configbinAxis);
+    }
+
+    runaxesSyst.push_back(systIDAxis);
+
+    // if (needetaaxis)
+    // runaxes.insert(runaxes.end(), {axisGrp.configbinAxis});
+    // std::vector<AxisSpec> runaxes2 = {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configcentAxis};
 
     if (checkwithpub) {
       if (useprofile == 2) {
-        histos.add("hpuxQxpvscentpteta", "hpuxQxpvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQypvscentpteta", "hpuyQypvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxQxtvscentpteta", "hpuxQxtvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQytvscentpteta", "hpuyQytvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxytvscentpteta", "hpuxyQxytvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxypvscentpteta", "hpuxyQxypvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpoddv1vscentpteta", "hpoddv1vscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpevenv1vscentpteta", "hpevenv1vscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpv21", "hpv21", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpv22", "hpv22", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpv23", "hpv23", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Tx1Ax1Cvscentpteta", "hpx2Tx1Ax1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Ty1Ay1Cvscentpteta", "hpx2Ty1Ay1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Tx1Ay1Cvscentpteta", "hpy2Tx1Ay1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Ty1Ax1Cvscentpteta", "hpy2Ty1Ax1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx1Ax1Cvscentpteta", "hpx1Ax1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy1Ay1Cvscentpteta", "hpy1Ay1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx1Avscentpteta", "hpx1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx1Cvscentpteta", "hpx1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy1Avscentpteta", "hpy1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy1Cvscentpteta", "hpy1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
+        histos.add("hpuxQxpvscentpteta", "hpuxQxpvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQypvscentpteta", "hpuyQypvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxQxtvscentpteta", "hpuxQxtvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQytvscentpteta", "hpuyQytvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxytvscentpteta", "hpuxyQxytvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxypvscentpteta", "hpuxyQxypvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpoddv1vscentpteta", "hpoddv1vscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpevenv1vscentpteta", "hpevenv1vscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        /*histos.add("hpv21", "hpv21", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpv22", "hpv22", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpv23", "hpv23", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Tx1Ax1Cvscentpteta", "hpx2Tx1Ax1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Ty1Ay1Cvscentpteta", "hpx2Ty1Ay1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Tx1Ay1Cvscentpteta", "hpy2Tx1Ay1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Ty1Ax1Cvscentpteta", "hpy2Ty1Ax1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx1Ax1Cvscentpteta", "hpx1Ax1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy1Ay1Cvscentpteta", "hpy1Ay1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx1Avscentpteta", "hpx1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx1Cvscentpteta", "hpx1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy1Avscentpteta", "hpy1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy1Cvscentpteta", "hpy1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
 
-        histos.add("hpx2Tx1Avscentpteta", "hpx2Tx1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Tx1Cvscentpteta", "hpx2Tx1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Ty1Avscentpteta", "hpx2Ty1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Ty1Cvscentpteta", "hpx2Ty1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Tx1Avscentpteta", "hpy2Tx1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Ty1Cvscentpteta", "hpy2Ty1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Ty1Avscentpteta", "hpy2Ty1Avscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Tx1Cvscentpteta", "hpy2Tx1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx1Ay1Cvscentpteta", "hpx1Ay1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy1Ax1Cvscentpteta", "hpy1Ax1Cvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpx2Tvscentpteta", "hpx2Tvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpy2Tvscentpteta", "hpy2Tvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-
-        histos.add("hpuxvscentpteta", "hpuxvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyvscentpteta", "hpuyvscentpteta", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
+        histos.add("hpx2Tx1Avscentpteta", "hpx2Tx1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Tx1Cvscentpteta", "hpx2Tx1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Ty1Avscentpteta", "hpx2Ty1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Ty1Cvscentpteta", "hpx2Ty1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Tx1Avscentpteta", "hpy2Tx1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Ty1Cvscentpteta", "hpy2Ty1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Ty1Avscentpteta", "hpy2Ty1Avscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Tx1Cvscentpteta", "hpy2Tx1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx1Ay1Cvscentpteta", "hpx1Ay1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy1Ax1Cvscentpteta", "hpy1Ax1Cvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpx2Tvscentpteta", "hpx2Tvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpy2Tvscentpteta", "hpy2Tvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+  */
+        histos.add("hpuxvscentpteta", "hpuxvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyvscentpteta", "hpuyvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
         /*
-              histos.add("hpuxvscentptetaneg", "hpuxvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuyvscentptetaneg", "hpuyvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuxvscentptetaneg", "hpuxvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuyvscentptetaneg", "hpuyvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
 
-              histos.add("hpuxQxpvscentptetaneg", "hpuxQxpvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuyQypvscentptetaneg", "hpuyQypvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuxQxtvscentptetaneg", "hpuxQxtvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuyQytvscentptetaneg", "hpuyQytvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuxyQxytvscentptetaneg", "hpuxyQxytvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpuxyQxypvscentptetaneg", "hpuxyQxypvscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpoddv1vscentptetaneg", "hpoddv1vscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
-              histos.add("hpevenv1vscentptetaneg", "hpevenv1vscentptetaneg", HistType::kTHnSparseF, {centAxis, thnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuxQxpvscentptetaneg", "hpuxQxpvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuyQypvscentptetaneg", "hpuyQypvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuxQxtvscentptetaneg", "hpuxQxtvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuyQytvscentptetaneg", "hpuyQytvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuxyQxytvscentptetaneg", "hpuxyQxytvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpuxyQxypvscentptetaneg", "hpuxyQxypvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpoddv1vscentptetaneg", "hpoddv1vscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+              histos.add("hpevenv1vscentptetaneg", "hpevenv1vscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
         */
 
-        histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQytQypvscent", "hpQytQypvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQxytpvscent", "hpQxytpvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQxtQypvscent", "hpQxtQypvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQxpQytvscent", "hpQxpQytvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
+        histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQytQypvscent", "hpQytQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxytpvscent", "hpQxytpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxtQypvscent", "hpQxtQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxpQytvscent", "hpQxpQytvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
 
-        histos.add("hpQxpvscent", "hpQxpvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQxtvscent", "hpQxtvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQypvscent", "hpQypvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
-        histos.add("hpQytvscent", "hpQytvscent", HistType::kTHnSparseF, {centAxis, spAxis}, true);
+        histos.add("hpQxpvscent", "hpQxpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxtvscent", "hpQxtvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQypvscent", "hpQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQytvscent", "hpQytvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+
+        histos.add("hpQxtQxpvscentptetaTrack",
+                   "QxZNAQxZNC track weighted;centrality;p_{T};#eta;Q_{x}^{ZNA}Q_{x}^{ZNC}",
+                   kTHnSparseF,
+                   {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis});
+
+        histos.add("hpQytQypvscentptetaTrack",
+                   "QyZNAQyZNC track weighted;centrality;p_{T};#eta;Q_{y}^{ZNA}Q_{y}^{ZNC}",
+                   kTHnSparseF,
+                   {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis});
+
+        histos.add("hpQxytpvscentptetaTrack",
+                   "QxQx + QyQy track weighted;centrality;p_{T};#eta;Q_{x}Q_{x}+Q_{y}Q_{y}",
+                   kTHnSparseF,
+                   {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis});
+
+        histos.add("hpQxpQytvscentptetaTrack",
+                   "QxZNAQyZNC track weighted;centrality;p_{T};#eta;Q_{x}^{ZNA}Q_{y}^{ZNC}",
+                   kTHnSparseF,
+                   {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis});
+
+        histos.add("hpQxtQypvscentptetaTrack",
+                   "QxZNCQyZNA track weighted;centrality;p_{T};#eta;Q_{x}^{ZNC}Q_{y}^{ZNA}",
+                   kTHnSparseF,
+                   {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis});
       } else {
-        histos.add("hpuxQxpvscentpteta", "hpuxQxpvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQypvscentpteta", "hpuyQypvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxQxtvscentpteta", "hpuxQxtvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQytvscentpteta", "hpuyQytvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxytvscentpteta", "hpuxyQxytvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxypvscentpteta", "hpuxyQxypvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpoddv1vscentpteta", "hpoddv1vscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpevenv1vscentpteta", "hpevenv1vscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+        histos.add("hpuxQxpvscentpteta", "hpuxQxpvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQypvscentpteta", "hpuyQypvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxQxtvscentpteta", "hpuxQxtvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQytvscentpteta", "hpuyQytvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxytvscentpteta", "hpuxyQxytvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxypvscentpteta", "hpuxyQxypvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpoddv1vscentpteta", "hpoddv1vscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpevenv1vscentpteta", "hpevenv1vscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
 
-        histos.add("hpuxvscentpteta", "hpuxvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyvscentpteta", "hpuyvscentpteta", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        /*histos.add("hpuxvscentptetaneg", "hpuxvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyvscentptetaneg", "hpuyvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
+        histos.add("hpuxvscentpteta", "hpuxvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyvscentpteta", "hpuyvscentpteta", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        /*histos.add("hpuxvscentptetaneg", "hpuxvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyvscentptetaneg", "hpuyvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
 
-        histos.add("hpuxQxpvscentptetaneg", "hpuxQxpvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQypvscentptetaneg", "hpuyQypvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxQxtvscentptetaneg", "hpuxQxtvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuyQytvscentptetaneg", "hpuyQytvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxytvscentptetaneg", "hpuxyQxytvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpuxyQxypvscentptetaneg", "hpuxyQxypvscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpoddv1vscentptetaneg", "hpoddv1vscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);
-        histos.add("hpevenv1vscentptetaneg", "hpevenv1vscentptetaneg", HistType::kTHnSparseF, {configcentAxis, configthnAxispT, configetaAxis, spAxis}, true);*/
+        histos.add("hpuxQxpvscentptetaneg", "hpuxQxpvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQypvscentptetaneg", "hpuyQypvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxQxtvscentptetaneg", "hpuxQxtvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuyQytvscentptetaneg", "hpuyQytvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxytvscentptetaneg", "hpuxyQxytvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpuxyQxypvscentptetaneg", "hpuxyQxypvscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpoddv1vscentptetaneg", "hpoddv1vscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);
+        histos.add("hpevenv1vscentptetaneg", "hpevenv1vscentptetaneg", HistType::kTHnSparseF, {axisGrp.configcentAxis, axisGrp.configthnAxispT, axisGrp.configetaAxis, spAxis}, true);*/
 
-        histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQytQypvscent", "hpQytQypvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQxytpvscent", "hpQxytpvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQxtQypvscent", "hpQxtQypvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQxpQytvscent", "hpQxpQytvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
+        histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQytQypvscent", "hpQytQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxytpvscent", "hpQxytpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxtQypvscent", "hpQxtQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxpQytvscent", "hpQxpQytvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
 
-        histos.add("hpQxpvscent", "hpQxpvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQxtvscent", "hpQxtvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQypvscent", "hpQypvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
-        histos.add("hpQytvscent", "hpQytvscent", HistType::kTHnSparseF, {configcentAxis, spAxis}, true);
+        histos.add("hpQxpvscent", "hpQxpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxtvscent", "hpQxtvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQypvscent", "hpQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQytvscent", "hpQytvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
       }
     }
 
-    histos.add("hCentrality", "Centrality distribution", kTH1F, {{centAxis}});
+    histos.add("hCentrality", "Centrality distribution", kTH1F, {{axisGrp.configcentAxis}});
     // histos.add("hpsiApsiC", "hpsiApsiC", kTHnSparseF, {psiACAxis, psiACAxis});
     //  histos.add("hpsiApsiC", "hpsiApsiC", kTH2F, {psiACAxis, psiACAxis});
     // histos.add("hphiminuspsiA", "hphiminuspisA", kTH1F, {{50, 0, 6.28}}, true);
@@ -282,48 +480,243 @@ struct lambdapolsp {
 
     if (!checkwithpub) {
       // histos.add("hVtxZ", "Vertex distribution in Z;Z (cm)", kTH1F, {{20, -10.0, 10.0}});
-      histos.add("hpRes", "hpRes", HistType::kTHnSparseF, {configcentAxis, thnAxisres});
-      histos.add("hpResSin", "hpResSin", HistType::kTHnSparseF, {configcentAxis, thnAxisres});
-      /*histos.add("hpCosPsiA", "hpCosPsiA", HistType::kTHnSparseF, {configcentAxis, thnAxisres});
-      histos.add("hpCosPsiC", "hpCosPsiC", HistType::kTHnSparseF, {configcentAxis, thnAxisres});
-      histos.add("hpSinPsiA", "hpSinPsiA", HistType::kTHnSparseF, {configcentAxis, thnAxisres});
-      histos.add("hpSinPsiC", "hpSinPsiC", HistType::kTHnSparseF, {configcentAxis, thnAxisres});*/
-      /*histos.add("hcentQxZDCA", "hcentQxZDCA", kTH2F, {{centAxis}, {qxZDCAxis}});
-      histos.add("hcentQyZDCA", "hcentQyZDCA", kTH2F, {{centAxis}, {qxZDCAxis}});
-      histos.add("hcentQxZDCC", "hcentQxZDCC", kTH2F, {{centAxis}, {qxZDCAxis}});
-      histos.add("hcentQyZDCC", "hcentQyZDCC", kTH2F, {{centAxis}, {qxZDCAxis}});*/
+      histos.add("hpRes", "hpRes", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});
+      // histos.add("hpResSin", "hpResSin", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});
+      /*histos.add("hpCosPsiA", "hpCosPsiA", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});
+      histos.add("hpCosPsiC", "hpCosPsiC", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});
+      histos.add("hpSinPsiA", "hpSinPsiA", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});
+      histos.add("hpSinPsiC", "hpSinPsiC", HistType::kTHnSparseF, {axisGrp.configcentAxis, thnAxisres});*/
+      if (randGrp.useSP) {
+        histos.add("hcentQxZDCA", "hcentQxZDCA", kTH2F, {axisGrp.configcentAxis, spAxis});
+        histos.add("hcentQyZDCA", "hcentQyZDCA", kTH2F, {axisGrp.configcentAxis, spAxis});
+        histos.add("hcentQxZDCC", "hcentQxZDCC", kTH2F, {axisGrp.configcentAxis, spAxis});
+        histos.add("hcentQyZDCC", "hcentQyZDCC", kTH2F, {axisGrp.configcentAxis, spAxis});
 
-      histos.add("hSparseLambdaCosPsiA", "hSparseLambdaCosPsiA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaSinPsiA", "hSparseLambdaSinPsiA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaCosPsiC", "hSparseLambdaCosPsiC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaSinPsiC", "hSparseLambdaSinPsiC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaCosPsi", "hSparseLambdaCosPsi", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaSinPsi", "hSparseLambdaSinPsi", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaCosPsiA", "hSparseAntiLambdaCosPsiA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaSinPsiA", "hSparseAntiLambdaSinPsiA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaCosPsiC", "hSparseAntiLambdaCosPsiC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaSinPsiC", "hSparseAntiLambdaSinPsiC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaCosPsi", "hSparseAntiLambdaCosPsi", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaSinPsi", "hSparseAntiLambdaSinPsi", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
+        histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQytQypvscent", "hpQytQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxytpvscent", "hpQxytpvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxtQypvscent", "hpQxtQypvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+        histos.add("hpQxpQytvscent", "hpQxpQytvscent", HistType::kTHnSparseF, {axisGrp.configcentAxis, spAxis}, true);
+      }
+      if (usesubdet) {
+        histos.add("hSparseLambdaCosPsiA", "hSparseLambdaCosPsiA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaSinPsiA", "hSparseLambdaSinPsiA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaCosPsiC", "hSparseLambdaCosPsiC", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaSinPsiC", "hSparseLambdaSinPsiC", HistType::kTHnSparseF, runaxes, true);
+      }
+      histos.add("hSparseLambdaCosPsi", "hSparseLambdaCosPsi", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseLambdaSinPsi", "hSparseLambdaSinPsi", HistType::kTHnSparseF, runaxes, true);
+      if (usesubdet) {
+        histos.add("hSparseAntiLambdaCosPsiA", "hSparseAntiLambdaCosPsiA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaSinPsiA", "hSparseAntiLambdaSinPsiA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaCosPsiC", "hSparseAntiLambdaCosPsiC", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaSinPsiC", "hSparseAntiLambdaSinPsiC", HistType::kTHnSparseF, runaxes, true);
+      }
+      histos.add("hSparseAntiLambdaCosPsi", "hSparseAntiLambdaCosPsi", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseAntiLambdaSinPsi", "hSparseAntiLambdaSinPsi", HistType::kTHnSparseF, runaxes, true);
 
-      histos.add("hSparseLambdaPol", "hSparseLambdaPol", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaPolA", "hSparseLambdaPolA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambdaPolC", "hSparseLambdaPolC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaPol", "hSparseAntiLambdaPol", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaPolA", "hSparseAntiLambdaPolA", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambdaPolC", "hSparseAntiLambdaPolC", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
+      histos.add("hSparseLambdaPol", "hSparseLambdaPol", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseLambdaPolwgt", "hSparseLambdaPolwgt", HistType::kTHnSparseF, runaxes, true);
+      if (usesubdet) {
+        histos.add("hSparseLambdaPolA", "hSparseLambdaPolA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaPolC", "hSparseLambdaPolC", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaPolAwgt", "hSparseLambdaPolAwgt", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseLambdaPolCwgt", "hSparseLambdaPolCwgt", HistType::kTHnSparseF, runaxes, true);
+      }
+      histos.add("hSparseAntiLambdaPol", "hSparseAntiLambdaPol", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseAntiLambdaPolwgt", "hSparseAntiLambdaPolwgt", HistType::kTHnSparseF, runaxes, true);
+      if (usesubdet) {
+        histos.add("hSparseAntiLambdaPolA", "hSparseAntiLambdaPolA", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaPolC", "hSparseAntiLambdaPolC", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaPolAwgt", "hSparseAntiLambdaPolAwgt", HistType::kTHnSparseF, runaxes, true);
+        histos.add("hSparseAntiLambdaPolCwgt", "hSparseAntiLambdaPolCwgt", HistType::kTHnSparseF, runaxes, true);
+      }
+      histos.add("hSparseLambda_corr1a", "hSparseLambda_corr1a", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseLambda_corr1b", "hSparseLambda_corr1b", HistType::kTHnSparseF, runaxes, true);
+      // histos.add("hSparseLambda_corr1c", "hSparseLambda_corr1c", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configphiAxis, configcentAxis, configbinAxis}, true);
+      histos.add("hSparseAntiLambda_corr1a", "hSparseAntiLambda_corr1a", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseAntiLambda_corr1b", "hSparseAntiLambda_corr1b", HistType::kTHnSparseF, runaxes, true);
+      // histos.add("hSparseAntiLambda_corr1c", "hSparseAntiLambda_corr1c", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configphiAxis, configcentAxis, configbinAxis}, true);
 
-      histos.add("hSparseLambda_corr1a", "hSparseLambda_corr1a", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambda_corr1b", "hSparseLambda_corr1b", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambda_corr1c", "hSparseLambda_corr1c", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configphiAxis, configcentAxis}, true);
-      histos.add("hSparseAntiLambda_corr1a", "hSparseAntiLambda_corr1a", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambda_corr1b", "hSparseAntiLambda_corr1b", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambda_corr1c", "hSparseAntiLambda_corr1c", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configphiAxis, configcentAxis}, true);
+      histos.add("hSparseLambda_corr2a", "hSparseLambda_corr2a", HistType::kTHnSparseF, runaxes, true);
+      // histos.add("hSparseLambda_corr2b", "hSparseLambda_corr2b", HistType::kTHnSparseF, runaxes, true);
+      histos.add("hSparseAntiLambda_corr2a", "hSparseAntiLambda_corr2a", HistType::kTHnSparseF, runaxes, true);
+      // histos.add("hSparseAntiLambda_corr2b", "hSparseAntiLambda_corr2b", HistType::kTHnSparseF, runaxes, true);
+      if (randGrp.useSP) {
+        histos.add("hSparseAntiLambda_avgux", "hSparseAntiLambda_avgux", HistType::kTHnSparseF, {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configthnAxisPol, axisGrp.configcentAxis}, true);
+        histos.add("hSparseAntiLambda_avguy", "hSparseAntiLambda_avguy", HistType::kTHnSparseF, {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configthnAxisPol, axisGrp.configcentAxis}, true);
+        histos.add("hSparseLambda_avgux", "hSparseLambda_avgux", HistType::kTHnSparseF, {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configthnAxisPol, axisGrp.configcentAxis}, true);
+        histos.add("hSparseLambda_avguy", "hSparseLambda_avguy", HistType::kTHnSparseF, {thnAxisInvMass, axisGrp.configthnAxispT, axisGrp.configthnAxisPol, axisGrp.configcentAxis}, true);
+      }
+    }
 
-      histos.add("hSparseLambda_corr2a", "hSparseLambda_corr2a", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseLambda_corr2b", "hSparseLambda_corr2b", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambda_corr2a", "hSparseAntiLambda_corr2a", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
-      histos.add("hSparseAntiLambda_corr2b", "hSparseAntiLambda_corr2b", HistType::kTHnSparseF, {thnAxisInvMass, configthnAxispT, configetaAxis, configthnAxisPol, configcentAxis}, true);
+    if (distGrp.filldist) {
+      /*histos.add("hcosinelambda", "hcosinelambda", HistType::kTH1D, {distGrp.axisCosine}, true);
+      histos.add("hdcabwv0daughlambda", "hdcabwv0daughlambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("hlifetimelambda", "hlifetimelambda", HistType::kTH1D, {distGrp.axisLT}, true);
+      histos.add("hradiuslambda", "hradiuslambda", HistType::kTH1D, {distGrp.axisRadius}, true);
+      histos.add("hdcaposlambda", "hdcaposlambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("hdcaneglambda", "hdcaneglambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("htpcCRlambda", "htpcCRlambda", HistType::kTH1D, {distGrp.axisCR}, true);
+      histos.add("htpcposlambda", "htpcposlambda", HistType::kTH1D, {distGrp.axisnsig}, true);
+      histos.add("htpcneglambda", "htpcneglambda", HistType::kTH1D, {distGrp.axisnsig}, true);
+      histos.add("hptposlambda", "hptposlambda", HistType::kTH1D, {distGrp.axispt}, true);
+      histos.add("hptneglambda", "hptneglambda", HistType::kTH1D, {distGrp.axispt}, true);
+
+      histos.add("hcosineantilambda", "hcosineantilambda", HistType::kTH1D, {distGrp.axisCosine}, true);
+      histos.add("hdcabwv0daughantilambda", "hdcabwv0daughantilambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("hlifetimeantilambda", "hlifetimeantilambda", HistType::kTH1D, {distGrp.axisLT}, true);
+      histos.add("hradiusantilambda", "hradiusantilambda", HistType::kTH1D, {distGrp.axisRadius}, true);
+      histos.add("hdcaposantilambda", "hdcaposantilambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("hdcanegantilambda", "hdcanegantilambda", HistType::kTH1D, {distGrp.axisDca}, true);
+      histos.add("htpcCRantilambda", "htpcCRantilambda", HistType::kTH1D, {distGrp.axisCR}, true);
+      histos.add("htpcposantilambda", "htpcposantilambda", HistType::kTH1D, {distGrp.axisnsig}, true);
+      histos.add("htpcnegantilambda", "htpcnegantilambda", HistType::kTH1D, {distGrp.axisnsig}, true);
+      histos.add("hptposantilambda", "hptposantilambda", HistType::kTH1D, {distGrp.axispt}, true);
+      histos.add("hptnegantilambda", "hptnegantilambda", HistType::kTH1D, {distGrp.axispt}, true);
+      */
+      histos.add("hALcosphiminuspsiCvseta", "hALcosphiminuspsiCvseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+      histos.add("hALcosphiminuspsiAvseta", "hALcosphiminuspsiAvseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+      histos.add("hALcosphiminuspsivseta", "hALcosphiminuspsivseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+      histos.add("hLcosphiminuspsiCvseta", "hLcosphiminuspsiCvseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+      histos.add("hLcosphiminuspsiAvseta", "hLcosphiminuspsiAvseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+      histos.add("hLcosphiminuspsivseta", "hLcosphiminuspsivseta", HistType::kTH2D, {{distGrp.axiscosphiminuspsi}, {distGrp.axiseta}});
+    }
+    /*
+    histos.add("hSparseGenLambda", "hSparseGenLambda", HistType::kTHnSparseF, runaxes2, true);
+    histos.add("hSparseGenAntiLambda", "hSparseGenAntiLambda", HistType::kTHnSparseF, runaxes2, true);
+    histos.add("hSparseRecLambda", "hSparseRecLambda", HistType::kTHnSparseF, runaxes2, true);
+    histos.add("hSparseRecAntiLambda", "hSparseRecAntiLambda", HistType::kTHnSparseF, runaxes2, true);
+    */
+    if (QAgrp.isQA) {
+      histos.add("hCentQxZDCA", "hCentQxZDCA", kTH2F, {{QAgrp.centfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hCentQyZDCA", "hCentQyZDCA", kTH2F, {{QAgrp.centfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hCentQxZDCC", "hCentQxZDCC", kTH2F, {{QAgrp.centfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hCentQyZDCC", "hCentQyZDCC", kTH2F, {{QAgrp.centfineAxis}, {QAgrp.qxZDCAxis}});
+
+      histos.add("hvxQxZDCA", "hvxQxZDCA", kTH2F, {{QAgrp.vxfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvxQyZDCA", "hvxQyZDCA", kTH2F, {{QAgrp.vxfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvxQxZDCC", "hvxQxZDCC", kTH2F, {{QAgrp.vxfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvxQyZDCC", "hvxQyZDCC", kTH2F, {{QAgrp.vxfineAxis}, {QAgrp.qxZDCAxis}});
+
+      histos.add("hvyQxZDCA", "hvyQxZDCA", kTH2F, {{QAgrp.vyfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvyQyZDCA", "hvyQyZDCA", kTH2F, {{QAgrp.vyfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvyQxZDCC", "hvyQxZDCC", kTH2F, {{QAgrp.vyfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvyQyZDCC", "hvyQyZDCC", kTH2F, {{QAgrp.vyfineAxis}, {QAgrp.qxZDCAxis}});
+
+      histos.add("hvzQxZDCA", "hvzQxZDCA", kTH2F, {{QAgrp.vzfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvzQyZDCA", "hvzQyZDCA", kTH2F, {{QAgrp.vzfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvzQxZDCC", "hvzQxZDCC", kTH2F, {{QAgrp.vzfineAxis}, {QAgrp.qxZDCAxis}});
+      histos.add("hvzQyZDCC", "hvzQyZDCC", kTH2F, {{QAgrp.vzfineAxis}, {QAgrp.qxZDCAxis}});
+
+      histos.add("PsiZDCC", "PsiZDCC", kTH2F, {QAgrp.centfineAxis, QAgrp.psiAxis});
+      histos.add("PsiZDCA", "PsiZDCA", kTH2F, {QAgrp.centfineAxis, QAgrp.psiAxis});
+      histos.add("PsiZDC", "PsiZDC", kTH2F, {QAgrp.centfineAxis, QAgrp.psiAxis});
+    }
+
+    if (QAgrp.fillNUA) {
+      histos.add("hNUA", "hNUA", HistType::kTHnSparseF, {QAgrp.nuacentAxis, QAgrp.nuavzAxis, QAgrp.nuaetaAxis, QAgrp.nuasignAxis, QAgrp.nuaphiAxis});
+    }
+
+    ccdb->setURL(cfgCcdbParam.cfgURL);
+    ccdbApi.init("http://alice-ccdb.cern.ch");
+    ccdb->setCaching(true);
+    ccdb->setLocalObjectValidityChecking();
+    ccdb->setCreatedNotAfter(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    LOGF(info, "Getting alignment offsets from the CCDB...");
+    hwgtAL = ccdb->getForTimeStamp<TH1D>(ConfWgtPathAL.value, cfgCcdbParam.nolaterthan.value);
+    if (useeffwgt) {
+      heffL = ccdb->getForTimeStamp<TH1D>(ConfEffWgtPathL.value, cfgCcdbParam.nolaterthan.value);
+      heffAL = ccdb->getForTimeStamp<TH1D>(ConfEffWgtPathAL.value, cfgCcdbParam.nolaterthan.value);
+    }
+    if (useResoRBR)
+      hwgtRESO = ccdb->getForTimeStamp<TH1D>(ConfResoPath.value, cfgCcdbParam.nolaterthan.value);
+
+    if (systGrp.doTopoSyst) {
+
+      topoSystCuts.clear();
+      topoSystCuts.reserve(systGrp.nTopoSyst.value);
+
+      TRandom3 systRnd(systGrp.topoSystSeed.value);
+
+      auto drawUniform = [&](float a, float b) -> float {
+        const float lo = std::min(a, b);
+        const float hi = std::max(a, b);
+
+        if (std::abs(hi - lo) < 1.e-12f) {
+          return lo;
+        }
+
+        return systRnd.Uniform(lo, hi);
+      };
+
+      for (int i = 0; i < systGrp.nTopoSyst.value; ++i) {
+
+        TopoSystCuts cuts;
+
+        cuts.lifeMax =
+          drawUniform(systGrp.systLifeCutMin.value,
+                      systGrp.systLifeCutMax.value);
+
+        cuts.cpaMin =
+          drawUniform(systGrp.systCPACutMin.value,
+                      systGrp.systCPACutMax.value);
+
+        cuts.dcaDaughtersMax =
+          drawUniform(systGrp.systDCADaughCutMin.value,
+                      systGrp.systDCADaughCutMax.value);
+
+        cuts.dcaPrMin =
+          drawUniform(systGrp.systDCAPrCutMin.value,
+                      systGrp.systDCAPrCutMax.value);
+
+        cuts.dcaPiMin =
+          drawUniform(systGrp.systDCAPiCutMin.value,
+                      systGrp.systDCAPiCutMax.value);
+
+        cuts.radiusMin =
+          drawUniform(systGrp.systRadiusCutMin.value,
+                      systGrp.systRadiusCutMax.value);
+
+        topoSystCuts.push_back(cuts);
+
+        LOGF(info,
+             "TopoSyst %d: lifeMax=%.4f, cpaMin=%.6f, dcaDaughtersMax=%.4f, "
+             "dcaPrMin=%.4f, dcaPiMin=%.4f, radiusMin=%.4f",
+             i, cuts.lifeMax, cuts.cpaMin, cuts.dcaDaughtersMax, cuts.dcaPrMin, cuts.dcaPiMin, cuts.radiusMin);
+      }
+
+      LOGF(info,
+           "Generated %d random topology systematic combinations with seed %d",
+           systGrp.nTopoSyst.value,
+           systGrp.topoSystSeed.value);
+    }
+
+    if (systGrp.doTopoSyst) {
+
+      histos.add("hSparseLambdaPolSyst",
+                 "hSparseLambdaPolSyst",
+                 HistType::kTHnSparseF,
+                 runaxesSyst,
+                 true);
+
+      histos.add("hSparseLambdaPolwgtSyst",
+                 "hSparseLambdaPolwgtSyst",
+                 HistType::kTHnSparseF,
+                 runaxesSyst,
+                 true);
+
+      histos.add("hSparseAntiLambdaPolSyst",
+                 "hSparseAntiLambdaPolSyst",
+                 HistType::kTHnSparseF,
+                 runaxesSyst,
+                 true);
+
+      histos.add("hSparseAntiLambdaPolwgtSyst",
+                 "hSparseAntiLambdaPolwgtSyst",
+                 HistType::kTHnSparseF,
+                 runaxesSyst,
+                 true);
     }
   }
 
@@ -337,7 +730,8 @@ struct lambdapolsp {
   }
 
   template <typename Collision, typename V0>
-  bool SelectionV0(Collision const& collision, V0 const& candidate)
+  // bool SelectionV0(Collision const& collision, V0 const& candidate)
+  bool SelectionV0(Collision const& collision, V0 const& candidate, bool applyTopoCuts = true)
   {
     if (TMath::Abs(candidate.dcav0topv()) > cMaxV0DCA) {
       return false;
@@ -348,48 +742,63 @@ struct lambdapolsp {
     const float cpav0 = candidate.v0cosPA();
 
     float CtauLambda = candidate.distovertotmom(collision.posX(), collision.posY(), collision.posZ()) * massLambda;
+    float CtauK0s = candidate.distovertotmom(collision.posX(), collision.posY(), collision.posZ()) * massK0s;
     // float lowmasscutlambda = cMinLambdaMass;
     // float highmasscutlambda = cMaxLambdaMass;
 
     if (pT < ConfV0PtMin) {
       return false;
     }
-    if (dcaDaughv0 > ConfV0DCADaughMax) {
-      return false;
+
+    if (applyTopoCuts) {
+      if (dcaDaughv0 > ConfV0DCADaughMax) {
+        return false;
+      }
+      if (cpav0 < ConfV0CPAMin) {
+        return false;
+      }
+      if (tranRad < ConfV0TranRadV0Min) {
+        return false;
+      }
+
+      if (analyzeLambda && TMath::Abs(CtauLambda) > cMaxV0LifeTime) {
+        return false;
+      }
     }
-    if (cpav0 < ConfV0CPAMin) {
-      return false;
-    }
-    if (tranRad < ConfV0TranRadV0Min) {
-      return false;
-    }
+
     if (tranRad > ConfV0TranRadV0Max) {
       return false;
     }
-    if (TMath::Abs(CtauLambda) > cMaxV0LifeTime) {
+
+    if (analyzeK0s && TMath::Abs(CtauK0s) > cMaxV0LifeTime) {
       return false;
     }
-    if (TMath::Abs(candidate.yLambda()) > ConfV0Rap) {
+    if (analyzeLambda && TMath::Abs(candidate.yLambda()) > ConfV0Rap) {
+      return false;
+    }
+    if (analyzeK0s && TMath::Abs(candidate.yK0Short()) > ConfV0Rap) {
       return false;
     }
     return true;
   }
+
   template <typename V0, typename T>
-  bool isSelectedV0Daughter(V0 const& candidate, T const& track, int pid)
+  bool isSelectedV0Daughter(V0 const& candidate, T const& track, int pid, int pid2)
   {
     // const auto eta = track.eta();
     // const auto pt = track.pt();
     const auto tpcNClsF = track.tpcNClsFound();
-    if (track.tpcNClsCrossedRows() < 70) {
+    if (track.tpcNClsCrossedRows() < cfgTPCcluster) {
       return false;
     }
     /*if (TMath::Abs(eta) > ConfDaughEta) {
       return false;
       }*/
+
     if (tpcNClsF < ConfDaughTPCnclsMin) {
       return false;
     }
-    if (track.tpcCrossedRowsOverFindableCls() < 0.8) {
+    if (track.tpcCrossedRowsOverFindableCls() < rcrfc) {
       return false;
     }
 
@@ -409,26 +818,19 @@ struct lambdapolsp {
       return false;
     }
 
-    if (pid == 0 && (TMath::Abs(candidate.dcapostopv()) < cMinV0DCAPr || TMath::Abs(candidate.dcanegtopv()) < cMinV0DCAPi)) {
+    if (pid2 == 0 && (TMath::Abs(candidate.dcapostopv()) < cMinV0DCAPr || TMath::Abs(candidate.dcanegtopv()) < cMinV0DCAPi)) {
       return false;
     }
-    if (pid == 1 && (TMath::Abs(candidate.dcapostopv()) < cMinV0DCAPi || TMath::Abs(candidate.dcanegtopv()) < cMinV0DCAPr)) {
+    if (pid2 == 1 && (TMath::Abs(candidate.dcapostopv()) < cMinV0DCAPi || TMath::Abs(candidate.dcanegtopv()) < cMinV0DCAPr)) {
       return false;
     }
-
-    /*
-    if (pid == 0 && pt < cfgDaughPrPt) {
-      return false;
-    }
-    if (pid == 1 && pt < cfgDaughPiPt) {
-      return false;
-      }*/
 
     return true;
   }
 
   template <typename TV0>
-  bool isCompatible(TV0 const& v0, int pid /*0: lambda, 1: antilambda*/)
+  // bool isCompatible(TV0 const& v0, int pid /*0: lambda, 1: antilambda*/)
+  bool isCompatible(TV0 const& v0, int pid /*0: lambda, 1: antilambda*/, bool applyDcaCuts = true)
   {
     // checks if this V0 is compatible with the requested hypothesis
 
@@ -448,13 +850,15 @@ struct lambdapolsp {
     }
 
     // check TPC tracking properties
-    if (posTrackExtra.tpcNClsCrossedRows() < 70 || negTrackExtra.tpcNClsCrossedRows() < 70) {
+
+    if (posTrackExtra.tpcNClsCrossedRows() < cfgTPCcluster || negTrackExtra.tpcNClsCrossedRows() < cfgTPCcluster) {
       return false;
     }
+
     if (posTrackExtra.tpcNClsFound() < ConfDaughTPCnclsMin || negTrackExtra.tpcNClsFound() < ConfDaughTPCnclsMin) {
       return false;
     }
-    if (posTrackExtra.tpcCrossedRowsOverFindableCls() < 0.8 || negTrackExtra.tpcCrossedRowsOverFindableCls() < 0.8) {
+    if (posTrackExtra.tpcCrossedRowsOverFindableCls() < rcrfc || negTrackExtra.tpcCrossedRowsOverFindableCls() < rcrfc) {
       return false;
     }
 
@@ -466,26 +870,140 @@ struct lambdapolsp {
       return false;
     }
 
-    if (pid == 0 && (TMath::Abs(v0.dcapostopv()) < cMinV0DCAPr || TMath::Abs(v0.dcanegtopv()) < cMinV0DCAPi)) {
-      return false;
+    if (applyDcaCuts) {
+
+      if (pid == 0 && (TMath::Abs(v0.dcapostopv()) < cMinV0DCAPr || TMath::Abs(v0.dcanegtopv()) < cMinV0DCAPi)) {
+        return false;
+      }
+      if (pid == 1 && (TMath::Abs(v0.dcapostopv()) < cMinV0DCAPi || TMath::Abs(v0.dcanegtopv()) < cMinV0DCAPr)) {
+        return false;
+      }
     }
-    if (pid == 1 && (TMath::Abs(v0.dcapostopv()) < cMinV0DCAPi || TMath::Abs(v0.dcanegtopv()) < cMinV0DCAPr)) {
+    // if we made it this far, it's good
+    return true;
+  }
+
+  template <typename Collision, typename TV0>
+  bool passesTopoSystematic(Collision const& collision,
+                            TV0 const& v0,
+                            int pid,
+                            const TopoSystCuts& cut)
+  {
+    const float dcaDaughters =
+      TMath::Abs(v0.dcaV0daughters());
+
+    const float cpa =
+      v0.v0cosPA();
+
+    const float radius =
+      v0.v0radius();
+
+    const float ctau =
+      TMath::Abs(
+        v0.distovertotmom(collision.posX(),
+                          collision.posY(),
+                          collision.posZ()) *
+        massLambda);
+
+    // randomized V0 topology cuts
+    if (dcaDaughters > cut.dcaDaughtersMax) {
       return false;
     }
 
+    if (cpa < cut.cpaMin) {
+      return false;
+    }
+
+    if (ctau > cut.lifeMax) {
+      return false;
+    }
+
+    if (radius < cut.radiusMin) {
+      return false;
+    }
+
+    // Lambda
+    if (pid == 0) {
+
+      if (TMath::Abs(v0.dcapostopv()) < cut.dcaPrMin) {
+        return false;
+      }
+
+      if (TMath::Abs(v0.dcanegtopv()) < cut.dcaPiMin) {
+        return false;
+      }
+    }
+
+    // AntiLambda
+    if (pid == 1) {
+
+      if (TMath::Abs(v0.dcanegtopv()) < cut.dcaPrMin) {
+        return false;
+      }
+
+      if (TMath::Abs(v0.dcapostopv()) < cut.dcaPiMin) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  template <typename TV0>
+  bool isCompatibleK0s(TV0 const& v0)
+  {
+    // checks if this V0 is compatible with the requested hypothesis
+
+    // de-ref track extras
+    auto posTrackExtra = v0.template posTrackExtra_as<dauTracks>();
+    auto negTrackExtra = v0.template negTrackExtra_as<dauTracks>();
+
+    // check for desired kinematics
+    if ((v0.positivept() < cfgDaughPrPt || v0.negativept() < cfgDaughPiPt)) {
+      return false; // doesn´t pass lambda pT sels
+    }
+    if (std::abs(v0.positiveeta()) > ConfDaughEta || std::abs(v0.negativeeta()) > ConfDaughEta) {
+      return false;
+    }
+    // check TPC tracking properties
+    if (posTrackExtra.tpcNClsCrossedRows() < cfgTPCcluster || negTrackExtra.tpcNClsCrossedRows() < cfgTPCcluster) {
+      return false;
+    }
+
+    if (posTrackExtra.tpcNClsFound() < ConfDaughTPCnclsMin || negTrackExtra.tpcNClsFound() < ConfDaughTPCnclsMin) {
+      return false;
+    }
+    if (posTrackExtra.tpcCrossedRowsOverFindableCls() < rcrfc || negTrackExtra.tpcCrossedRowsOverFindableCls() < rcrfc) {
+      return false;
+    }
+
+    // check TPC PID
+    if (((std::abs(posTrackExtra.tpcNSigmaPi()) > ConfDaughPIDCuts) || (std::abs(negTrackExtra.tpcNSigmaPi()) > ConfDaughPIDCuts))) {
+      return false;
+    }
+    if ((TMath::Abs(v0.dcapostopv()) < cMinV0DCAPi || TMath::Abs(v0.dcanegtopv()) < cMinV0DCAPi)) {
+      return false;
+    }
+    if ((v0.qtarm() / (std::abs(v0.alpha()))) < qtArmenterosMinForK0) {
+      return false;
+    }
     // if we made it this far, it's good
     return true;
   }
 
   double GetPhiInRange(double phi)
   {
-    double result = phi;
-    while (result < 0) {
-      result = result + 2. * TMath::Pi();
-    }
-    while (result > 2. * TMath::Pi()) {
-      result = result - 2. * TMath::Pi();
-    }
+    double result = RecoDecay::constrainAngle(phi);
+    /*
+      double result = phi;
+      while (result < 0) {
+      // result = result + 2. * TMath::Pi();
+      result = result + 2. * o2::constants::math::PI;
+      }
+      while (result > 2. * TMath::Pi()) {
+      // result = result - 2. * TMath::Pi();
+      result = result - 2. * o2::constants::math::PI;
+      }*/
     return result;
   }
 
@@ -500,15 +1018,28 @@ struct lambdapolsp {
             (AntiLambdadummy.M() > minMass && AntiLambdadummy.M() < maxMass));
   }
 
+  double modqxZDCA;
+  double modqyZDCA;
+  double modqxZDCC;
+  double modqyZDCC;
+
   void fillHistograms(bool tag1, bool tag2, const ROOT::Math::PxPyPzMVector& particle,
                       const ROOT::Math::PxPyPzMVector& daughter,
                       double psiZDCC, double psiZDCA, double psiZDC, double centrality,
-                      double candmass, double candpt, double candeta)
+                      double candmass, double candpt, float desbinvalue, double acvalue, double wgtfactor, double resowgt, const std::vector<int>* systIDs = nullptr, int systSpecies = 0)
   {
+    TRandom3 randPhi(0);
 
     ROOT::Math::Boost boost{particle.BoostToCM()};
     auto fourVecDauCM = boost(daughter);
     auto phiangle = TMath::ATan2(fourVecDauCM.Py(), fourVecDauCM.Px());
+    if (randGrp.doRandomPhi) {
+      phiangle = randPhi.Uniform(0, 2 * TMath::Pi());
+    }
+
+    auto ux = TMath::Cos(phiangle);
+    auto uy = TMath::Sin(phiangle);
+
     auto phiminuspsiC = GetPhiInRange(phiangle - psiZDCC);
     auto phiminuspsiA = GetPhiInRange(phiangle - psiZDCA);
     auto phiminuspsi = GetPhiInRange(phiangle - psiZDC);
@@ -517,83 +1048,258 @@ struct lambdapolsp {
     auto PolC = TMath::Sin(phiminuspsiC);
     auto PolA = TMath::Sin(phiminuspsiA);
     auto Pol = TMath::Sin(phiminuspsi);
-
     auto sinPhiStar = TMath::Sin(GetPhiInRange(phiangle));
     auto cosPhiStar = TMath::Cos(GetPhiInRange(phiangle));
-    auto sinThetaStarcosphiphiStar = sinThetaStar * TMath::Cos(2 * GetPhiInRange(particle.Phi() - phiangle));
-    auto phiphiStar = GetPhiInRange(particle.Phi() - phiangle);
+    // auto sinThetaStarcosphiphiStar = sinThetaStar * TMath::Cos(2 * GetPhiInRange(particle.Phi() - phiangle));
+    // auto phiphiStar = GetPhiInRange(particle.Phi() - phiangle);
+
+    acvalue = (4 / 3.14) * acvalue;
+    if (useResoRBR) {
+      Pol = Pol / resowgt;
+      PolA = PolA / resowgt;
+      PolC = PolC / resowgt;
+    }
+    // PolC = PolC / acvalue;
+    // PolA = PolA / acvalue;
+    // Pol = Pol / acvalue;
+    auto Polwgt = Pol / acvalue;
+    auto PolAwgt = PolA / acvalue;
+    auto PolCwgt = PolC / acvalue;
+
+    // for SP calculation
+    const double qx = (modqxZDCC - modqxZDCA);
+    const double qy = (modqyZDCC - modqyZDCA);
+    const double qmag = std::sqrt(qx * qx + qy * qy);
+    auto PolSP = uy * (modqxZDCC - modqxZDCA) - ux * (modqyZDCC - modqyZDCA);
+    if (normbymag && qmag > 0.0)
+      PolSP = PolSP / qmag;
+    // SP numerators with A and C separately (use Q components)
+    auto PolSP_A = uy * modqxZDCA - ux * modqyZDCA; // u_y QxA - u_x QyA
+    auto PolSP_C = uy * modqxZDCC - ux * modqyZDCC; // u_y QxC - u_x QyC
+
+    if (randGrp.useSP) {
+      Pol = PolSP;
+      PolA = PolSP_A;
+      PolC = PolSP_C;
+      Polwgt = PolSP / acvalue;
+      PolAwgt = PolSP_A / acvalue;
+      PolCwgt = PolSP_C / acvalue;
+    }
+    //////////////////////////////
 
     // Fill histograms using constructed names
     if (tag2) {
-      histos.fill(HIST("hSparseAntiLambdaCosPsiA"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality);
-      histos.fill(HIST("hSparseAntiLambdaCosPsiC"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality);
-      histos.fill(HIST("hSparseAntiLambdaSinPsiA"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality);
-      histos.fill(HIST("hSparseAntiLambdaSinPsiC"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality);
-      histos.fill(HIST("hSparseAntiLambdaCosPsi"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDC))), centrality);
-      histos.fill(HIST("hSparseAntiLambdaSinPsi"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDC))), centrality);
-
-      histos.fill(HIST("hSparseAntiLambdaPolA"), candmass, candpt, candeta, PolA, centrality);
-      histos.fill(HIST("hSparseAntiLambdaPolC"), candmass, candpt, candeta, PolC, centrality);
-      histos.fill(HIST("hSparseAntiLambdaPol"), candmass, candpt, candeta, Pol, centrality);
-      histos.fill(HIST("hSparseAntiLambda_corr1a"), candmass, candpt, candeta, sinPhiStar, centrality);
-      histos.fill(HIST("hSparseAntiLambda_corr1b"), candmass, candpt, candeta, cosPhiStar, centrality);
-      histos.fill(HIST("hSparseAntiLambda_corr1c"), candmass, candpt, candeta, phiphiStar, centrality);
-      histos.fill(HIST("hSparseAntiLambda_corr2a"), candmass, candpt, candeta, sinThetaStar, centrality);
-      histos.fill(HIST("hSparseAntiLambda_corr2b"), candmass, candpt, candeta, sinThetaStarcosphiphiStar, centrality);
+      if (needetaaxis) {
+        if (usesubdet) {
+          histos.fill(HIST("hSparseAntiLambdaCosPsiA"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaCosPsiC"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaSinPsiA"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaSinPsiC"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality, desbinvalue, wgtfactor);
+        }
+        histos.fill(HIST("hSparseAntiLambdaCosPsi"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDC))), centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambdaSinPsi"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDC))), centrality, desbinvalue, wgtfactor);
+        if (usesubdet) {
+          histos.fill(HIST("hSparseAntiLambdaPolA"), candmass, candpt, PolA, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolC"), candmass, candpt, PolC, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolAwgt"), candmass, candpt, PolAwgt, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolCwgt"), candmass, candpt, PolCwgt, centrality, desbinvalue, wgtfactor);
+        }
+        histos.fill(HIST("hSparseAntiLambdaPol"), candmass, candpt, Pol, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambdaPolwgt"), candmass, candpt, Polwgt, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr1a"), candmass, candpt, sinPhiStar, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr1b"), candmass, candpt, cosPhiStar, centrality, desbinvalue, wgtfactor);
+        // histos.fill(HIST("hSparseAntiLambda_corr1c"), candmass, candpt, phiphiStar, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr2a"), candmass, candpt, sinThetaStar, centrality, desbinvalue, wgtfactor);
+        // histos.fill(HIST("hSparseAntiLambda_corr2b"), candmass, candpt, sinThetaStarcosphiphiStar, centrality, desbinvalue, wgtfactor);
+        if (randGrp.useSP) {
+          histos.fill(HIST("hSparseAntiLambda_avgux"), candmass, candpt, ux, centrality);
+          histos.fill(HIST("hSparseAntiLambda_avguy"), candmass, candpt, uy, centrality);
+        }
+      } else {
+        if (usesubdet) {
+          histos.fill(HIST("hSparseAntiLambdaCosPsiA"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaCosPsiC"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaSinPsiA"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaSinPsiC"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality, wgtfactor);
+        }
+        histos.fill(HIST("hSparseAntiLambdaCosPsi"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDC))), centrality, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambdaSinPsi"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDC))), centrality, wgtfactor);
+        if (usesubdet) {
+          histos.fill(HIST("hSparseAntiLambdaPolA"), candmass, candpt, PolA, centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolC"), candmass, candpt, PolC, centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolAwgt"), candmass, candpt, PolAwgt, centrality, wgtfactor);
+          histos.fill(HIST("hSparseAntiLambdaPolCwgt"), candmass, candpt, PolCwgt, centrality, wgtfactor);
+        }
+        histos.fill(HIST("hSparseAntiLambdaPol"), candmass, candpt, Pol, centrality, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambdaPolwgt"), candmass, candpt, Polwgt, centrality, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr1a"), candmass, candpt, sinPhiStar, centrality, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr1b"), candmass, candpt, cosPhiStar, centrality, wgtfactor);
+        // histos.fill(HIST("hSparseAntiLambda_corr1c"), candmass, candpt, phiphiStar, centrality, wgtfactor);
+        histos.fill(HIST("hSparseAntiLambda_corr2a"), candmass, candpt, sinThetaStar, centrality, wgtfactor);
+        // histos.fill(HIST("hSparseAntiLambda_corr2b"), candmass, candpt, sinThetaStarcosphiphiStar, centrality, wgtfactor);
+        if (randGrp.useSP) {
+          histos.fill(HIST("hSparseAntiLambda_avgux"), candmass, candpt, ux, centrality);
+          histos.fill(HIST("hSparseAntiLambda_avguy"), candmass, candpt, uy, centrality);
+        }
+      }
     }
     if (tag1) {
-      histos.fill(HIST("hSparseLambdaCosPsiA"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality);
-      histos.fill(HIST("hSparseLambdaCosPsiC"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality);
-      histos.fill(HIST("hSparseLambdaSinPsiA"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality);
-      histos.fill(HIST("hSparseLambdaSinPsiC"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality);
-      histos.fill(HIST("hSparseLambdaCosPsi"), candmass, candpt, candeta, (TMath::Cos(GetPhiInRange(psiZDC))), centrality);
-      histos.fill(HIST("hSparseLambdaSinPsi"), candmass, candpt, candeta, (TMath::Sin(GetPhiInRange(psiZDC))), centrality);
+      if (needetaaxis) {
+        if (usesubdet) {
+          histos.fill(HIST("hSparseLambdaCosPsiA"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaCosPsiC"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaSinPsiA"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaSinPsiC"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality, desbinvalue, wgtfactor);
+        }
+        histos.fill(HIST("hSparseLambdaCosPsi"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDC))), centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseLambdaSinPsi"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDC))), centrality, desbinvalue, wgtfactor);
+        if (usesubdet) {
+          histos.fill(HIST("hSparseLambdaPolA"), candmass, candpt, PolA, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolC"), candmass, candpt, PolC, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolAwgt"), candmass, candpt, PolAwgt, centrality, desbinvalue, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolCwgt"), candmass, candpt, PolCwgt, centrality, desbinvalue, wgtfactor);
+        }
+        histos.fill(HIST("hSparseLambdaPol"), candmass, candpt, Pol, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseLambdaPolwgt"), candmass, candpt, Polwgt, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr1a"), candmass, candpt, sinPhiStar, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr1b"), candmass, candpt, cosPhiStar, centrality, desbinvalue, wgtfactor);
+        // histos.fill(HIST("hSparseLambda_corr1c"), candmass, candpt, phiphiStar, centrality, desbinvalue, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr2a"), candmass, candpt, sinThetaStar, centrality, desbinvalue, wgtfactor);
+        // histos.fill(HIST("hSparseLambda_corr2b"), candmass, candpt, sinThetaStarcosphiphiStar, centrality, desbinvalue, wgtfactor);
+        if (randGrp.useSP) {
+          histos.fill(HIST("hSparseLambda_avgux"), candmass, candpt, ux, centrality);
+          histos.fill(HIST("hSparseLambda_avguy"), candmass, candpt, uy, centrality);
+        }
+      } else {
+        if (usesubdet) {
+          histos.fill(HIST("hSparseLambdaCosPsiA"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCA))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaCosPsiC"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDCC))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaSinPsiA"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCA))), centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaSinPsiC"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDCC))), centrality, wgtfactor);
+        }
+        histos.fill(HIST("hSparseLambdaCosPsi"), candmass, candpt, (TMath::Cos(GetPhiInRange(psiZDC))), centrality, wgtfactor);
+        histos.fill(HIST("hSparseLambdaSinPsi"), candmass, candpt, (TMath::Sin(GetPhiInRange(psiZDC))), centrality, wgtfactor);
+        if (usesubdet) {
+          histos.fill(HIST("hSparseLambdaPolA"), candmass, candpt, PolA, centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolC"), candmass, candpt, PolC, centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolAwgt"), candmass, candpt, PolAwgt, centrality, wgtfactor);
+          histos.fill(HIST("hSparseLambdaPolCwgt"), candmass, candpt, PolCwgt, centrality, wgtfactor);
+        }
+        histos.fill(HIST("hSparseLambdaPol"), candmass, candpt, Pol, centrality, wgtfactor);
+        histos.fill(HIST("hSparseLambdaPolwgt"), candmass, candpt, Polwgt, centrality, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr1a"), candmass, candpt, sinPhiStar, centrality, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr1b"), candmass, candpt, cosPhiStar, centrality, wgtfactor);
+        // histos.fill(HIST("hSparseLambda_corr1c"), candmass, candpt, phiphiStar, centrality, wgtfactor);
+        histos.fill(HIST("hSparseLambda_corr2a"), candmass, candpt, sinThetaStar, centrality, wgtfactor);
+        // histos.fill(HIST("hSparseLambda_corr2b"), candmass, candpt, sinThetaStarcosphiphiStar, centrality, wgtfactor);
+        if (randGrp.useSP) {
+          histos.fill(HIST("hSparseLambda_avgux"), candmass, candpt, ux, centrality);
+          histos.fill(HIST("hSparseLambda_avguy"), candmass, candpt, uy, centrality);
+        }
+      }
+    }
 
-      histos.fill(HIST("hSparseLambdaPolA"), candmass, candpt, candeta, PolA, centrality);
-      histos.fill(HIST("hSparseLambdaPolC"), candmass, candpt, candeta, PolC, centrality);
-      histos.fill(HIST("hSparseLambdaPol"), candmass, candpt, candeta, Pol, centrality);
-      histos.fill(HIST("hSparseLambda_corr1a"), candmass, candpt, candeta, sinPhiStar, centrality);
-      histos.fill(HIST("hSparseLambda_corr1b"), candmass, candpt, candeta, cosPhiStar, centrality);
-      histos.fill(HIST("hSparseLambda_corr1c"), candmass, candpt, candeta, phiphiStar, centrality);
-      histos.fill(HIST("hSparseLambda_corr2a"), candmass, candpt, candeta, sinThetaStar, centrality);
-      histos.fill(HIST("hSparseLambda_corr2b"), candmass, candpt, candeta, sinThetaStarcosphiphiStar, centrality);
+    if (systGrp.doTopoSyst &&
+        systIDs != nullptr &&
+        !systIDs->empty()) {
+
+      for (const auto isyst : *systIDs) {
+
+        // Lambda
+        if (systSpecies == 1) {
+
+          if (needetaaxis) {
+
+            histos.fill(HIST("hSparseLambdaPolSyst"),
+                        candmass,
+                        candpt,
+                        Pol,
+                        centrality,
+                        desbinvalue,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+            histos.fill(HIST("hSparseLambdaPolwgtSyst"),
+                        candmass,
+                        candpt,
+                        Polwgt,
+                        centrality,
+                        desbinvalue,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+          } else {
+
+            histos.fill(HIST("hSparseLambdaPolSyst"),
+                        candmass,
+                        candpt,
+                        Pol,
+                        centrality,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+            histos.fill(HIST("hSparseLambdaPolwgtSyst"),
+                        candmass,
+                        candpt,
+                        Polwgt,
+                        centrality,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+          }
+        }
+
+        // AntiLambda
+        if (systSpecies == 2) {
+
+          if (needetaaxis) {
+
+            histos.fill(HIST("hSparseAntiLambdaPolSyst"),
+                        candmass,
+                        candpt,
+                        Pol,
+                        centrality,
+                        desbinvalue,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+            histos.fill(HIST("hSparseAntiLambdaPolwgtSyst"),
+                        candmass,
+                        candpt,
+                        Polwgt,
+                        centrality,
+                        desbinvalue,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+          } else {
+
+            histos.fill(HIST("hSparseAntiLambdaPolSyst"),
+                        candmass,
+                        candpt,
+                        Pol,
+                        centrality,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+
+            histos.fill(HIST("hSparseAntiLambdaPolwgtSyst"),
+                        candmass,
+                        candpt,
+                        Polwgt,
+                        centrality,
+                        static_cast<double>(isyst),
+                        wgtfactor);
+          }
+        }
+      }
     }
   }
 
-  /*
-  double calculateAngleBetweenLorentzVectors(const ROOT::Math::PxPyPzMVector& vec1,
-               const ROOT::Math::PxPyPzMVector& vec2) {
-    // Extract spatial momenta (3D vectors)
-    ROOT::Math::XYZVector momentum1 = vec1.Vect();
-    ROOT::Math::XYZVector momentum2 = vec2.Vect();
-
-    // Calculate the dot product
-    double dotProduct = momentum1.Dot(momentum2);
-
-    // Calculate the magnitudes
-    double magnitude1 = std::sqrt(momentum1.Mag2());
-    double magnitude2 = std::sqrt(momentum2.Mag2());
-
-    // Check for zero magnitudes to avoid division by zero
-    if (magnitude1 == 0 || magnitude2 == 0) {
-      std::cerr << "Error: One of the vectors has zero magnitude!" << std::endl;
-      return -999.0; // Return an invalid value
-    }
-
-    // Compute cosine of the angle
-    double cosTheta = dotProduct / (magnitude1 * magnitude2);
-
-    // Calculate and return the angle in radians
-    return cosTheta;
-  }
-  */
-
-  ROOT::Math::PxPyPzMVector Lambda, AntiLambda, Lambdadummy, AntiLambdadummy, Proton, Pion, AntiProton, AntiPion, fourVecDauCM;
-  ROOT::Math::XYZVector threeVecDauCM, threeVecDauCMXY;
-  double phiangle = 0.0;
-  // double angleLambda=0.0;
-  // double angleAntiLambda=0.0;
+  ROOT::Math::PxPyPzMVector Lambda, AntiLambda, Lambdadummy, AntiLambdadummy, Proton, Pion, AntiProton, AntiPion, fourVecDauCM, K0sdummy, K0s;
+  // double phiangle = 0.0;
+  //  double angleLambda=0.0;
+  //  double angleAntiLambda=0.0;
   double massLambda = o2::constants::physics::MassLambda;
+  double massK0s = o2::constants::physics::MassK0Short;
   double massPr = o2::constants::physics::MassProton;
   double massPi = o2::constants::physics::MassPionCharged;
 
@@ -603,41 +1309,63 @@ struct lambdapolsp {
   Filter dcaCutFilter = (nabs(aod::track::dcaXY) < cfgCutDCAxy) && (nabs(aod::track::dcaZ) < cfgCutDCAz);
 
   using EventCandidates = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::FT0Mults, aod::FV0Mults, aod::TPCMults, aod::CentFV0As, aod::CentFT0Ms, aod::CentFT0Cs, aod::CentFT0As, aod::SPCalibrationTables, aod::Mults>>;
-  // using AllTrackCandidates = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection, aod::pidTPCFullPi, aod::pidTPCFullPr>;
-  // using AllTrackCandidates = soa::Filtered<soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection, aod::pidTPCFullPi, aod::pidTPCFullPr, aod::pidTPCFullKa, aod::pidTOFFullPi, aod::pidTOFFullPr>>;
+  using EventCandidatesMC = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs>>;
   using AllTrackCandidates = soa::Filtered<soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection, aod::pidTPCFullPi, aod::pidTPCFullPr, aod::pidTPCFullKa>>;
   using ResoV0s = aod::V0Datas;
 
-  // void processData(EventCandidates::iterator const& collision, AllTrackCandidates const&, ResoV0s const& V0s, aod::BCs const&)
-  void processData(EventCandidates::iterator const& collision, AllTrackCandidates const& tracks, ResoV0s const& V0s, aod::BCs const&)
+  TProfile2D* accprofileL;
+  TProfile2D* accprofileAL;
+  int currentRunNumber = -999;
+  int lastRunNumber = -999;
+  THnSparseF* hNUAWeights = nullptr;
+
+  using BCsRun3 = soa::Join<aod::BCsWithTimestamps, aod::Run3MatchedToBCSparse>;
+
+  void processData(EventCandidates::iterator const& collision, AllTrackCandidates const& tracks, ResoV0s const& V0s, BCsRun3 const&)
   {
 
     if (!collision.sel8()) {
       return;
     }
-    auto centrality = collision.centFT0C();
+    double centrality = -999.;
+    if (centestim == 0)
+      centrality = collision.centFT0C();
+    else if (centestim == 1)
+      centrality = collision.centFT0M();
+    else if (centestim == 2)
+      centrality = collision.centFT0A();
+    else if (centestim == 3)
+      centrality = collision.centFV0A();
+
     // histos.fill(HIST("hCentrality0"), centrality);
     if (!collision.triggereventsp()) {
       return;
     }
     // histos.fill(HIST("hCentrality1"), centrality);
 
-    if (additionalEvSel && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+    if (evselGrp.additionalEvSel && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
       return;
     }
     // histos.fill(HIST("hCentrality2"), centrality);
-    //  if (additionalEvSel2 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
-    if (additionalEvSel2 && (collision.trackOccupancyInTimeRange() > cfgMaxOccupancy || collision.trackOccupancyInTimeRange() < cfgMinOccupancy)) {
+    // if (evselGrp.additionalEvSel2 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
+    if (evselGrp.additionalEvSel2 && (collision.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
       return;
     }
     // histos.fill(HIST("hCentrality3"), centrality);
-    if (additionalEvSel3 && (!collision.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+    if (evselGrp.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
       return;
     }
 
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+    if (rctCut.requireRCTFlagChecker && !rctChecker(collision)) {
       return;
     }
+
+    auto bc = collision.foundBC_as<BCsRun3>();
+    currentRunNumber = collision.foundBC_as<BCsRun3>().runNumber();
+
+    auto vz = collision.vz();
+    auto vx = collision.vx();
+    auto vy = collision.vy();
 
     auto qxZDCA = collision.qxZDCA();
     auto qxZDCC = collision.qxZDCC();
@@ -645,12 +1373,10 @@ struct lambdapolsp {
     auto qyZDCC = collision.qyZDCC();
     auto psiZDCC = collision.psiZDCC();
     auto psiZDCA = collision.psiZDCA();
-
-    double modqxZDCA;
-    double modqyZDCA;
-    double modqxZDCC;
-    double modqyZDCC;
-
+    if (usepsisubbeforeshift) {
+      psiZDCC = 1.0 * std::atan2(qyZDCC, qxZDCC);
+      psiZDCA = 1.0 * std::atan2(qyZDCA, qxZDCA);
+    }
     if (cqvas) {
       modqxZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Cos(psiZDCA);
       modqyZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Sin(psiZDCA);
@@ -663,24 +1389,59 @@ struct lambdapolsp {
       modqyZDCC = qyZDCC;
     }
 
-    auto psiZDC = TMath::ATan2((modqyZDCC - modqyZDCA), (modqxZDCC - modqxZDCA)); // full event plane
-    if (useonlypsis) {
+    auto psiZDC = TMath::ATan2((modqyZDCC - modqyZDCA), (modqxZDCC - modqxZDCA)); // full event plane*/
+
+    /*if (useonlypsis) {
       psiZDC = psiZDCC - psiZDCA;
+      }*/
+
+    if (QAgrp.isQA) {
+      histos.fill(HIST("hCentQxZDCA"), centrality, modqxZDCA);
+      histos.fill(HIST("hCentQyZDCA"), centrality, modqyZDCA);
+      histos.fill(HIST("hCentQxZDCC"), centrality, modqxZDCC);
+      histos.fill(HIST("hCentQyZDCC"), centrality, modqyZDCC);
+
+      histos.fill(HIST("hvxQxZDCA"), vx, modqxZDCA);
+      histos.fill(HIST("hvxQyZDCA"), vx, modqyZDCA);
+      histos.fill(HIST("hvxQxZDCC"), vx, modqxZDCC);
+      histos.fill(HIST("hvxQyZDCC"), vx, modqyZDCC);
+
+      histos.fill(HIST("hvyQxZDCA"), vy, modqxZDCA);
+      histos.fill(HIST("hvyQyZDCA"), vy, modqyZDCA);
+      histos.fill(HIST("hvyQxZDCC"), vy, modqxZDCC);
+      histos.fill(HIST("hvyQyZDCC"), vy, modqyZDCC);
+
+      histos.fill(HIST("hvzQxZDCA"), vz, modqxZDCA);
+      histos.fill(HIST("hvzQyZDCA"), vz, modqyZDCA);
+      histos.fill(HIST("hvzQxZDCC"), vz, modqxZDCC);
+      histos.fill(HIST("hvzQyZDCC"), vz, modqyZDCC);
+
+      histos.fill(HIST("PsiZDCA"), centrality, psiZDCA);
+      histos.fill(HIST("PsiZDCC"), centrality, psiZDCC);
+      histos.fill(HIST("PsiZDC"), centrality, psiZDC);
     }
 
     histos.fill(HIST("hCentrality"), centrality);
     if (!checkwithpub) {
       // histos.fill(HIST("hVtxZ"), collision.posZ());
-      histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
-      histos.fill(HIST("hpResSin"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA - psiZDCC))));
-      /*histos.fill(HIST("hpCosPsiA"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA))));
-      histos.fill(HIST("hpCosPsiC"), centrality, (TMath::Cos(GetPhiInRange(psiZDCC))));
-      histos.fill(HIST("hpSinPsiA"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA))));
-      histos.fill(HIST("hpSinPsiC"), centrality, (TMath::Sin(GetPhiInRange(psiZDCC))));*/
-      /*histos.fill(HIST("hcentQxZDCA"), centrality, qxZDCA);
-        histos.fill(HIST("hcentQyZDCA"), centrality, qyZDCA);
-        histos.fill(HIST("hcentQxZDCC"), centrality, qxZDCC);
-        histos.fill(HIST("hcentQyZDCC"), centrality, qyZDCC);*/
+      if (randGrp.useSP) {
+        histos.fill(HIST("hpRes"), centrality, ((modqxZDCA * modqxZDCC) + (modqyZDCA * modqyZDCC)));
+        histos.fill(HIST("hcentQxZDCA"), centrality, modqxZDCA);
+        histos.fill(HIST("hcentQyZDCA"), centrality, modqyZDCA);
+        histos.fill(HIST("hcentQxZDCC"), centrality, modqxZDCC);
+        histos.fill(HIST("hcentQyZDCC"), centrality, modqyZDCC);
+      } else {
+        histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
+      }
+    }
+
+    double resowgt = 1.0;
+
+    if (useResoRBR) {
+      int binxreso = hwgtRESO->GetXaxis()->FindBin(centrality + 0.000001);
+      resowgt = hwgtRESO->GetBinContent(binxreso);
+    } else {
+      resowgt = 1.0;
     }
 
     ///////////checking v1////////////////////////////////
@@ -703,7 +1464,7 @@ struct lambdapolsp {
       histos.fill(HIST("hpQypvscent"), centrality, modqyZDCA);
       histos.fill(HIST("hpQytvscent"), centrality, modqyZDCC);
 
-      for (auto track : tracks) {
+      for (const auto& track : tracks) {
         if (!selectionTrack(track)) {
           continue;
         }
@@ -716,6 +1477,32 @@ struct lambdapolsp {
         auto uy = TMath::Sin(GetPhiInRange(track.phi()));
         // auto py=track.py();
 
+        if (QAgrp.fillNUA) {
+          histos.fill(HIST("hNUA"), centrality, collision.posZ(), track.eta(), track.sign(), GetPhiInRange(track.phi()));
+        }
+
+        float wNUA = 1.f;
+        if (QAgrp.useNUA && (currentRunNumber != lastRunNumber)) {
+          hNUAWeights = ccdb->getForTimeStamp<THnSparseF>(QAgrp.ConfNUA.value, bc.timestamp());
+        }
+
+        if (QAgrp.useNUA) {
+          constexpr int kCent = 0;
+          constexpr int kVz = 1;
+          constexpr int kEta = 2;
+          constexpr int kSign = 3;
+          constexpr int kPhi = 4;
+
+          Int_t nuaBins[5] = {
+            hNUAWeights->GetAxis(kCent)->FindFixBin(centrality + 0.00001),
+            hNUAWeights->GetAxis(kVz)->FindFixBin(collision.posZ() + 0.00001),
+            hNUAWeights->GetAxis(kEta)->FindFixBin(track.eta() + 0.00001),
+            hNUAWeights->GetAxis(kSign)->FindFixBin(track.sign()),
+            hNUAWeights->GetAxis(kPhi)->FindFixBin(GetPhiInRange(track.phi()))};
+
+          wNUA = hNUAWeights->GetBinContent(nuaBins);
+        }
+
         auto uxQxp = ux * modqxZDCA;
         auto uyQyp = uy * modqyZDCA;
         auto uxyQxyp = uxQxp + uyQyp;
@@ -724,7 +1511,7 @@ struct lambdapolsp {
         auto uxyQxyt = uxQxt + uyQyt;
         auto oddv1 = ux * (modqxZDCA - modqxZDCC) + uy * (modqyZDCA - modqyZDCC);
         auto evenv1 = ux * (modqxZDCA + modqxZDCC) + uy * (modqyZDCA + modqyZDCC);
-        auto v21 = TMath::Cos(2 * (GetPhiInRange(track.phi()) - psiZDCA - psiZDCC));
+        /*auto v21 = TMath::Cos(2 * (GetPhiInRange(track.phi()) - psiZDCA - psiZDCC));
         auto v22 = TMath::Cos(2 * (GetPhiInRange(track.phi()) + psiZDCA - psiZDCC));
         auto v23 = TMath::Cos(2 * (GetPhiInRange(track.phi()) - psiZDC));
 
@@ -751,81 +1538,111 @@ struct lambdapolsp {
         auto y2Tx1A = TMath::Sin(2 * GetPhiInRange(track.phi())) * modqxZDCA;
         auto y2Tx1C = TMath::Sin(2 * GetPhiInRange(track.phi())) * modqxZDCC;
         auto y2Ty1A = TMath::Sin(2 * GetPhiInRange(track.phi())) * modqyZDCA;
-        auto y2Ty1C = TMath::Sin(2 * GetPhiInRange(track.phi())) * modqyZDCC;
+        auto y2Ty1C = TMath::Sin(2 * GetPhiInRange(track.phi())) * modqyZDCC;*/
 
         if (globalpt) {
           // if (sign > 0) {
-          histos.fill(HIST("hpuxQxpvscentpteta"), centrality, track.pt(), track.eta(), uxQxp);
-          histos.fill(HIST("hpuyQypvscentpteta"), centrality, track.pt(), track.eta(), uyQyp);
-          histos.fill(HIST("hpuxQxtvscentpteta"), centrality, track.pt(), track.eta(), uxQxt);
-          histos.fill(HIST("hpuyQytvscentpteta"), centrality, track.pt(), track.eta(), uyQyt);
+          histos.fill(HIST("hpuxQxpvscentpteta"), centrality, track.pt(), track.eta(), uxQxp, wNUA);
+          histos.fill(HIST("hpuyQypvscentpteta"), centrality, track.pt(), track.eta(), uyQyp, wNUA);
+          histos.fill(HIST("hpuxQxtvscentpteta"), centrality, track.pt(), track.eta(), uxQxt, wNUA);
+          histos.fill(HIST("hpuyQytvscentpteta"), centrality, track.pt(), track.eta(), uyQyt, wNUA);
 
-          histos.fill(HIST("hpuxvscentpteta"), centrality, track.pt(), track.eta(), ux);
-          histos.fill(HIST("hpuyvscentpteta"), centrality, track.pt(), track.eta(), uy);
+          histos.fill(HIST("hpuxvscentpteta"), centrality, track.pt(), track.eta(), ux, wNUA);
+          histos.fill(HIST("hpuyvscentpteta"), centrality, track.pt(), track.eta(), uy, wNUA);
 
-          histos.fill(HIST("hpuxyQxytvscentpteta"), centrality, track.pt(), track.eta(), uxyQxyt);
-          histos.fill(HIST("hpuxyQxypvscentpteta"), centrality, track.pt(), track.eta(), uxyQxyp);
-          histos.fill(HIST("hpoddv1vscentpteta"), centrality, track.pt(), track.eta(), oddv1);
-          histos.fill(HIST("hpevenv1vscentpteta"), centrality, track.pt(), track.eta(), evenv1);
+          histos.fill(HIST("hpuxyQxytvscentpteta"), centrality, track.pt(), track.eta(), uxyQxyt, wNUA);
+          histos.fill(HIST("hpuxyQxypvscentpteta"), centrality, track.pt(), track.eta(), uxyQxyp, wNUA);
+          histos.fill(HIST("hpoddv1vscentpteta"), centrality, track.pt(), track.eta(), oddv1, wNUA);
+          histos.fill(HIST("hpevenv1vscentpteta"), centrality, track.pt(), track.eta(), evenv1, wNUA);
 
-          histos.fill(HIST("hpv21"), centrality, track.pt(), track.eta(), v21);
-          histos.fill(HIST("hpv22"), centrality, track.pt(), track.eta(), v22);
-          histos.fill(HIST("hpv23"), centrality, track.pt(), track.eta(), v23);
+          histos.fill(HIST("hpQxtQxpvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxtQxp, wNUA);
 
-          histos.fill(HIST("hpx2Tx1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Tx1Ax1C);
-          histos.fill(HIST("hpx2Ty1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Ty1Ay1C);
-          histos.fill(HIST("hpy2Tx1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Tx1Ay1C);
-          histos.fill(HIST("hpy2Ty1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Ty1Ax1C);
-          histos.fill(HIST("hpx2Tvscentpteta"), centrality, track.pt(), track.eta(), x2T);
-          histos.fill(HIST("hpy2Tvscentpteta"), centrality, track.pt(), track.eta(), y2T);
-          histos.fill(HIST("hpx2Tx1Avscentpteta"), centrality, track.pt(), track.eta(), x2Tx1A);
-          histos.fill(HIST("hpx2Tx1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Tx1C);
-          histos.fill(HIST("hpx2Ty1Avscentpteta"), centrality, track.pt(), track.eta(), x2Ty1A);
-          histos.fill(HIST("hpx2Ty1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Ty1C);
-          histos.fill(HIST("hpy2Tx1Avscentpteta"), centrality, track.pt(), track.eta(), y2Tx1A);
-          histos.fill(HIST("hpy2Ty1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Ty1C);
-          histos.fill(HIST("hpy2Ty1Avscentpteta"), centrality, track.pt(), track.eta(), y2Ty1A);
-          histos.fill(HIST("hpy2Tx1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Tx1C);
-          histos.fill(HIST("hpx1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Ax1C);
-          histos.fill(HIST("hpy1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), y1Ay1C);
-          histos.fill(HIST("hpx1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Ay1C);
-          histos.fill(HIST("hpy1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Cy1A);
-          histos.fill(HIST("hpx1Avscentpteta"), centrality, track.pt(), track.eta(), x1A);
-          histos.fill(HIST("hpx1Cvscentpteta"), centrality, track.pt(), track.eta(), x1C);
-          histos.fill(HIST("hpy1Avscentpteta"), centrality, track.pt(), track.eta(), y1A);
-          histos.fill(HIST("hpy1Cvscentpteta"), centrality, track.pt(), track.eta(), y1C);
+          histos.fill(HIST("hpQytQypvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QytQyp, wNUA);
 
+          histos.fill(HIST("hpQxytpvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), Qxytp, wNUA);
+
+          histos.fill(HIST("hpQxpQytvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxpQyt, wNUA);
+
+          histos.fill(HIST("hpQxtQypvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxtQyp, wNUA);
+          /*
+                histos.fill(HIST("hpv21"), centrality, track.pt(), track.eta(), v21,wNUA);
+                histos.fill(HIST("hpv22"), centrality, track.pt(), track.eta(), v22,wNUA);
+                histos.fill(HIST("hpv23"), centrality, track.pt(), track.eta(), v23,wNUA);
+
+                histos.fill(HIST("hpx2Tx1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Tx1Ax1C,wNUA);
+                histos.fill(HIST("hpx2Ty1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Ty1Ay1C,wNUA);
+                histos.fill(HIST("hpy2Tx1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Tx1Ay1C,wNUA);
+                histos.fill(HIST("hpy2Ty1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Ty1Ax1C,wNUA);
+                histos.fill(HIST("hpx2Tvscentpteta"), centrality, track.pt(), track.eta(), x2T,wNUA);
+                histos.fill(HIST("hpy2Tvscentpteta"), centrality, track.pt(), track.eta(), y2T,wNUA);
+                histos.fill(HIST("hpx2Tx1Avscentpteta"), centrality, track.pt(), track.eta(), x2Tx1A,wNUA);
+                histos.fill(HIST("hpx2Tx1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Tx1C,wNUA);
+                histos.fill(HIST("hpx2Ty1Avscentpteta"), centrality, track.pt(), track.eta(), x2Ty1A,wNUA);
+                histos.fill(HIST("hpx2Ty1Cvscentpteta"), centrality, track.pt(), track.eta(), x2Ty1C,wNUA);
+                histos.fill(HIST("hpy2Tx1Avscentpteta"), centrality, track.pt(), track.eta(), y2Tx1A,wNUA);
+                histos.fill(HIST("hpy2Ty1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Ty1C,wNUA);
+                histos.fill(HIST("hpy2Ty1Avscentpteta"), centrality, track.pt(), track.eta(), y2Ty1A,wNUA);
+                histos.fill(HIST("hpy2Tx1Cvscentpteta"), centrality, track.pt(), track.eta(), y2Tx1C,wNUA);
+                histos.fill(HIST("hpx1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Ax1C,wNUA);
+                histos.fill(HIST("hpy1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), y1Ay1C,wNUA);
+                histos.fill(HIST("hpx1Ay1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Ay1C,wNUA);
+                histos.fill(HIST("hpy1Ax1Cvscentpteta"), centrality, track.pt(), track.eta(), x1Cy1A,wNUA);
+                histos.fill(HIST("hpx1Avscentpteta"), centrality, track.pt(), track.eta(), x1A,wNUA);
+                histos.fill(HIST("hpx1Cvscentpteta"), centrality, track.pt(), track.eta(), x1C,wNUA);
+                histos.fill(HIST("hpy1Avscentpteta"), centrality, track.pt(), track.eta(), y1A,wNUA);
+                histos.fill(HIST("hpy1Cvscentpteta"), centrality, track.pt(), track.eta(), y1C,wNUA);
+          */
           /*} else {
-            histos.fill(HIST("hpuxQxpvscentptetaneg"), centrality, track.pt(), track.eta(), uxQxp);
-            histos.fill(HIST("hpuyQypvscentptetaneg"), centrality, track.pt(), track.eta(), uyQyp);
-            histos.fill(HIST("hpuxQxtvscentptetaneg"), centrality, track.pt(), track.eta(), uxQxt);
-            histos.fill(HIST("hpuyQytvscentptetaneg"), centrality, track.pt(), track.eta(), uyQyt);
+            histos.fill(HIST("hpuxQxpvscentptetaneg"), centrality, track.pt(), track.eta(), uxQxp,wNUA);
+            histos.fill(HIST("hpuyQypvscentptetaneg"), centrality, track.pt(), track.eta(), uyQyp,wNUA);
+            histos.fill(HIST("hpuxQxtvscentptetaneg"), centrality, track.pt(), track.eta(), uxQxt,wNUA);
+            histos.fill(HIST("hpuyQytvscentptetaneg"), centrality, track.pt(), track.eta(), uyQyt,wNUA);
 
-            histos.fill(HIST("hpuxvscentptetaneg"), centrality, track.pt(), track.eta(), ux);
-            histos.fill(HIST("hpuyvscentptetaneg"), centrality, track.pt(), track.eta(), uy);
+            histos.fill(HIST("hpuxvscentptetaneg"), centrality, track.pt(), track.eta(), ux,wNUA);
+            histos.fill(HIST("hpuyvscentptetaneg"), centrality, track.pt(), track.eta(), uy,wNUA);
 
-            histos.fill(HIST("hpuxyQxytvscentptetaneg"), centrality, track.pt(), track.eta(), uxyQxyt);
-            histos.fill(HIST("hpuxyQxypvscentptetaneg"), centrality, track.pt(), track.eta(), uxyQxyp);
-            histos.fill(HIST("hpoddv1vscentptetaneg"), centrality, track.pt(), track.eta(), oddv1);
-            histos.fill(HIST("hpevenv1vscentptetaneg"), centrality, track.pt(), track.eta(), evenv1);
+            histos.fill(HIST("hpuxyQxytvscentptetaneg"), centrality, track.pt(), track.eta(), uxyQxyt,wNUA);
+            histos.fill(HIST("hpuxyQxypvscentptetaneg"), centrality, track.pt(), track.eta(), uxyQxyp,wNUA);
+            histos.fill(HIST("hpoddv1vscentptetaneg"), centrality, track.pt(), track.eta(), oddv1,wNUA);
+            histos.fill(HIST("hpevenv1vscentptetaneg"), centrality, track.pt(), track.eta(), evenv1,wNUA);
             }*/
         } else {
-          histos.fill(HIST("hpuxQxpvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxQxp);
-          histos.fill(HIST("hpuyQypvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uyQyp);
-          histos.fill(HIST("hpuxQxtvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxQxt);
-          histos.fill(HIST("hpuyQytvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uyQyt);
+          histos.fill(HIST("hpuxQxpvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxQxp, wNUA);
+          histos.fill(HIST("hpuyQypvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uyQyp, wNUA);
+          histos.fill(HIST("hpuxQxtvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxQxt, wNUA);
+          histos.fill(HIST("hpuyQytvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uyQyt, wNUA);
 
-          histos.fill(HIST("hpuxvscentpteta"), centrality, track.pt(), track.eta(), ux);
-          histos.fill(HIST("hpuyvscentpteta"), centrality, track.pt(), track.eta(), uy);
+          histos.fill(HIST("hpuxvscentpteta"), centrality, track.pt(), track.eta(), ux, wNUA);
+          histos.fill(HIST("hpuyvscentpteta"), centrality, track.pt(), track.eta(), uy, wNUA);
 
-          histos.fill(HIST("hpuxyQxytvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxyQxyt);
-          histos.fill(HIST("hpuxyQxypvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxyQxyp);
-          histos.fill(HIST("hpoddv1vscentpteta"), centrality, track.pt(), track.eta(), oddv1);
-          histos.fill(HIST("hpevenv1vscentpteta"), centrality, track.pt(), track.eta(), evenv1);
+          histos.fill(HIST("hpuxyQxytvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxyQxyt, wNUA);
+          histos.fill(HIST("hpuxyQxypvscentpteta"), centrality, track.tpcInnerParam(), track.eta(), uxyQxyp, wNUA);
+          histos.fill(HIST("hpoddv1vscentpteta"), centrality, track.pt(), track.eta(), oddv1, wNUA);
+          histos.fill(HIST("hpevenv1vscentpteta"), centrality, track.pt(), track.eta(), evenv1, wNUA);
+
+          histos.fill(HIST("hpQxtQxpvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxtQxp, wNUA);
+
+          histos.fill(HIST("hpQytQypvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QytQyp, wNUA);
+
+          histos.fill(HIST("hpQxytpvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), Qxytp, wNUA);
+
+          histos.fill(HIST("hpQxpQytvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxpQyt, wNUA);
+
+          histos.fill(HIST("hpQxtQypvscentptetaTrack"),
+                      centrality, track.pt(), track.eta(), QxtQyp, wNUA);
         }
       }
     } else {
-      for (auto v0 : V0s) {
+      for (const auto& v0 : V0s) {
 
         auto postrack = v0.template posTrack_as<AllTrackCandidates>();
         auto negtrack = v0.template negTrack_as<AllTrackCandidates>();
@@ -840,10 +1657,10 @@ struct lambdapolsp {
           continue;
         }
 
-        if (isSelectedV0Daughter(v0, postrack, 0) && isSelectedV0Daughter(v0, negtrack, 1)) {
+        if (isSelectedV0Daughter(v0, postrack, 0, 0) && isSelectedV0Daughter(v0, negtrack, 1, 0)) {
           LambdaTag = 1;
         }
-        if (isSelectedV0Daughter(v0, negtrack, 0) && isSelectedV0Daughter(v0, postrack, 1)) {
+        if (isSelectedV0Daughter(v0, negtrack, 0, 1) && isSelectedV0Daughter(v0, postrack, 1, 1)) {
           aLambdaTag = 1;
         }
 
@@ -877,51 +1694,148 @@ struct lambdapolsp {
         int taga = LambdaTag;
         int tagb = aLambdaTag;
 
+        if (useAccCorr) {
+          accprofileL = ccdb->getForTimeStamp<TProfile2D>(ConfAccPathL.value, bc.timestamp());
+          accprofileAL = ccdb->getForTimeStamp<TProfile2D>(ConfAccPathAL.value, bc.timestamp());
+        }
+        double acvalue = 1.0;
+        int binxwgt;
+        double wgtvalue;
+        if (useyldwgt) {
+          binxwgt = hwgtAL->GetXaxis()->FindBin(v0.pt());
+          wgtvalue = hwgtAL->GetBinContent(binxwgt);
+        } else {
+          wgtvalue = 1.0;
+        }
+
+        std::vector<int> lambdaSystIDs;
+        std::vector<int> antiLambdaSystIDs;
+
         if (LambdaTag) {
           Lambda = Proton + AntiPion;
           tagb = 0;
-          fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mLambda(), v0.pt(), v0.eta());
+          if (useAccCorr) {
+            int binx = accprofileL->GetXaxis()->FindBin(v0.eta());
+            int biny = accprofileL->GetYaxis()->FindBin(v0.pt());
+            acvalue = accprofileL->GetBinContent(binx, biny);
+          } else {
+            acvalue = 1.0;
+          }
+          if (distGrp.filldist && aLambdaTag == 0 && Lambda.M() > distGrp.lowmasscut && Lambda.M() < distGrp.highmasscut) {
+            /*histos.fill(HIST("hcosinelambda"), v0.v0cosPA());
+            histos.fill(HIST("hdcabwv0daughlambda"), v0.dcaV0daughters());
+            histos.fill(HIST("hlifetimelambda"), TMath::Abs(v0.distovertotmom(collision.posX(), collision.posY(), collision.posZ()) * massLambda));
+            histos.fill(HIST("hradiuslambda"), v0.v0radius());
+            histos.fill(HIST("htpcCRlambda"), postrack.tpcNClsCrossedRows());
+            histos.fill(HIST("hdcaposlambda"), v0.dcapostopv());
+            histos.fill(HIST("hdcaneglambda"), v0.dcanegtopv());
+            histos.fill(HIST("htpcposlambda"), postrack.tpcNSigmaPr());
+            histos.fill(HIST("htpcneglambda"), negtrack.tpcNSigmaPi());
+            histos.fill(HIST("hptposlambda"), Proton.Pt());
+            histos.fill(HIST("hptneglambda"), AntiPion.Pt());*/
+            auto phiL = TMath::ATan2(v0.py(), v0.px());
+            auto LcosphiminuspsiC = TMath::Cos(GetPhiInRange(phiL - psiZDCC));
+            auto LcosphiminuspsiA = TMath::Cos(GetPhiInRange(phiL - psiZDCA));
+            auto Lcosphiminuspsi = TMath::Cos(GetPhiInRange(phiL - psiZDC));
+            histos.fill(HIST("hLcosphiminuspsiCvseta"), LcosphiminuspsiC, v0.eta());
+            histos.fill(HIST("hLcosphiminuspsiAvseta"), LcosphiminuspsiA, v0.eta());
+            histos.fill(HIST("hLcosphiminuspsivseta"), Lcosphiminuspsi, v0.eta());
+          }
+          fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mLambda(), v0.pt(), v0.eta(), acvalue, 1.0, resowgt, &lambdaSystIDs, 1);
         }
 
         tagb = aLambdaTag;
         if (aLambdaTag) {
           AntiLambda = AntiProton + Pion;
           taga = 0;
-          fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mAntiLambda(), v0.pt(), v0.eta());
+          if (useAccCorr) {
+            int binx = accprofileAL->GetXaxis()->FindBin(v0.eta());
+            int biny = accprofileAL->GetYaxis()->FindBin(v0.pt());
+            acvalue = accprofileAL->GetBinContent(binx, biny);
+          } else {
+            acvalue = 1.0;
+          }
+          if (distGrp.filldist && LambdaTag == 0 && AntiLambda.M() > distGrp.lowmasscut && AntiLambda.M() < distGrp.highmasscut) {
+            /*histos.fill(HIST("hcosineantilambda"), v0.v0cosPA());
+            histos.fill(HIST("hdcabwv0daughantilambda"), v0.dcaV0daughters());
+            histos.fill(HIST("hlifetimeantilambda"), TMath::Abs(v0.distovertotmom(collision.posX(), collision.posY(), collision.posZ()) * massLambda));
+            histos.fill(HIST("hradiusantilambda"), v0.v0radius());
+            histos.fill(HIST("htpcCRantilambda"), postrack.tpcNClsCrossedRows());
+            histos.fill(HIST("hdcaposantilambda"), v0.dcapostopv());
+            histos.fill(HIST("hdcanegantilambda"), v0.dcanegtopv());
+            histos.fill(HIST("htpcposantilambda"), postrack.tpcNSigmaPi());
+            histos.fill(HIST("htpcnegantilambda"), negtrack.tpcNSigmaPr());
+            histos.fill(HIST("hptposantilambda"), Pion.Pt());
+            histos.fill(HIST("hptnegantilambda"), AntiProton.Pt());*/
+            auto phiAL = TMath::ATan2(v0.py(), v0.px());
+            auto ALcosphiminuspsiC = TMath::Cos(GetPhiInRange(phiAL - psiZDCC));
+            auto ALcosphiminuspsiA = TMath::Cos(GetPhiInRange(phiAL - psiZDCA));
+            auto ALcosphiminuspsi = TMath::Cos(GetPhiInRange(phiAL - psiZDC));
+            histos.fill(HIST("hALcosphiminuspsiCvseta"), ALcosphiminuspsiC, v0.eta());
+            histos.fill(HIST("hALcosphiminuspsiAvseta"), ALcosphiminuspsiA, v0.eta());
+            histos.fill(HIST("hALcosphiminuspsivseta"), ALcosphiminuspsi, v0.eta());
+          }
+          fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mAntiLambda(), v0.pt(), v0.eta(), acvalue, wgtvalue, resowgt, &antiLambdaSystIDs, 2);
         }
       }
     }
+    lastRunNumber = currentRunNumber;
   }
   PROCESS_SWITCH(lambdapolsp, processData, "Process data", true);
 
   // process function for derived data - mimics the functionality of the original data
-  void processDerivedData(soa::Join<aod::StraCollisions, aod::StraCents, aod::StraEvSels, aod::StraStamps, aod::StraZDCSP>::iterator const& collision, v0Candidates const& V0s, dauTracks const&)
+  void processDerivedData(soa::Join<aod::StraCollisions, aod::StraCents, aod::StraEvSels, aod::StraEvSelExtras, aod::StraStamps, aod::StraZDCSP>::iterator const& collision, v0Candidates const& V0s, dauTracks const&)
   {
     //___________________________________________________________________________________________________
     // event selection
     if (!collision.sel8()) {
       return;
     }
-    auto centrality = collision.centFT0C();
+    double centrality = -999.;
+    if (centestim == 0)
+      centrality = collision.centFT0C();
+    else if (centestim == 1)
+      centrality = collision.centFT0M();
+    else if (centestim == 2)
+      centrality = collision.centFT0A();
+    else if (centestim == 3)
+      centrality = collision.centFV0A();
+
+    auto vz = collision.posZ();
+    auto vx = collision.posX();
+    auto vy = collision.posY();
+
+    auto runnumber = collision.runNumber();
     if (!collision.triggereventsp()) { // provided by StraZDCSP
       return;
     }
 
-    if (additionalEvSel && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
-      return;
-    }
-    // histos.fill(HIST("hCentrality2"), centrality);
-    //  if (additionalEvSel2 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
-    if (additionalEvSel2 && (collision.trackOccupancyInTimeRange() > cfgMaxOccupancy || collision.trackOccupancyInTimeRange() < cfgMinOccupancy)) {
-      return;
-    }
-    // histos.fill(HIST("hCentrality3"), centrality);
-    if (additionalEvSel3 && (!collision.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+    if (rctCut.requireRCTFlagChecker && !rctChecker(collision)) {
       return;
     }
 
-    if (additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+    if (evselGrp.additionalEvSel && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
       return;
+    }
+    // histos.fill(HIST("hCentrality2"), centrality);
+    //  if (evselGrp.additionalEvSel2 && (!collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard))) {
+    if (evselGrp.additionalEvSel2 && (collision.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+      return;
+    }
+    // histos.fill(HIST("hCentrality3"), centrality);
+
+    if (evselGrp.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+      return;
+    }
+
+    auto timestamps = ccdb->getRunDuration(runnumber, true); /// fatalise if timestamps are not found
+    int64_t sorTimestamp = timestamps.first;                 // timestamp of the SOR/SOX/STF in ms
+    int64_t eorTimestamp = timestamps.second;                // timestamp of the EOR/EOX/ETF in ms
+    int64_t ts = eorTimestamp / 2 + sorTimestamp / 2;        // timestamp of the middle of the run
+
+    if (useAccCorr) {
+      accprofileL = ccdb->getForTimeStamp<TProfile2D>(ConfAccPathL.value, ts);
+      accprofileAL = ccdb->getForTimeStamp<TProfile2D>(ConfAccPathAL.value, ts);
     }
 
     //___________________________________________________________________________________________________
@@ -932,11 +1846,10 @@ struct lambdapolsp {
     auto qyZDCC = collision.qyZDCC();
     auto psiZDCC = collision.psiZDCC();
     auto psiZDCA = collision.psiZDCA();
-    double modqxZDCA;
-    double modqyZDCA;
-    double modqxZDCC;
-    double modqyZDCC;
-
+    if (usepsisubbeforeshift) {
+      psiZDCC = 1.0 * std::atan2(qyZDCC, qxZDCC);
+      psiZDCA = 1.0 * std::atan2(qyZDCA, qxZDCA);
+    }
     if (cqvas) {
       modqxZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Cos(psiZDCA);
       modqyZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Sin(psiZDCA);
@@ -951,23 +1864,344 @@ struct lambdapolsp {
 
     auto psiZDC = TMath::ATan2((modqyZDCC - modqyZDCA), (modqxZDCC - modqxZDCA)); // full event plane
 
+    if (QAgrp.isQA) {
+      histos.fill(HIST("hCentQxZDCA"), centrality, modqxZDCA);
+      histos.fill(HIST("hCentQyZDCA"), centrality, modqyZDCA);
+      histos.fill(HIST("hCentQxZDCC"), centrality, modqxZDCC);
+      histos.fill(HIST("hCentQyZDCC"), centrality, modqyZDCC);
+
+      histos.fill(HIST("hvxQxZDCA"), vx, modqxZDCA);
+      histos.fill(HIST("hvxQyZDCA"), vx, modqyZDCA);
+      histos.fill(HIST("hvxQxZDCC"), vx, modqxZDCC);
+      histos.fill(HIST("hvxQyZDCC"), vx, modqyZDCC);
+
+      histos.fill(HIST("hvyQxZDCA"), vy, modqxZDCA);
+      histos.fill(HIST("hvyQyZDCA"), vy, modqyZDCA);
+      histos.fill(HIST("hvyQxZDCC"), vy, modqxZDCC);
+      histos.fill(HIST("hvyQyZDCC"), vy, modqyZDCC);
+
+      histos.fill(HIST("hvzQxZDCA"), vz, modqxZDCA);
+      histos.fill(HIST("hvzQyZDCA"), vz, modqyZDCA);
+      histos.fill(HIST("hvzQxZDCC"), vz, modqxZDCC);
+      histos.fill(HIST("hvzQyZDCC"), vz, modqyZDCC);
+
+      histos.fill(HIST("PsiZDCA"), centrality, psiZDCA);
+      histos.fill(HIST("PsiZDCC"), centrality, psiZDCC);
+      histos.fill(HIST("PsiZDC"), centrality, psiZDC);
+    }
+
     // fill histograms
     histos.fill(HIST("hCentrality"), centrality);
     if (!checkwithpub) {
       // histos.fill(HIST("hVtxZ"), collision.posZ());
-      histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
-      histos.fill(HIST("hpResSin"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA - psiZDCC))));
-      /*histos.fill(HIST("hpCosPsiA"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA))));
-      histos.fill(HIST("hpCosPsiC"), centrality, (TMath::Cos(GetPhiInRange(psiZDCC))));
-      histos.fill(HIST("hpSinPsiA"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA))));
-      histos.fill(HIST("hpSinPsiC"), centrality, (TMath::Sin(GetPhiInRange(psiZDCC))));*/
+      if (randGrp.useSP) {
+        const double magA = std::sqrt(modqxZDCA * modqxZDCA + modqyZDCA * modqyZDCA);
+        const double magC = std::sqrt(modqxZDCC * modqxZDCC + modqyZDCC * modqyZDCC);
+        double cosPsiAminusC = 0.0;
+        if (normbymag && magA > 0. && magC > 0.) {
+          cosPsiAminusC = (modqxZDCA * modqxZDCC + modqyZDCA * modqyZDCC) / (magA * magC);
+        } else {
+          cosPsiAminusC = (modqxZDCA * modqxZDCC + modqyZDCA * modqyZDCC);
+        }
+        // histos.fill(HIST("hpRes"), centrality, ((modqxZDCA * modqxZDCC) + (modqyZDCA * modqyZDCC)));
+        histos.fill(HIST("hpRes"), centrality, cosPsiAminusC);
+        histos.fill(HIST("hcentQxZDCA"), centrality, modqxZDCA);
+        histos.fill(HIST("hcentQyZDCA"), centrality, modqyZDCA);
+        histos.fill(HIST("hcentQxZDCC"), centrality, modqxZDCC);
+        histos.fill(HIST("hcentQyZDCC"), centrality, modqyZDCC);
+
+        auto QxtQxp = modqxZDCA * modqxZDCC;
+        auto QytQyp = modqyZDCA * modqyZDCC;
+        auto Qxytp = QxtQxp + QytQyp;
+        auto QxpQyt = modqxZDCA * modqyZDCC;
+        auto QxtQyp = modqxZDCC * modqyZDCA;
+
+        histos.fill(HIST("hpQxtQxpvscent"), centrality, QxtQxp);
+        histos.fill(HIST("hpQytQypvscent"), centrality, QytQyp);
+        histos.fill(HIST("hpQxytpvscent"), centrality, Qxytp);
+        histos.fill(HIST("hpQxpQytvscent"), centrality, QxpQyt);
+        histos.fill(HIST("hpQxtQypvscent"), centrality, QxtQyp);
+      } else {
+        histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
+      }
+    }
+
+    double resowgt = 1.0;
+    if (useResoRBR) {
+      int binxreso = hwgtRESO->GetXaxis()->FindBin(centrality + 0.000001);
+      resowgt = hwgtRESO->GetBinContent(binxreso);
+    } else {
+      resowgt = 1.0;
     }
 
     //___________________________________________________________________________________________________
     // loop over V0s as necessary
-    for (auto v0 : V0s) {
-      bool LambdaTag = isCompatible(v0, 0);
-      bool aLambdaTag = isCompatible(v0, 1);
+    for (const auto& v0 : V0s) {
+
+      if (analyzeLambda && analyzeK0s)
+        continue;
+      if (!analyzeLambda && !analyzeK0s)
+        continue;
+
+      // bool LambdaTag = isCompatible(v0, 0);
+      // bool aLambdaTag = isCompatible(v0, 1);
+
+      bool LambdaPreSelTag = isCompatible(v0, 0, false); // for systematic
+      bool aLambdaPreSelTag = isCompatible(v0, 1, false);
+      bool LambdaTag = isCompatible(v0, 0, true); // for default
+      bool aLambdaTag = isCompatible(v0, 1, true);
+
+      bool K0sTag = isCompatibleK0s(v0);
+
+      // if (analyzeLambda && !LambdaTag && !aLambdaTag)
+      // continue;
+      if (analyzeLambda && !LambdaPreSelTag && !aLambdaPreSelTag) {
+        continue;
+      }
+
+      if (analyzeK0s && !K0sTag)
+        continue;
+
+      // if (!SelectionV0(collision, v0)) {
+      // continue;
+      // }
+
+      bool passNominalV0 = true;
+      if (analyzeLambda) {
+        // only fixed/common cuts here
+        if (!SelectionV0(collision, v0, false)) {
+          continue;
+        }
+        // remember whether nominal topology is passed
+        passNominalV0 = SelectionV0(collision, v0, true);
+
+        LambdaTag = LambdaTag && passNominalV0;
+        aLambdaTag = aLambdaTag && passNominalV0;
+
+      } else if (analyzeK0s) {
+        // K0 analysis remains exactly nominal
+        if (!SelectionV0(collision, v0, true)) {
+          continue;
+        }
+      }
+
+      if (analyzeLambda) {
+        // if (LambdaTag) {
+        if (LambdaPreSelTag) {
+          Proton = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPr);
+          AntiPion = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPi);
+          Lambdadummy = Proton + AntiPion;
+        }
+        // if (aLambdaTag) {
+        if (aLambdaPreSelTag) {
+          AntiProton = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPr);
+          Pion = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPi);
+          AntiLambdadummy = AntiProton + Pion;
+        }
+
+        // if (shouldReject(LambdaTag, aLambdaTag, Lambdadummy, AntiLambdadummy)) {
+        // continue;
+        // }
+
+        if (shouldReject(LambdaTag,
+                         aLambdaTag,
+                         Lambdadummy,
+                         AntiLambdadummy)) {
+
+          LambdaTag = false;
+          aLambdaTag = false;
+        }
+      }
+
+      if (analyzeK0s) {
+        if (K0sTag) {
+          Pion = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPi);
+          AntiPion = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPi);
+          K0sdummy = Pion + AntiPion;
+        }
+      }
+
+      if (TMath::Abs(v0.eta()) >= 0.8)
+        continue;
+
+      std::vector<int> K0sSystIDs;
+      std::vector<int> lambdaSystIDs;
+      std::vector<int> antiLambdaSystIDs;
+
+      if (systGrp.doTopoSyst && analyzeLambda) {
+
+        lambdaSystIDs.reserve(systGrp.nTopoSyst.value);
+        antiLambdaSystIDs.reserve(systGrp.nTopoSyst.value);
+
+        for (int isyst = 0; isyst < systGrp.nTopoSyst.value; ++isyst) {
+
+          const auto& cuts = topoSystCuts[isyst];
+          bool passLambda = LambdaPreSelTag && passesTopoSystematic(collision, v0, 0, cuts);
+          bool passAntiLambda = aLambdaPreSelTag && passesTopoSystematic(collision, v0, 1, cuts);
+
+          // Apply the same Lambda/AntiLambda ambiguity logic
+          // separately for THIS systematic variation.
+          if (shouldReject(passLambda,
+                           passAntiLambda,
+                           Lambdadummy,
+                           AntiLambdadummy)) {
+
+            passLambda = false;
+            passAntiLambda = false;
+          }
+
+          if (passLambda) {
+            lambdaSystIDs.push_back(isyst);
+          }
+
+          if (passAntiLambda) {
+            antiLambdaSystIDs.push_back(isyst);
+          }
+        }
+      }
+
+      int taga = LambdaTag;
+      int tagb = aLambdaTag;
+      int tagc = K0sTag;
+
+      if (analyzeK0s && K0sTag) {
+        K0s = Pion + AntiPion;
+        double acvalue = 1.0;
+        fillHistograms(tagc, 0, K0s, Pion, psiZDCC, psiZDCA, psiZDC, centrality, v0.mK0Short(), v0.pt(), v0.eta(), acvalue, 1.0, resowgt, &K0sSystIDs, 1);
+      }
+
+      int binxwgt;
+      double wgtvalue;
+      int binxwgtAL;
+      double effwgtvalueAL;
+      double effwgtvalueL;
+
+      if (useyldwgt) {
+        binxwgt = hwgtAL->GetXaxis()->FindBin(v0.pt());
+        wgtvalue = hwgtAL->GetBinContent(binxwgt);
+      } else {
+        wgtvalue = 1.0;
+      }
+      if (useeffwgt) {
+        binxwgtAL = heffAL->GetXaxis()->FindBin(v0.pt());
+        effwgtvalueAL = heffAL->GetBinContent(binxwgtAL);
+        effwgtvalueL = heffL->GetBinContent(binxwgtAL);
+      } else {
+        effwgtvalueAL = 1.0;
+        effwgtvalueL = 1.0;
+      }
+
+      // if (analyzeLambda && LambdaTag) {
+      if (analyzeLambda && LambdaPreSelTag && (LambdaTag || !lambdaSystIDs.empty())) {
+        Lambda = Proton + AntiPion;
+        tagb = 0;
+        double acvalue = 1.0;
+        if (useAccCorr) {
+          int binx = accprofileL->GetXaxis()->FindBin(v0.eta());
+          int biny = accprofileL->GetYaxis()->FindBin(v0.pt());
+          acvalue = accprofileL->GetBinContent(binx, biny);
+        } else {
+          acvalue = 1.0;
+        }
+
+        if (distGrp.filldist && aLambdaTag == 0 && Lambda.M() > distGrp.lowmasscut && Lambda.M() < distGrp.highmasscut) {
+          auto phiL = TMath::ATan2(v0.py(), v0.px());
+          auto LcosphiminuspsiC = TMath::Cos(GetPhiInRange(phiL - psiZDCC));
+          auto LcosphiminuspsiA = TMath::Cos(GetPhiInRange(phiL - psiZDCA));
+          auto Lcosphiminuspsi = TMath::Cos(GetPhiInRange(phiL - psiZDC));
+          histos.fill(HIST("hLcosphiminuspsiCvseta"), LcosphiminuspsiC, v0.eta());
+          histos.fill(HIST("hLcosphiminuspsiAvseta"), LcosphiminuspsiA, v0.eta());
+          histos.fill(HIST("hLcosphiminuspsivseta"), Lcosphiminuspsi, v0.eta());
+        }
+
+        fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mLambda(), v0.pt(), v0.eta(), acvalue, (1. / effwgtvalueL), resowgt, &lambdaSystIDs, 1);
+      }
+
+      tagb = aLambdaTag;
+      // if (analyzeLambda && aLambdaTag) {
+      if (analyzeLambda && aLambdaPreSelTag && (aLambdaTag || !antiLambdaSystIDs.empty())) {
+        AntiLambda = AntiProton + Pion;
+        taga = 0;
+        double acvalue = 1.0;
+        if (useAccCorr) {
+          int binx = accprofileAL->GetXaxis()->FindBin(v0.eta());
+          int biny = accprofileAL->GetYaxis()->FindBin(v0.pt());
+          acvalue = accprofileAL->GetBinContent(binx, biny);
+        } else {
+          acvalue = 1.0;
+        }
+
+        if (distGrp.filldist && LambdaTag == 0 && AntiLambda.M() > distGrp.lowmasscut && AntiLambda.M() < distGrp.highmasscut) {
+          auto phiAL = TMath::ATan2(v0.py(), v0.px());
+          auto ALcosphiminuspsiC = TMath::Cos(GetPhiInRange(phiAL - psiZDCC));
+          auto ALcosphiminuspsiA = TMath::Cos(GetPhiInRange(phiAL - psiZDCA));
+          auto ALcosphiminuspsi = TMath::Cos(GetPhiInRange(phiAL - psiZDC));
+          histos.fill(HIST("hALcosphiminuspsiCvseta"), ALcosphiminuspsiC, v0.eta());
+          histos.fill(HIST("hALcosphiminuspsiAvseta"), ALcosphiminuspsiA, v0.eta());
+          histos.fill(HIST("hALcosphiminuspsivseta"), ALcosphiminuspsi, v0.eta());
+        }
+
+        fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mAntiLambda(), v0.pt(), v0.eta(), acvalue, wgtvalue * (1. / effwgtvalueAL), resowgt, &antiLambdaSystIDs, 2);
+      }
+    }
+    // lastRunNumber = currentRunNumber;
+  }
+  PROCESS_SWITCH(lambdapolsp, processDerivedData, "Process derived data", false);
+
+  /*
+  using TrackMCTrueTable = aod::McParticles;
+  ROOT::Math::PxPyPzMVector lambdadummymc, antiLambdadummymc, protonmc, pionmc, antiProtonmc, antiPionmc;
+
+  void processMC(EventCandidatesMC::iterator const& collision, AllTrackCandidates const& tracks, TrackMCTrueTable const& GenParticles, ResoV0s const& V0s)
+  {
+    if (!collision.sel8()) {
+      return;
+    }
+    double centrality = -999.;
+    centrality = collision.centFT0C();
+
+    if (evselGrp.additionalEvSel && (!collision.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      return;
+    }
+
+    if (evselGrp.additionalEvSel2 && (collision.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+      return;
+    }
+
+    if (evselGrp.additionalEvSel3 && (!collision.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+      return;
+    }
+    if (evselGrp.additionalEvSel4 && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+      return;
+    }
+
+    if (rctCut.requireRCTFlagChecker && !rctChecker(collision)) {
+      return;
+    }
+
+    histos.fill(HIST("hCentrality"), centrality);
+
+    for (const auto& v0 : V0s) {
+
+      auto postrack = v0.template posTrack_as<AllTrackCandidates>();
+      auto negtrack = v0.template negTrack_as<AllTrackCandidates>();
+
+      int LambdaTag = 0;
+      int aLambdaTag = 0;
+
+      const auto signpos = postrack.sign();
+      const auto signneg = negtrack.sign();
+
+      if (signpos < 0 || signneg > 0) {
+        continue;
+      }
+
+      if (isSelectedV0Daughter(v0, postrack, 0, 0) && isSelectedV0Daughter(v0, negtrack, 1, 0)) {
+        LambdaTag = 1;
+      }
+      if (isSelectedV0Daughter(v0, negtrack, 0, 1) && isSelectedV0Daughter(v0, postrack, 1, 1)) {
+        aLambdaTag = 1;
+      }
 
       if (!LambdaTag && !aLambdaTag)
         continue;
@@ -980,13 +2214,11 @@ struct lambdapolsp {
         Proton = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPr);
         AntiPion = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPi);
         Lambdadummy = Proton + AntiPion;
-        // angleLambda = calculateAngleBetweenLorentzVectors(Proton, AntiPion);
       }
       if (aLambdaTag) {
         AntiProton = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPr);
         Pion = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPi);
         AntiLambdadummy = AntiProton + Pion;
-        // angleAntiLambda = calculateAngleBetweenLorentzVectors(AntiProton, Pion);
       }
 
       if (shouldReject(LambdaTag, aLambdaTag, Lambdadummy, AntiLambdadummy)) {
@@ -996,27 +2228,356 @@ struct lambdapolsp {
       if (TMath::Abs(v0.eta()) > 0.8)
         continue;
 
-      int taga = LambdaTag;
-      int tagb = aLambdaTag;
-
       if (LambdaTag) {
         Lambda = Proton + AntiPion;
-        tagb = 0;
-        fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality,
-                       v0.mLambda(), v0.pt(), v0.eta());
+        histos.fill(HIST("hSparseRecLambda"), v0.mLambda(), v0.pt(), centrality);
       }
-
-      tagb = aLambdaTag;
       if (aLambdaTag) {
         AntiLambda = AntiProton + Pion;
-        taga = 0;
-        fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality,
-                       v0.mAntiLambda(), v0.pt(), v0.eta());
+        histos.fill(HIST("hSparseRecAntiLambda"), v0.mAntiLambda(), v0.pt(), centrality);
       }
-    } // end loop over V0s
+    }
+
+    for (const auto& mcParticle : GenParticles) {
+      if (std::abs(mcParticle.pdgCode()) != PDG_t::kLambda0) {
+        continue;
+      }
+      if (std::abs(mcParticle.y()) > ConfV0Rap) {
+        continue;
+      }
+      auto pdg1 = mcParticle.pdgCode();
+      auto kDaughters = mcParticle.daughters_as<aod::McParticles>();
+      int daughsize = 2;
+      if (kDaughters.size() != daughsize) {
+        continue;
+      }
+      for (const auto& kCurrentDaughter : kDaughters) {
+
+        if (std::abs(kCurrentDaughter.pdgCode()) != PDG_t::kProton && std::abs(kCurrentDaughter.pdgCode()) != PDG_t::kPiPlus) {
+          continue;
+        }
+        if (kCurrentDaughter.pdgCode() == PDG_t::kProton) {
+          protonmc = ROOT::Math::PxPyPzMVector(kCurrentDaughter.px(), kCurrentDaughter.py(), kCurrentDaughter.pz(), o2::constants::physics::MassProton);
+        }
+        if (kCurrentDaughter.pdgCode() == PDG_t::kPiMinus) {
+          antiPionmc = ROOT::Math::PxPyPzMVector(kCurrentDaughter.px(), kCurrentDaughter.py(), kCurrentDaughter.pz(), o2::constants::physics::MassPionCharged);
+        }
+
+        if (kCurrentDaughter.pdgCode() == PDG_t::kProtonBar) {
+          antiProtonmc = ROOT::Math::PxPyPzMVector(kCurrentDaughter.px(), kCurrentDaughter.py(), kCurrentDaughter.pz(), o2::constants::physics::MassProton);
+        }
+        if (kCurrentDaughter.pdgCode() == PDG_t::kPiPlus) {
+          pionmc = ROOT::Math::PxPyPzMVector(kCurrentDaughter.px(), kCurrentDaughter.py(), kCurrentDaughter.pz(), o2::constants::physics::MassPionCharged);
+        }
+      }
+      if (pdg1 == PDG_t::kLambda0) {
+        lambdadummymc = protonmc + antiPionmc;
+        histos.fill(HIST("hSparseGenLambda"), lambdadummymc.M(), lambdadummymc.Pt(), centrality);
+      }
+
+      if (pdg1 == PDG_t::kLambda0Bar) {
+        antiLambdadummymc = antiProtonmc + pionmc;
+        histos.fill(HIST("hSparseGenAntiLambda"), antiLambdadummymc.M(), antiLambdadummymc.Pt(), centrality);
+      }
+    }
   }
-  PROCESS_SWITCH(lambdapolsp, processDerivedData, "Process derived data", false);
+  PROCESS_SWITCH(lambdapolsp, processMC, "Process MC", false);
+*/
+  // Processing Event Mixing
+  /*
+  using BinningType = ColumnBinningPolicy<aod::collision::PosZ, aod::cent::CentFT0C>;
+  BinningType colBinning{{meGrp.axisVertex, meGrp.axisMultiplicityClass}, true};
+  Preslice<v0Candidates> tracksPerCollisionV0Mixed = o2::aod::v0data::straCollisionId; // for derived data only
+
+  void processDerivedDataMixed(soa::Join<aod::StraCollisions, aod::StraCents, aod::StraEvSels, aod::StraEvSelExtras, aod::StraStamps, aod::StraZDCSP> const& collisions, v0Candidates const& V0s, dauTracks const&)
+  {
+    TRandom3 randGen(0);
+
+    for (const auto& [collision1, collision2] : selfCombinations(colBinning, meGrp.nMix, -1, collisions, collisions)) {
+
+      if (collision1.index() == collision2.index()) {
+        continue;
+      }
+
+      if (!collision1.sel8()) {
+        continue;
+      }
+      if (!collision2.sel8()) {
+        continue;
+      }
+
+      if (!collision1.triggereventsp()) { // provided by StraZDCSP
+        continue;
+      }
+      if (!collision2.triggereventsp()) { // provided by StraZDCSP
+        continue;
+      }
+
+      if (rctCut.requireRCTFlagChecker && !rctChecker(collision1)) {
+        continue;
+      }
+      if (rctCut.requireRCTFlagChecker && !rctChecker(collision2)) {
+        continue;
+      }
+
+      if (evselGrp.additionalEvSel && (!collision1.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel && (!collision2.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel2 && (collision1.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision1.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel2 && (collision2.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision2.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel3 && (!collision1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision1.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel3 && (!collision2.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel4 && !collision1.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel4 && !collision2.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+        continue;
+      }
+
+      auto centrality = collision1.centFT0C();
+      auto qxZDCA = collision2.qxZDCA();
+      auto qxZDCC = collision2.qxZDCC();
+      auto qyZDCA = collision2.qyZDCA();
+      auto qyZDCC = collision2.qyZDCC();
+      auto psiZDCC = collision2.psiZDCC();
+      auto psiZDCA = collision2.psiZDCA();
+      double modqxZDCA;
+      double modqyZDCA;
+      double modqxZDCC;
+      double modqyZDCC;
+
+      modqxZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Cos(psiZDCA);
+      modqyZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Sin(psiZDCA);
+      modqxZDCC = TMath::Sqrt((qxZDCC * qxZDCC) + (qyZDCC * qyZDCC)) * TMath::Cos(psiZDCC);
+      modqyZDCC = TMath::Sqrt((qxZDCC * qxZDCC) + (qyZDCC * qyZDCC)) * TMath::Sin(psiZDCC);
+
+      auto psiZDC = TMath::ATan2((modqyZDCC - modqyZDCA), (modqxZDCC - modqxZDCA)); // full event plane from collision 2
+      auto groupV0 = V0s.sliceBy(tracksPerCollisionV0Mixed, collision1.index());
+
+      histos.fill(HIST("hCentrality"), centrality);
+
+      if (randGrp.doRandomPsi) {
+        psiZDC = randGen.Uniform(0, 2 * TMath::Pi());
+      }
+      if (randGrp.doRandomPsiAC) {
+        psiZDCA = randGen.Uniform(0, 2 * TMath::Pi());
+        psiZDCC = randGen.Uniform(0, 2 * TMath::Pi());
+      }
+
+      histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
+      // histos.fill(HIST("hpResSin"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA - psiZDCC))));
+
+      for (const auto& v0 : groupV0) {
+
+        bool LambdaTag = isCompatible(v0, 0);
+        bool aLambdaTag = isCompatible(v0, 1);
+        if (!LambdaTag && !aLambdaTag)
+          continue;
+        if (!SelectionV0(collision1, v0))
+          continue;
+        if (LambdaTag) {
+          Proton = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPr);
+          AntiPion = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPi);
+          Lambdadummy = Proton + AntiPion;
+        }
+        if (aLambdaTag) {
+          AntiProton = ROOT::Math::PxPyPzMVector(v0.pxneg(), v0.pyneg(), v0.pzneg(), massPr);
+          Pion = ROOT::Math::PxPyPzMVector(v0.pxpos(), v0.pypos(), v0.pzpos(), massPi);
+          AntiLambdadummy = AntiProton + Pion;
+        }
+        if (shouldReject(LambdaTag, aLambdaTag, Lambdadummy, AntiLambdadummy)) {
+          continue;
+        }
+        if (TMath::Abs(v0.eta()) > 0.8)
+          continue;
+        int taga = LambdaTag;
+        int tagb = aLambdaTag;
+
+        if (LambdaTag) {
+          Lambda = Proton + AntiPion;
+          tagb = 0;
+          double acvalue = 1.0;
+          fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mLambda(), v0.pt(), v0.eta(), acvalue, 1.0);
+        }
+
+        tagb = aLambdaTag;
+        if (aLambdaTag) {
+          AntiLambda = AntiProton + Pion;
+          taga = 0;
+          double acvalue = 1.0;
+          fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality, v0.mAntiLambda(), v0.pt(), v0.eta(), acvalue, 1.0);
+        }
+      }
+    }
+  }
+  PROCESS_SWITCH(lambdapolsp, processDerivedDataMixed, "Process mixed event using derived data", false);
+
+
+  void processDerivedDataMixed2(soa::Join<aod::StraCollisions, aod::StraCents, aod::StraEvSels, aod::StraEvSelExtras, aod::StraStamps, aod::StraZDCSP> const& collisions, v0Candidates const& V0s, dauTracks const&)
+  {
+    TRandom3 randGen(0);
+
+    for (const auto& [collision1, collision2] : selfCombinations(colBinning, meGrp.nMix, -1, collisions, collisions)) {
+
+      if (collision1.index() == collision2.index()) {
+        continue;
+      }
+
+      if (!collision1.sel8()) {
+        continue;
+      }
+      if (!collision2.sel8()) {
+        continue;
+      }
+
+      if (!collision1.triggereventsp()) { // provided by StraZDCSP
+        continue;
+      }
+      if (!collision2.triggereventsp()) { // provided by StraZDCSP
+        continue;
+      }
+
+      if (rctCut.requireRCTFlagChecker && !rctChecker(collision1)) {
+        continue;
+      }
+      if (rctCut.requireRCTFlagChecker && !rctChecker(collision2)) {
+        continue;
+      }
+
+      if (evselGrp.additionalEvSel && (!collision1.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision1.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel && (!collision2.selection_bit(aod::evsel::kNoSameBunchPileup) || !collision2.selection_bit(aod::evsel::kIsGoodZvtxFT0vsPV))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel2 && (collision1.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision1.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel2 && (collision2.trackOccupancyInTimeRange() > evselGrp.cfgMaxOccupancy || collision2.trackOccupancyInTimeRange() < evselGrp.cfgMinOccupancy)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel3 && (!collision1.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision1.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel3 && (!collision2.selection_bit(aod::evsel::kNoTimeFrameBorder) || !collision2.selection_bit(aod::evsel::kNoITSROFrameBorder))) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel4 && !collision1.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+        continue;
+      }
+      if (evselGrp.additionalEvSel4 && !collision2.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+        continue;
+      }
+      auto centrality = collision1.centFT0C();
+      auto qxZDCA = collision1.qxZDCA();
+      auto qxZDCC = collision1.qxZDCC();
+      auto qyZDCA = collision1.qyZDCA();
+      auto qyZDCC = collision1.qyZDCC();
+      auto psiZDCC = collision1.psiZDCC();
+      auto psiZDCA = collision1.psiZDCA();
+      double modqxZDCA;
+      double modqyZDCA;
+      double modqxZDCC;
+      double modqyZDCC;
+
+      modqxZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Cos(psiZDCA);
+      modqyZDCA = TMath::Sqrt((qxZDCA * qxZDCA) + (qyZDCA * qyZDCA)) * TMath::Sin(psiZDCA);
+      modqxZDCC = TMath::Sqrt((qxZDCC * qxZDCC) + (qyZDCC * qyZDCC)) * TMath::Cos(psiZDCC);
+      modqyZDCC = TMath::Sqrt((qxZDCC * qxZDCC) + (qyZDCC * qyZDCC)) * TMath::Sin(psiZDCC);
+
+      auto psiZDC = TMath::ATan2((modqyZDCC - modqyZDCA), (modqxZDCC - modqxZDCA)); // full event plane from collision 2
+
+      histos.fill(HIST("hCentrality"), centrality);
+      histos.fill(HIST("hpRes"), centrality, (TMath::Cos(GetPhiInRange(psiZDCA - psiZDCC))));
+      // histos.fill(HIST("hpResSin"), centrality, (TMath::Sin(GetPhiInRange(psiZDCA - psiZDCC))));
+
+      // V0s from collision1 to match kinematics
+      auto v0sCol1 = V0s.sliceBy(tracksPerCollisionV0Mixed, collision1.index());
+      // V0s from collision2 to test
+      auto v0sCol2 = V0s.sliceBy(tracksPerCollisionV0Mixed, collision2.index());
+
+      for (const auto& v0_2 : v0sCol2) {
+
+        bool LambdaTag = isCompatible(v0_2, 0);
+        bool aLambdaTag = isCompatible(v0_2, 1);
+        if (!LambdaTag && !aLambdaTag)
+          continue;
+        if (!SelectionV0(collision2, v0_2))
+          continue;
+        if (LambdaTag) {
+          Proton = ROOT::Math::PxPyPzMVector(v0_2.pxpos(), v0_2.pypos(), v0_2.pzpos(), massPr);
+          AntiPion = ROOT::Math::PxPyPzMVector(v0_2.pxneg(), v0_2.pyneg(), v0_2.pzneg(), massPi);
+          Lambdadummy = Proton + AntiPion;
+        }
+        if (aLambdaTag) {
+          AntiProton = ROOT::Math::PxPyPzMVector(v0_2.pxneg(), v0_2.pyneg(), v0_2.pzneg(), massPr);
+          Pion = ROOT::Math::PxPyPzMVector(v0_2.pxpos(), v0_2.pypos(), v0_2.pzpos(), massPi);
+          AntiLambdadummy = AntiProton + Pion;
+        }
+        if (shouldReject(LambdaTag, aLambdaTag, Lambdadummy, AntiLambdadummy)) {
+          continue;
+        }
+        if (TMath::Abs(v0_2.eta()) > 0.8)
+          continue;
+
+        // Check if lambda kinematics from collision2 matches with collision1
+        bool matched = false;
+        for (const auto& v0_1 : v0sCol1) {
+          bool LambdaTag1 = isCompatible(v0_1, 0);
+          bool aLambdaTag1 = isCompatible(v0_1, 1);
+          if (!LambdaTag1 && !aLambdaTag1)
+            continue;
+          if (!SelectionV0(collision1, v0_1))
+            continue;
+          if (TMath::Abs(v0_1.eta()) > 0.8)
+            continue;
+
+          double deta = std::abs(v0_1.eta() - v0_2.eta());
+          double dpt = std::abs(v0_1.pt() - v0_2.pt());
+          double dphi = RecoDecay::constrainAngle(v0_1.phi() - v0_2.phi(), 0.0);
+          if (deta < randGrp.etaMix && dpt < randGrp.ptMix && dphi < randGrp.phiMix && ((v0_1.eta() * v0_2.eta()) > 0.0)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched)
+          continue;
+
+        int taga = LambdaTag;
+        int tagb = aLambdaTag;
+
+        if (LambdaTag) {
+          Lambda = Proton + AntiPion;
+          tagb = 0;
+          double acvalue = 1.0;
+          fillHistograms(taga, tagb, Lambda, Proton, psiZDCC, psiZDCA, psiZDC, centrality, v0_2.mLambda(), v0_2.pt(), v0_2.eta(), acvalue, 1.0);
+        }
+
+        tagb = aLambdaTag;
+        if (aLambdaTag) {
+          AntiLambda = AntiProton + Pion;
+          taga = 0;
+          double acvalue = 1.0;
+          fillHistograms(taga, tagb, AntiLambda, AntiProton, psiZDCC, psiZDCA, psiZDC, centrality, v0_2.mAntiLambda(), v0_2.pt(), v0_2.eta(), acvalue, 1.0);
+        }
+      }
+    }
+  }
+  PROCESS_SWITCH(lambdapolsp, processDerivedDataMixed2, "Process mixed event2 using derived data", false);
+ */
 };
+
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{

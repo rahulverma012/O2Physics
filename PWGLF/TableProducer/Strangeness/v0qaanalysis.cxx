@@ -13,25 +13,45 @@
 ///
 /// \author Francesca Ercolessi (francesca.ercolessi@cern.ch)
 
-#include <vector>
-#include <utility>
-
-#include "Framework/AnalysisTask.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "PWGLF/DataModel/LFStrangenessTables.h"
 #include "PWGLF/DataModel/v0qaanalysis.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/Centrality.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "Framework/O2DatabasePDGPlugin.h"
+
+#include "PWGLF/DataModel/LFStrangenessTables.h"
 #include "PWGLF/DataModel/mcCentrality.h"
 #include "PWGLF/Utils/inelGt.h"
+
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/CCDB/RCTSelectionFlags.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/Expressions.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/O2DatabasePDGPlugin.h>
+#include <Framework/SliceCache.h>
+#include <Framework/Variant.h>
+
+#include <TH1.h>
+
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
+using namespace o2::aod::rctsel;
 
 void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
 {
@@ -39,11 +59,12 @@ void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
   std::swap(workflowOptions, options);
 }
 
-#include "Framework/runDataProcessing.h"
+#include <Framework/runDataProcessing.h>
 
 using DauTracks = soa::Join<aod::Tracks, aod::TracksExtra, aod::TracksDCA, aod::pidTPCPi, aod::pidTPCKa, aod::pidTPCPr, aod::pidTOFPi, aod::pidTOFPr>;
 using DauTracksMC = soa::Join<DauTracks, aod::McTrackLabels>;
-using V0Collisions = soa::Join<aod::Collisions, aod::EvSels, aod::PVMults, aod::CentFT0Ms, aod::CentFV0As>;
+using V0Collisions = soa::Join<aod::Collisions, aod::EvSels, aod::PVMults, aod::CentFT0Ms, aod::CentNGlobals>;
+using BCsWithBcSels = soa::Join<aod::BCsWithTimestamps, aod::BcSels>;
 
 struct LfV0qaanalysis {
 
@@ -81,7 +102,7 @@ struct LfV0qaanalysis {
     registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(9, "Applied selection");
 
     registry.add("hCentFT0M", "hCentFT0M", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
-    registry.add("hCentFV0A", "hCentFV0A", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
+    registry.add("hCentNGlobals", "hCentNGlobals", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
     if (isMC) {
       registry.add("hCentFT0M_RecoColl_MC", "hCentFT0M_RecoColl_MC", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
       registry.add("hCentFT0M_RecoColl_MC_INELgt0", "hCentFT0M_RecoColl_MC_INELgt0", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
@@ -89,10 +110,12 @@ struct LfV0qaanalysis {
       registry.add("hCentFT0M_GenRecoColl_MC_INELgt0", "hCentFT0M_GenRecoColl_MC_INELgt0", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
       registry.add("hCentFT0M_GenColl_MC", "hCentFT0M_GenColl_MC", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
       registry.add("hCentFT0M_GenColl_MC_INELgt0", "hCentFT0M_GenColl_MC_INELgt0", {HistType::kTH1F, {{1000, 0.f, 100.f}}});
-      registry.add("hNEventsMCGen", "hNEventsMCGen", {HistType::kTH1D, {{4, 0.f, 4.f}}});
+      registry.add("hNEventsMCGen", "hNEventsMCGen", {HistType::kTH1D, {{5, 0.f, 5.f}}});
       registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(1, "all");
       registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(2, "zvertex_true");
-      registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(3, "INELgt0_true");
+      registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(3, "BC TF/ITS ROF border");
+      registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(4, "RCTFlagsChecker");
+      registry.get<TH1>(HIST("hNEventsMCGen"))->GetXaxis()->SetBinLabel(5, "INELgt0_true");
       registry.add("hNEventsMCGenReco", "hNEventsMCGenReco", {HistType::kTH1D, {{2, 0.f, 2.f}}});
       registry.get<TH1>(HIST("hNEventsMCGenReco"))->GetXaxis()->SetBinLabel(1, "INEL");
       registry.get<TH1>(HIST("hNEventsMCGenReco"))->GetXaxis()->SetBinLabel(2, "INELgt0");
@@ -110,6 +133,8 @@ struct LfV0qaanalysis {
       registry.add("Generated_MCGenRecoColl_INEL_K0Short", "Generated_MCGenRecoColl_INEL_K0Short", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCGenRecoColl_INEL_Lambda", "Generated_MCGenRecoColl_INEL_Lambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCGenRecoColl_INEL_AntiLambda", "Generated_MCGenRecoColl_INEL_AntiLambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
+      registry.add("Generated_MCGenRecoColl_INEL_XiMinus", "Generated_MCGenRecoColl_INEL_XiMinus", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
+      registry.add("Generated_MCGenRecoColl_INEL_XiPlus", "Generated_MCGenRecoColl_INEL_XiPlus", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INEL_K0Short", "Generated_MCRecoColl_INEL_K0Short", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INEL_Lambda", "Generated_MCRecoColl_INEL_Lambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INEL_AntiLambda", "Generated_MCRecoColl_INEL_AntiLambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
@@ -122,6 +147,8 @@ struct LfV0qaanalysis {
       registry.add("Generated_MCGenRecoColl_INELgt0_K0Short", "Generated_MCGenRecoColl_INELgt0_K0Short", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCGenRecoColl_INELgt0_Lambda", "Generated_MCGenRecoColl_INELgt0_Lambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCGenRecoColl_INELgt0_AntiLambda", "Generated_MCGenRecoColl_INELgt0_AntiLambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
+      registry.add("Generated_MCGenRecoColl_INELgt0_XiMinus", "Generated_MCGenRecoColl_INELgt0_XiMinus", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
+      registry.add("Generated_MCGenRecoColl_INELgt0_XiPlus", "Generated_MCGenRecoColl_INELgt0_XiPlus", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INELgt0_K0Short", "Generated_MCRecoColl_INELgt0_K0Short", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INELgt0_Lambda", "Generated_MCRecoColl_INELgt0_Lambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCRecoColl_INELgt0_AntiLambda", "Generated_MCRecoColl_INELgt0_AntiLambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
@@ -132,6 +159,7 @@ struct LfV0qaanalysis {
       registry.add("Generated_MCGenColl_INELgt0_Lambda", "Generated_MCGenColl_INELgt0_Lambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
       registry.add("Generated_MCGenColl_INELgt0_AntiLambda", "Generated_MCGenColl_INELgt0_AntiLambda", {HistType::kTH2F, {{250, 0.f, 25.f}, {1000, 0.f, 100.f}}});
     }
+    rctChecker.init(cfgEvtRCTFlagCheckerLabel, cfgEvtRCTFlagCheckerZDCCheck, cfgEvtRCTFlagCheckerLimitAcceptAsBad, applyRCTOnGen);
     registry.print();
   }
 
@@ -143,10 +171,17 @@ struct LfV0qaanalysis {
   Configurable<bool> isTriggerTVX{"isTriggerTVX", 1, "Is Trigger TVX"};
   Configurable<bool> isNoTimeFrameBorder{"isNoTimeFrameBorder", 1, "Is No Time Frame Border"};
   Configurable<bool> isNoITSROFrameBorder{"isNoITSROFrameBorder", 1, "Is No ITS Readout Frame Border"};
+  Configurable<bool> applyBcBorderCutsOnGen{"applyBcBorderCutsOnGen", false, "Apply enabled BC-level TF and ITS ROF border cuts on generated-level MC collisions"};
+  Configurable<bool> applyRCTOnGen{"applyRCTOnGen", false, "Apply enabled BC-level RCT run-condition selection on generated-level MC collisions"};
   Configurable<bool> isVertexTOFmatched{"isVertexTOFmatched", 0, "Is Vertex TOF matched"};
   Configurable<bool> isNoSameBunchPileup{"isNoSameBunchPileup", 0, "isNoSameBunchPileup"};
+  Configurable<std::string> cfgEvtRCTFlagCheckerLabel{"cfgEvtRCTFlagCheckerLabel", "CBT_hadronPID", "Evt sel: RCT flag checker label"};
+  Configurable<bool> cfgEvtRCTFlagCheckerZDCCheck{"cfgEvtRCTFlagCheckerZDCCheck", false, "Evt sel: RCT flag checker ZDC check"};
+  Configurable<bool> cfgEvtRCTFlagCheckerLimitAcceptAsBad{"cfgEvtRCTFlagCheckerLimitAcceptAsBad", false, "Evt sel: RCT flag checker treat Limited Acceptance As Bad"};
   Configurable<int> v0TypeSelection{"v0TypeSelection", 1, "select on a certain V0 type (leave negative if no selection desired)"};
   Configurable<bool> NotITSAfterburner{"NotITSAfterburner", 0, "NotITSAfterburner"};
+
+  RCTFlagsChecker rctChecker;
 
   // V0 selection criteria
   Configurable<double> v0cospa{"v0cospa", 0.97, "V0 CosPA"};
@@ -169,7 +204,7 @@ struct LfV0qaanalysis {
       return false;
     }
     registry.fill(HIST("hNEvents"), 2.5);
-    if (TMath::Abs(collision.posZ()) > cutzvertex) {
+    if (std::abs(collision.posZ()) > cutzvertex) {
       return false;
     }
     registry.fill(HIST("hNEvents"), 3.5);
@@ -193,6 +228,27 @@ struct LfV0qaanalysis {
     return true;
   }
 
+  template <typename TBC>
+  bool acceptGeneratedEventBcBorderCuts(TBC const& bc)
+  {
+    if (!applyBcBorderCutsOnGen) {
+      return true;
+    }
+    if (isNoTimeFrameBorder && !bc.selection_bit(aod::evsel::kNoTimeFrameBorder)) {
+      return false;
+    }
+    if (isNoITSROFrameBorder && !bc.selection_bit(aod::evsel::kNoITSROFrameBorder)) {
+      return false;
+    }
+    return true;
+  }
+
+  template <typename TBC>
+  bool acceptGeneratedEventRCT(TBC const& bc)
+  {
+    return !applyRCTOnGen || rctChecker(bc);
+  }
+
   Filter preFilterV0 = nabs(aod::v0data::dcapostopv) > dcapostopv&&
                                                          nabs(aod::v0data::dcanegtopv) > dcanegtopv&& aod::v0data::dcaV0daughters < dcav0dau;
 
@@ -207,9 +263,9 @@ struct LfV0qaanalysis {
     }
     registry.fill(HIST("hNEvents"), 8.5);
     registry.fill(HIST("hCentFT0M"), collision.centFT0M());
-    registry.fill(HIST("hCentFV0A"), collision.centFV0A());
+    registry.fill(HIST("hCentNGlobals"), collision.centNGlobal());
 
-    for (auto& v0 : V0s) { // loop over V0s
+    for (const auto& v0 : V0s) { // loop over V0s
 
       if (v0.v0Type() != v0TypeSelection) {
         continue;
@@ -230,6 +286,9 @@ struct LfV0qaanalysis {
       }
 
       int lPDG = 0;
+      float ptMotherMC = 0.;
+      float pdgMotherMC = 0.;
+      float yMC = 0.;
       bool isPhysicalPrimary = isMC;
       bool isDauK0Short = false, isDauLambda = false, isDauAntiLambda = false;
 
@@ -239,27 +298,26 @@ struct LfV0qaanalysis {
 
       if (v0.v0radius() > v0radius &&
           v0.v0cosPA() > v0cospa &&
-          TMath::Abs(v0.posTrack_as<DauTracks>().eta()) < etadau &&
-          TMath::Abs(v0.negTrack_as<DauTracks>().eta()) < etadau) {
+          std::abs(v0.posTrack_as<DauTracks>().eta()) < etadau &&
+          std::abs(v0.negTrack_as<DauTracks>().eta()) < etadau) {
 
         // Fill table
-        myv0s(v0.pt(), v0.yLambda(), v0.yK0Short(),
+        myv0s(v0.pt(), ptMotherMC, yMC, v0.yLambda(), v0.yK0Short(),
               v0.mLambda(), v0.mAntiLambda(), v0.mK0Short(),
               v0.v0radius(), v0.v0cosPA(),
               v0.dcapostopv(), v0.dcanegtopv(), v0.dcaV0daughters(),
               v0.posTrack_as<DauTracks>().eta(), v0.negTrack_as<DauTracks>().eta(),
-              v0.posTrack_as<DauTracks>().phi(), v0.negTrack_as<DauTracks>().phi(),
               posITSNhits, negITSNhits, ctauLambda, ctauAntiLambda, ctauK0s,
               v0.negTrack_as<DauTracks>().tpcNSigmaPr(), v0.posTrack_as<DauTracks>().tpcNSigmaPr(),
               v0.negTrack_as<DauTracks>().tpcNSigmaPi(), v0.posTrack_as<DauTracks>().tpcNSigmaPi(),
               v0.negTrack_as<DauTracks>().tofNSigmaPr(), v0.posTrack_as<DauTracks>().tofNSigmaPr(),
               v0.negTrack_as<DauTracks>().tofNSigmaPi(), v0.posTrack_as<DauTracks>().tofNSigmaPi(),
-              v0.posTrack_as<DauTracks>().hasTOF(), v0.negTrack_as<DauTracks>().hasTOF(), lPDG, isDauK0Short, isDauLambda, isDauAntiLambda, isPhysicalPrimary,
-              collision.centFT0M(), collision.centFV0A(), evFlag, v0.alpha(), v0.qtarm(),
-              v0.posTrack_as<DauTracks>().tpcNClsCrossedRows(), v0.posTrack_as<DauTracks>().tpcCrossedRowsOverFindableCls(),
+              v0.posTrack_as<DauTracks>().hasTOF(), v0.negTrack_as<DauTracks>().hasTOF(), lPDG, pdgMotherMC, isDauK0Short, isDauLambda, isDauAntiLambda, isPhysicalPrimary,
+              collision.centFT0M(), collision.centNGlobal(), evFlag, v0.alpha(), v0.qtarm(),
+              v0.posTrack_as<DauTracks>().tpcNClsCrossedRows(),
               v0.posTrack_as<DauTracks>().tpcNClsShared(), v0.posTrack_as<DauTracks>().itsChi2NCl(),
               v0.posTrack_as<DauTracks>().tpcChi2NCl(),
-              v0.negTrack_as<DauTracks>().tpcNClsCrossedRows(), v0.negTrack_as<DauTracks>().tpcCrossedRowsOverFindableCls(),
+              v0.negTrack_as<DauTracks>().tpcNClsCrossedRows(),
               v0.negTrack_as<DauTracks>().tpcNClsShared(), v0.negTrack_as<DauTracks>().itsChi2NCl(),
               v0.negTrack_as<DauTracks>().tpcChi2NCl());
       }
@@ -300,7 +358,7 @@ struct LfV0qaanalysis {
       }
 
       auto v0sThisCollision = V0s.sliceBy(perCol, collision.globalIndex());
-      for (auto& v0 : v0sThisCollision) { // loop over V0s
+      for (const auto& v0 : v0sThisCollision) { // loop over V0s
 
         if (!v0.has_mcParticle()) {
           continue;
@@ -344,12 +402,12 @@ struct LfV0qaanalysis {
         int lPDG = 0;
         bool isDauK0Short = false, isDauLambda = false, isDauAntiLambda = false;
         bool isprimary = false;
-        if (TMath::Abs(v0mcparticle.pdgCode()) == 310 || TMath::Abs(v0mcparticle.pdgCode()) == 3122) {
+        if (std::abs(v0mcparticle.pdgCode()) == 310 || std::abs(v0mcparticle.pdgCode()) == 3122) {
           lPDG = v0mcparticle.pdgCode();
           isprimary = v0mcparticle.isPhysicalPrimary();
         }
-        for (auto& mcparticleDaughter0 : v0mcparticle.daughters_as<aod::McParticles>()) {
-          for (auto& mcparticleDaughter1 : v0mcparticle.daughters_as<aod::McParticles>()) {
+        for (const auto& mcparticleDaughter0 : v0mcparticle.daughters_as<aod::McParticles>()) {
+          for (const auto& mcparticleDaughter1 : v0mcparticle.daughters_as<aod::McParticles>()) {
             if (mcparticleDaughter0.pdgCode() == 211 && mcparticleDaughter1.pdgCode() == -211) {
               isDauK0Short = true;
             }
@@ -358,6 +416,18 @@ struct LfV0qaanalysis {
             }
             if (mcparticleDaughter0.pdgCode() == 211 && mcparticleDaughter1.pdgCode() == -2212) {
               isDauAntiLambda = true;
+            }
+          }
+        }
+
+        float ptMotherMC = 0.;
+        float pdgMother = 0.;
+
+        if (std::abs(v0mcparticle.pdgCode()) == 3122 && v0mcparticle.has_mothers()) {
+          for (const auto& mcparticleMother0 : v0mcparticle.mothers_as<aod::McParticles>()) {
+            if (std::abs(mcparticleMother0.pdgCode()) == 3312 || std::abs(mcparticleMother0.pdgCode()) == 3322) {
+              ptMotherMC = mcparticleMother0.pt();
+              pdgMother = mcparticleMother0.pdgCode();
             }
           }
         }
@@ -371,28 +441,27 @@ struct LfV0qaanalysis {
 
         if (v0.v0radius() > v0radius &&
             v0.v0cosPA() > v0cospa &&
-            TMath::Abs(v0.posTrack_as<DauTracksMC>().eta()) < etadau &&
-            TMath::Abs(v0.negTrack_as<DauTracksMC>().eta()) < etadau // &&
+            std::abs(v0.posTrack_as<DauTracksMC>().eta()) < etadau &&
+            std::abs(v0.negTrack_as<DauTracksMC>().eta()) < etadau // &&
         ) {
 
           // Fill table
-          myv0s(v0.pt(), v0.yLambda(), v0.yK0Short(),
+          myv0s(v0.pt(), ptMotherMC, v0mcparticle.y(), v0.yLambda(), v0.yK0Short(),
                 v0.mLambda(), v0.mAntiLambda(), v0.mK0Short(),
                 v0.v0radius(), v0.v0cosPA(),
                 v0.dcapostopv(), v0.dcanegtopv(), v0.dcaV0daughters(),
                 v0.posTrack_as<DauTracksMC>().eta(), v0.negTrack_as<DauTracksMC>().eta(),
-                v0.posTrack_as<DauTracksMC>().phi(), v0.negTrack_as<DauTracksMC>().phi(),
                 posITSNhits, negITSNhits, ctauLambda, ctauAntiLambda, ctauK0s,
                 v0.negTrack_as<DauTracksMC>().tpcNSigmaPr(), v0.posTrack_as<DauTracksMC>().tpcNSigmaPr(),
                 v0.negTrack_as<DauTracksMC>().tpcNSigmaPi(), v0.posTrack_as<DauTracksMC>().tpcNSigmaPi(),
                 v0.negTrack_as<DauTracksMC>().tofNSigmaPr(), v0.posTrack_as<DauTracksMC>().tofNSigmaPr(),
                 v0.negTrack_as<DauTracksMC>().tofNSigmaPi(), v0.posTrack_as<DauTracksMC>().tofNSigmaPi(),
-                v0.posTrack_as<DauTracksMC>().hasTOF(), v0.negTrack_as<DauTracksMC>().hasTOF(), lPDG, isDauK0Short, isDauLambda, isDauAntiLambda, isprimary,
+                v0.posTrack_as<DauTracksMC>().hasTOF(), v0.negTrack_as<DauTracksMC>().hasTOF(), lPDG, pdgMother, isDauK0Short, isDauLambda, isDauAntiLambda, isprimary,
                 mcCollision.centFT0M(), cent, evFlag, v0.alpha(), v0.qtarm(),
-                v0.posTrack_as<DauTracksMC>().tpcNClsCrossedRows(), v0.posTrack_as<DauTracksMC>().tpcCrossedRowsOverFindableCls(),
+                v0.posTrack_as<DauTracksMC>().tpcNClsCrossedRows(),
                 v0.posTrack_as<DauTracksMC>().tpcNClsShared(), v0.posTrack_as<DauTracksMC>().itsChi2NCl(),
                 v0.posTrack_as<DauTracksMC>().tpcChi2NCl(),
-                v0.negTrack_as<DauTracksMC>().tpcNClsCrossedRows(), v0.negTrack_as<DauTracksMC>().tpcCrossedRowsOverFindableCls(),
+                v0.negTrack_as<DauTracksMC>().tpcNClsCrossedRows(),
                 v0.negTrack_as<DauTracksMC>().tpcNClsShared(), v0.negTrack_as<DauTracksMC>().itsChi2NCl(),
                 v0.negTrack_as<DauTracksMC>().tpcChi2NCl());
         }
@@ -401,7 +470,7 @@ struct LfV0qaanalysis {
       // Generated particles
       const auto particlesInCollision = mcParticles.sliceByCached(aod::mcparticle::mcCollisionId, mcCollision.globalIndex(), cache1);
 
-      for (auto& mcParticle : particlesInCollision) {
+      for (const auto& mcParticle : particlesInCollision) {
         if (!mcParticle.isPhysicalPrimary()) {
           continue;
         }
@@ -435,7 +504,8 @@ struct LfV0qaanalysis {
 
   void processMCGen(soa::Join<aod::McCollisions, aod::McCentFT0Ms>::iterator const& mcCollision,
                     aod::McParticles const& mcParticles,
-                    soa::SmallGroups<soa::Join<aod::Collisions, aod::EvSels, aod::McCollisionLabels, aod::PVMults>> const& collisions)
+                    soa::SmallGroups<soa::Join<aod::Collisions, aod::EvSels, aod::McCollisionLabels, aod::PVMults>> const& collisions,
+                    BCsWithBcSels const&)
   {
     //====================================
     //===== Event Loss Denominator =======
@@ -443,17 +513,26 @@ struct LfV0qaanalysis {
 
     registry.fill(HIST("hNEventsMCGen"), 0.5);
 
-    if (TMath::Abs(mcCollision.posZ()) > MCcutzvertex) {
+    if (std::abs(mcCollision.posZ()) > MCcutzvertex) {
       return;
     }
     registry.fill(HIST("hNEventsMCGen"), 1.5);
+    const auto bc = mcCollision.bc_as<BCsWithBcSels>();
+    if (!acceptGeneratedEventBcBorderCuts(bc)) {
+      return;
+    }
+    registry.fill(HIST("hNEventsMCGen"), 2.5);
+    if (!acceptGeneratedEventRCT(bc)) {
+      return;
+    }
+    registry.fill(HIST("hNEventsMCGen"), 3.5);
     registry.fill(HIST("hCentFT0M_GenColl_MC"), mcCollision.centFT0M());
 
     bool isINELgt0true = false;
 
     if (pwglf::isINELgtNmc(mcParticles, 0, pdgDB)) {
       isINELgt0true = true;
-      registry.fill(HIST("hNEventsMCGen"), 2.5);
+      registry.fill(HIST("hNEventsMCGen"), 4.5);
       registry.fill(HIST("hCentFT0M_GenColl_MC_INELgt0"), mcCollision.centFT0M());
     }
 
@@ -461,7 +540,7 @@ struct LfV0qaanalysis {
     //===== Signal Loss Denominator =======
     //=====================================
 
-    for (auto& mcParticle : mcParticles) {
+    for (const auto& mcParticle : mcParticles) {
 
       if (!mcParticle.isPhysicalPrimary()) {
         continue;
@@ -492,7 +571,7 @@ struct LfV0qaanalysis {
 
     int recoCollIndex_INEL = 0;
     int recoCollIndex_INELgt0 = 0;
-    for (auto& collision : collisions) { // loop on reconstructed collisions
+    for (const auto& collision : collisions) { // loop on reconstructed collisions
 
       //=====================================
       //====== Event Split Numerator ========
@@ -519,7 +598,7 @@ struct LfV0qaanalysis {
       //======== Sgn Split Numerator ========
       //=====================================
 
-      for (auto& mcParticle : mcParticles) {
+      for (const auto& mcParticle : mcParticles) {
 
         if (!mcParticle.isPhysicalPrimary()) {
           continue;
@@ -571,7 +650,7 @@ struct LfV0qaanalysis {
     //===== Signal Loss Numerator =========
     //=====================================
 
-    for (auto& mcParticle : mcParticles) {
+    for (const auto& mcParticle : mcParticles) {
 
       if (!mcParticle.isPhysicalPrimary()) {
         continue;
@@ -597,6 +676,18 @@ struct LfV0qaanalysis {
         registry.fill(HIST("Generated_MCGenRecoColl_INEL_AntiLambda"), mcParticle.pt(), mcCollision.centFT0M()); // AntiLambda
         if (recoCollIndex_INELgt0 > 0) {
           registry.fill(HIST("Generated_MCGenRecoColl_INELgt0_AntiLambda"), mcParticle.pt(), mcCollision.centFT0M()); // AntiLambda
+        }
+      }
+      if (mcParticle.pdgCode() == 3312) {
+        registry.fill(HIST("Generated_MCGenRecoColl_INEL_XiMinus"), mcParticle.pt(), mcCollision.centFT0M()); // XiMinus
+        if (recoCollIndex_INELgt0 > 0) {
+          registry.fill(HIST("Generated_MCGenRecoColl_INELgt0_XiMinus"), mcParticle.pt(), mcCollision.centFT0M()); // XiMinus
+        }
+      }
+      if (mcParticle.pdgCode() == -3312) {
+        registry.fill(HIST("Generated_MCGenRecoColl_INEL_XiPlus"), mcParticle.pt(), mcCollision.centFT0M()); // XiPlus
+        if (recoCollIndex_INELgt0 > 0) {
+          registry.fill(HIST("Generated_MCGenRecoColl_INELgt0_XiPlus"), mcParticle.pt(), mcCollision.centFT0M()); // XiPlus
         }
       }
     }
@@ -636,7 +727,7 @@ struct LfMyV0s {
 
   void process(aod::MyV0Candidates const& myv0s)
   {
-    for (auto& candidate : myv0s) {
+    for (const auto& candidate : myv0s) {
 
       registry.fill(HIST("hMassLambda"), candidate.masslambda());
       registry.fill(HIST("hPt"), candidate.v0pt());

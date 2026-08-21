@@ -9,9 +9,10 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -20,6 +21,7 @@ struct Run2BCInfosConverter {
   Produces<aod::Run2BCInfos_001> Run2BCInfos_001;
   void process(aod::Run2BCInfos_000 const& Run2BCInfos_000)
   {
+    Run2BCInfos_001.reserve(Run2BCInfos_000.size());
 
     for (const auto& entry : Run2BCInfos_000) {
       Run2BCInfos_001(entry.eventCuts(),

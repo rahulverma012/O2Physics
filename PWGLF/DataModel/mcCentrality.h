@@ -20,11 +20,10 @@
 #ifndef PWGLF_DATAMODEL_MCCENTRALITY_H_
 #define PWGLF_DATAMODEL_MCCENTRALITY_H_
 
-// O2 includes
-#include "Framework/ASoA.h"
-#include "Framework/AnalysisDataModel.h"
 #include "Common/DataModel/Centrality.h"
-#include "Framework/Logger.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
 
 namespace o2::aod
 {

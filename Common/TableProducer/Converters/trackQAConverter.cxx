@@ -8,11 +8,13 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include <limits>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <cstdint>
+#include <limits>
 
 using namespace o2;
 using namespace o2::framework;
@@ -22,6 +24,7 @@ struct trackQAConverter {
 
   void process(aod::TracksQA_000 const& tracksQA_000)
   {
+    tracksQA_001.reserve(tracksQA_000.size());
     for (const auto& trackQA : tracksQA_000) {
       tracksQA_001(
         trackQA.trackId(),

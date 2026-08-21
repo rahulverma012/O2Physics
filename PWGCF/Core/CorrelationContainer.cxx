@@ -15,20 +15,29 @@
 // Author: Jan Fiete Grosse-Oetringhaus
 
 #include "PWGCF/Core/CorrelationContainer.h"
-#include "Framework/StepTHn.h"
-#include "Framework/Logger.h"
-#include "THnSparse.h"
-#include "TMath.h"
-#include "TList.h"
-#include "TCollection.h"
-#include "TH1D.h"
-#include "TH2D.h"
-#include "TH3D.h"
-#include "TCanvas.h"
-#include "TF1.h"
-#include "THn.h"
-#include "Framework/HistogramSpec.h"
-#include "CommonConstants/MathConstants.h"
+
+#include <CommonConstants/MathConstants.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+#include <Framework/StepTHn.h>
+
+#include <TCanvas.h>
+#include <TCollection.h>
+#include <TF1.h>
+#include <THn.h>
+#include <TIterator.h>
+#include <TList.h>
+#include <TMath.h>
+#include <TMathBase.h>
+#include <TNamed.h>
+#include <TObject.h>
+#include <TString.h>
+
+#include <Rtypes.h>
+#include <RtypesCore.h>
+
+#include <cstring>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -115,7 +124,7 @@ CorrelationContainer::CorrelationContainer(const char* name, const char* objTitl
   triggerAxis.insert(triggerAxis.end(), userAxis.begin(), userAxis.end());
   mTriggerHist = HistFactory::createHist<StepTHnF>({"mTriggerHist", "d^{2}N_{ch}/d#varphid#eta", {HistType::kStepTHnF, triggerAxis, fgkCFSteps}}).release();
 
-  mTrackHistEfficiency = HistFactory::createHist<StepTHnD>({"mTrackHistEfficiency", "Tracking efficiency", {HistType::kStepTHnD, {efficiencyAxis[0], efficiencyAxis[1], {4, -0.5, 3.5, "species"}, correlationAxis[3], efficiencyAxis[2]}, fgkCFSteps}}).release();
+  mTrackHistEfficiency = HistFactory::createHist<StepTHnF>({"mTrackHistEfficiency", "Tracking efficiency", {HistType::kStepTHnF, {efficiencyAxis[0], efficiencyAxis[1], {5, -0.5, 4.5, "species"}, correlationAxis[3], efficiencyAxis[2]}, fgkCFSteps}}).release();
 
   mEventCount = HistFactory::createHist<TH2F>({"mEventCount", ";step;centrality;count", {HistType::kTH2F, {{fgkCFSteps + 2, -2.5, -0.5 + fgkCFSteps, "step"}, correlationAxis[3]}}}).release();
 }
@@ -309,7 +318,7 @@ void CorrelationContainer::resetBinLimits(THnBase* grid, int max_dimension)
 
   for (Int_t i = 0; i < max_dimension; i++) {
     if (grid->GetAxis(i)->TestBit(TAxis::kAxisRange)) {
-      grid->GetAxis(i)->SetRangeUser(0, -1);
+      grid->GetAxis(i)->SetRange(0, 0); // reset range
     }
   }
 }
@@ -681,8 +690,11 @@ TH2* CorrelationContainer::getSumOfRatios(CorrelationContainer* mixed, Correlati
         Double_t sums[] = {0, 0, 0};
         Double_t errors[] = {0, 0, 0};
 
+        Int_t checkBinYBegin = 1;                     // tracksSame->GetXaxis()->FindBin(-0.79);
+        Int_t checkBinYEnd = tracksSame->GetNbinsY(); // tracksSame->GetXaxis()->FindBin(0.79);
+
         for (Int_t x = 1; x <= tracksSame->GetNbinsX(); x++) {
-          for (Int_t y = 1; y <= tracksSame->GetNbinsY(); y++) {
+          for (Int_t y = checkBinYBegin; y <= checkBinYEnd; y++) {
             sums[0] += tracksSame->GetBinContent(x, y);
             errors[0] += tracksSame->GetBinError(x, y);
             sums[1] += tracksMixed->GetBinContent(x, y);
@@ -693,7 +705,7 @@ TH2* CorrelationContainer::getSumOfRatios(CorrelationContainer* mixed, Correlati
         tracksSame->Divide(tracksMixed);
 
         for (Int_t x = 1; x <= tracksSame->GetNbinsX(); x++) {
-          for (Int_t y = 1; y <= tracksSame->GetNbinsY(); y++) {
+          for (Int_t y = checkBinYBegin; y <= checkBinYEnd; y++) {
             sums[2] += tracksSame->GetBinContent(x, y);
             errors[2] += tracksSame->GetBinError(x, y);
           }

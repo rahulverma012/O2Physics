@@ -15,20 +15,37 @@
 ///
 /// \author Phil Stahlhut <phil.lennart.stahlhut@cern.ch>
 
-#include <string>
-#include <vector>
-
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/RunningWorkflowInfo.h"
-
-#include "Common/Core/TrackSelectorPID.h"
-
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/Core/HfMlResponse.h"
 #include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
+
+#include "Common/Core/TrackSelectorPID.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CCDB/CcdbApi.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
+#include <Framework/Configurable.h>
+#include <Framework/DeviceSpec.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/RunningWorkflowInfo.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TH2.h>
+
+#include <Rtypes.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::aod;
@@ -74,12 +91,11 @@ struct HfCandidateSelectorBsToDsPi {
   bool selectionFlagDsAndUsePidInSync = true;
 
   o2::analysis::HfMlResponse<float> hfMlResponse;
-  std::vector<float> outputMl = {};
+  std::vector<float> outputMl;
 
   o2::ccdb::CcdbApi ccdbApi;
 
   TrackSelectorPi selectorPion;
-  HfHelper hfHelper;
 
   using TracksPidWithSel = soa::Join<aod::TracksWExtra, aod::TracksPidPi, aod::TrackSelection>;
 
@@ -122,11 +138,11 @@ struct HfCandidateSelectorBsToDsPi {
     }
 
     int selectionFlagDs = -1;
-    auto& workflows = initContext.services().get<RunningWorkflowInfo const>();
+    const auto& workflows = initContext.services().get<RunningWorkflowInfo const>();
     for (const DeviceSpec& device : workflows.devices) {
-      if (device.name.compare("hf-candidate-creator-bs") == 0) {
+      if (device.name == "hf-candidate-creator-bs") {
         for (const auto& option : device.options) {
-          if (option.name.compare("selectionFlagDs") == 0) {
+          if (option.name == "selectionFlagDs") {
             selectionFlagDs = option.defaultValue.get<int>();
             LOGF(info, "selectionFlagDs = %d", selectionFlagDs);
           }
@@ -158,7 +174,7 @@ struct HfCandidateSelectorBsToDsPi {
       }
 
       // topological cuts
-      if (!hfHelper.selectionBsToDsPiTopol(hfCandBs, cuts, binsPt)) {
+      if (!HfHelper::selectionBsToDsPiTopol(hfCandBs, cuts, binsPt)) {
         hfSelBsToDsPiCandidate(statusBsToDsPi);
         if (applyMl) {
           hfMlBsToDsPiCandidate(outputMl);
@@ -181,8 +197,8 @@ struct HfCandidateSelectorBsToDsPi {
       // track-level PID selection
       if (usePid) {
         auto trackPi = hfCandBs.prong1_as<TracksPidWithSel>();
-        int pidTrackPi = selectorPion.statusTpcAndTof(trackPi);
-        if (!hfHelper.selectionBsToDsPiPid(pidTrackPi, acceptPIDNotApplicable.value)) {
+        int const pidTrackPi = selectorPion.statusTpcAndTof(trackPi);
+        if (!HfHelper::selectionBsToDsPiPid(pidTrackPi, acceptPIDNotApplicable.value)) {
           hfSelBsToDsPiCandidate(statusBsToDsPi);
           if (applyMl) {
             hfMlBsToDsPiCandidate(outputMl);
@@ -207,7 +223,7 @@ struct HfCandidateSelectorBsToDsPi {
                                          hfCandBs.maxNormalisedDeltaIP(),
                                          hfCandBs.impactParameterProduct()};
 
-        bool isSelectedMl = hfMlResponse.isSelectedMl(inputFeatures, ptCandBs, outputMl);
+        bool const isSelectedMl = hfMlResponse.isSelectedMl(inputFeatures, ptCandBs, outputMl);
         hfMlBsToDsPiCandidate(outputMl);
 
         if (!isSelectedMl) {

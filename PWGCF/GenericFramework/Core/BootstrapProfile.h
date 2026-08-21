@@ -9,14 +9,20 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+/// \file BootstrapProfile.h/.cxx
+/// \brief Derived class from TProfile that stores extra TProfiles for bootstrap samples
+/// \author Emil Gorm Nielsen (ack. V. Vislavicius), NBI, emil.gorm.nielsen@cern.ch
+
 #ifndef PWGCF_GENERICFRAMEWORK_CORE_BOOTSTRAPPROFILE_H_
 #define PWGCF_GENERICFRAMEWORK_CORE_BOOTSTRAPPROFILE_H_
 
-#include "TProfile.h"
-#include "TList.h"
-#include "TString.h"
-#include "TCollection.h"
-#include "TMath.h"
+#include <TCollection.h>
+#include <TH1.h>
+#include <TList.h>
+#include <TProfile.h>
+
+#include <Rtypes.h>
+#include <RtypesCore.h>
 
 class BootstrapProfile : public TProfile
 {

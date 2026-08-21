@@ -8,9 +8,15 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -35,6 +41,7 @@ struct collisionConverter {
   void process(aod::Collisions_000 const& collisionTable)
   {
     float negtolerance = -1.0f * tolerance;
+    Collisions_001.reserve(collisionTable.size());
     for (auto& collision : collisionTable) {
       float lYY = collision.covXZ();
       float lXZ = collision.covYY();

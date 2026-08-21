@@ -16,6 +16,8 @@
 #ifndef PWGLF_UTILS_STRANGENESSMASKS_H_
 #define PWGLF_UTILS_STRANGENESSMASKS_H_
 
+#include <bitset>
+
 enum SelectionsCombined : int { selV0CosPA = 0,
                                 selV0Radius,
                                 selV0RadiusMax,
@@ -119,9 +121,12 @@ enum SelectionsCombined : int { selV0CosPA = 0,
 
 static constexpr int kSelNum = static_cast<int>(SelectionsCombined::selCount);
 
-// constants
-const float ctauxiPDG = 4.91;     // from PDG
-const float ctauomegaPDG = 2.461; // from PDG
+// constants in cm
+const float ctauxiPDG = 4.91;
+const float ctauomegaPDG = 2.46;
+
+const float ctauk0shortPDG = 2.68;
+const float ctaulambdaPDG = 7.85;
 
 // bit masks
 std::bitset<kSelNum> maskTopologicalV0;
@@ -144,6 +149,10 @@ std::bitset<kSelNum> maskAntiOmegaSpecific;
 std::bitset<kSelNum> maskSelectionK0Short;
 std::bitset<kSelNum> maskSelectionLambda;
 std::bitset<kSelNum> maskSelectionAntiLambda;
+
+std::bitset<kSelNum> secondaryMaskSelectionLambda;
+std::bitset<kSelNum> secondaryMaskSelectionAntiLambda;
+
 std::bitset<kSelNum> maskSelectionXi;
 std::bitset<kSelNum> maskSelectionAntiXi;
 std::bitset<kSelNum> maskSelectionOmega;

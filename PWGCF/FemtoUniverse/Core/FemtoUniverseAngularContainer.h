@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -20,19 +20,18 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEANGULARCONTAINER_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEANGULARCONTAINER_H_
 
-#include <fairlogger/Logger.h>
-#include <vector>
-#include <string>
-
-#include "Framework/HistogramRegistry.h"
-#include "Common/Core/RecoDecay.h"
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseMath.h"
+#include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
 
-#include "Math/Vector4D.h"
-#include "TMath.h"
-#include "TDatabasePDG.h"
+#include <CommonConstants/MathConstants.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
 
-using namespace o2::framework;
+#include <TDatabasePDG.h>
+
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace o2::analysis::femto_universe
 {
@@ -74,7 +73,7 @@ class FemtoUniverseAngularContainer
   template <typename T>
   void initBase(std::string folderName, std::string /*femtoObs*/, T /*femtoObsAxis*/, T /*multAxis*/, T /*kTAxis*/, T /*mTAxis*/, T /*multAxis3D*/, T /*mTAxis3D*/, T etaAxis, T phiAxis, bool use3dplots)
   {
-    mHistogramRegistry->add((folderName + "/DeltaEtaDeltaPhi").c_str(), ";  #Delta#varphi (rad); #Delta#eta", kTH2F, {phiAxis, etaAxis});
+    mHistogramRegistry->add((folderName + "/DeltaEtaDeltaPhi").c_str(), ";  #Delta#varphi (rad); #Delta#eta", o2::framework::HistType::kTH2F, {phiAxis, etaAxis});
     if (use3dplots) {
       // use 3d plots
     }
@@ -103,7 +102,7 @@ class FemtoUniverseAngularContainer
   /// \param phiBins phi binning for the histograms
   /// \param isMC add Monte Carlo truth histograms to the output file
   template <typename T, typename P>
-  void init(HistogramRegistry* registry, T& kstarBins, T& multBins, T& kTBins, T& mTBins, T& multBins3D, T& mTBins3D, P& etaBins, P& phiBins, bool isMC, bool use3dplots)
+  void init(o2::framework::HistogramRegistry* registry, T& kstarBins, T& multBins, T& kTBins, T& mTBins, T& multBins3D, T& mTBins3D, P& etaBins, P& phiBins, bool isMC, bool use3dplots)
   {
     mHistogramRegistry = registry;
     std::string femtoObs;
@@ -206,7 +205,7 @@ class FemtoUniverseAngularContainer
     const float mT = FemtoUniverseMath::getmT(part1, mMassOne, part2, mMassTwo);
 
     if (mHistogramRegistry) {
-      setPairBase<o2::aod::femtouniverse_mc_particle::MCType::kRecon>(femtoObs, mT, part1, part2, mult, use3dplots);
+      setPairBase<o2::aod::femtouniverse_mc_particle::MCType::kRecon>(femtoObs, mT, part1, part2, mult, use3dplots, weight);
 
       if constexpr (isMC) {
         if (part1.has_fdMCParticle() && part2.has_fdMCParticle()) {
@@ -229,7 +228,7 @@ class FemtoUniverseAngularContainer
   }
 
  protected:
-  HistogramRegistry* mHistogramRegistry = nullptr;                                 ///< For QA output
+  o2::framework::HistogramRegistry* mHistogramRegistry = nullptr;                  ///< For QA output
   static constexpr std::string_view FolderSuffix[2] = {"SameEvent", "MixedEvent"}; ///< Folder naming for the output according to EventType
   static constexpr femto_universe_angular_container::Observable FemtoObs = obs;    ///< Femtoscopic observable to be computed (according to femto_universe_angular_container::Observable)
   static constexpr int EventType = eventType;                                      ///< Type of the event (same/mixed, according to femto_universe_angular_container::EventType)

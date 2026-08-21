@@ -16,17 +16,10 @@
 #ifndef PWGLF_DATAMODEL_LAMBDAJETPOLARIZATION_H_
 #define PWGLF_DATAMODEL_LAMBDAJETPOLARIZATION_H_
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "PWGLF/DataModel/LFStrangenessTables.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/Centrality.h"
-#include "TRandom.h"
-#include "Math/Vector4D.h"
-#include "Math/Boost.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+
+#include <RtypesCore.h>
 
 namespace o2::aod
 {
@@ -64,6 +57,10 @@ DECLARE_SOA_COLUMN(LeadingJetpT, leadingjetpt, Float_t);
 } // namespace myTable
 
 DECLARE_SOA_TABLE(MyTable, "AOD", "MYTABLE", o2::soa::Index<>,
+                  myTable::MyCollisionId, myTable::MyCollisionV0, myTable::V0px, myTable::V0py, myTable::V0pz, myTable::V0pT, myTable::V0Lambdamass,
+                  myTable::V0protonpx, myTable::V0protonpy, myTable::V0protonpz);
+
+DECLARE_SOA_TABLE(MyTableAnti, "AOD", "MYTABLEAnti", o2::soa::Index<>,
                   myTable::MyCollisionId, myTable::MyCollisionV0, myTable::V0px, myTable::V0py, myTable::V0pz, myTable::V0pT, myTable::V0Lambdamass,
                   myTable::V0protonpx, myTable::V0protonpy, myTable::V0protonpz);
 

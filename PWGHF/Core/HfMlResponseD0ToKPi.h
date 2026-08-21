@@ -17,14 +17,15 @@
 #ifndef PWGHF_CORE_HFMLRESPONSED0TOKPI_H_
 #define PWGHF_CORE_HFMLRESPONSED0TOKPI_H_
 
-#include <map>
-#include <string>
-#include <vector>
-
-#include "CommonConstants/PhysicsConstants.h"
-
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/Core/HfMlResponse.h"
+
+#include "Tools/ML/MlResponse.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+
+#include <cstdint>
+#include <vector>
 
 // Fill the map of available input features
 // the key is the feature's name (std::string)
@@ -53,28 +54,28 @@
   }
 
 // Variation of CHECK_AND_FILL_VEC_D0_FULL(OBJECT, FEATURE, GETTER)
-// where GETTER is a method of hfHelper
+// where GETTER is a method of HfHelper
 #define CHECK_AND_FILL_VEC_D0_HFHELPER(OBJECT, FEATURE, GETTER) \
   case static_cast<uint8_t>(InputFeaturesD0ToKPi::FEATURE): {   \
-    inputFeatures.emplace_back(hfHelper.GETTER(OBJECT));        \
+    inputFeatures.emplace_back(HfHelper::GETTER(OBJECT));       \
     break;                                                      \
   }
 
 // Variation of CHECK_AND_FILL_VEC_D0_HFHELPER(OBJECT, FEATURE, GETTER)
-// where GETTER1 and GETTER2 are methods of hfHelper, and the variable
+// where GETTER1 and GETTER2 are methods of HfHelper, and the variable
 // is filled depending on whether it is a D0 or a D0bar
 #define CHECK_AND_FILL_VEC_D0_HFHELPER_SIGNED(OBJECT, FEATURE, GETTER1, GETTER2) \
   case static_cast<uint8_t>(InputFeaturesD0ToKPi::FEATURE): {                    \
     if (pdgCode == o2::constants::physics::kD0) {                                \
-      inputFeatures.emplace_back(hfHelper.GETTER1(OBJECT));                      \
+      inputFeatures.emplace_back(HfHelper::GETTER1(OBJECT));                     \
     } else {                                                                     \
-      inputFeatures.emplace_back(hfHelper.GETTER2(OBJECT));                      \
+      inputFeatures.emplace_back(HfHelper::GETTER2(OBJECT));                     \
     }                                                                            \
     break;                                                                       \
   }
 
 // Variation of CHECK_AND_FILL_VEC_D0_HFHELPER(OBJECT, FEATURE, GETTER)
-// where GETTER1 and GETTER2 are methods of hfHelper, and the variable
+// where GETTER1 and GETTER2 are methods of HfHelper, and the variable
 // is filled depending on whether it is a D0 or a D0bar
 #define CHECK_AND_FILL_VEC_D0_OBJECT_HFHELPER_SIGNED(OBJECT1, OBJECT2, FEATURE, GETTER) \
   case static_cast<uint8_t>(InputFeaturesD0ToKPi::FEATURE): {                           \
@@ -174,8 +175,6 @@ class HfMlResponseD0ToKPi : public HfMlResponse<TypeOutputScore>
   /// Default destructor
   virtual ~HfMlResponseD0ToKPi() = default;
 
-  HfHelper hfHelper;
-
   /// Method to get the input features vector needed for ML inference
   /// \param candidate is the D0 candidate
   /// \return inputFeatures vector
@@ -226,8 +225,8 @@ class HfMlResponseD0ToKPi : public HfMlResponse<TypeOutputScore>
         CHECK_AND_FILL_VEC_D0_SIGNED(candidate, nSigTpcTofKaExpKa, tpcTofNSigmaKa1, tpcTofNSigmaKa0);
 
         CHECK_AND_FILL_VEC_D0_ML(candidate, bdtOutputBkg, mlProbD0, mlProbD0bar, 0);
-        CHECK_AND_FILL_VEC_D0_ML(candidate, bdtOutputNonPrompt, mlProbD0, mlProbD0bar, 1);
-        CHECK_AND_FILL_VEC_D0_ML(candidate, bdtOutputPrompt, mlProbD0, mlProbD0bar, 2);
+        CHECK_AND_FILL_VEC_D0_ML(candidate, bdtOutputPrompt, mlProbD0, mlProbD0bar, 1);
+        CHECK_AND_FILL_VEC_D0_ML(candidate, bdtOutputNonPrompt, mlProbD0, mlProbD0bar, 2);
 
         CHECK_AND_FILL_VEC_D0(maxNormalisedDeltaIP);
         CHECK_AND_FILL_VEC_D0_FULL(candidate, impactParameterProduct, impactParameterProduct);

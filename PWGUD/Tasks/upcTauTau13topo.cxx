@@ -17,33 +17,131 @@
 // copts="--configuration json://tautauConfig.json -b"
 // o2-analysis-ud-tautau13topo $copts > output.log
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-
-// #include "TDatabasePDG.h" // not recommended in o2
-#include "Framework/O2DatabasePDGPlugin.h"
-
-#include "TLorentzVector.h"
-// #include "Common/DataModel/EventSelection.h"
-// #include "Common/DataModel/TrackSelectionTables.h"
-
-#include "Common/DataModel/PIDResponse.h"
-#include "PWGUD/DataModel/UDTables.h"
-#include "PWGUD/Core/UDHelpers.h"
-#include "PWGUD/Core/DGPIDSelector.h"
 #include "PWGUD/Core/SGSelector.h"
+#include "PWGUD/DataModel/UDTables.h"
 
 #include "Common/Core/RecoDecay.h"
-// #include <CommonUtils/EnumFlags.h>
-#include "TPDGCode.h"
+
+#include <CommonConstants/MathConstants.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
+
+#include <Math/GenVector/LorentzVector.h>
+#include <Math/GenVector/PxPyPzE4D.h>
+#include <TH1.h>
+#include <TH2.h>
+#include <TPDGCode.h>
+#include <TVector3.h>
+
+#include <Rtypes.h>
+
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <string_view>
 
 using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 using namespace o2::constants::physics;
 
+// derived tables for tautau->4 (=1+3) tracks
+namespace o2::aod
+{
+namespace tau_tree
+{
+// event info
+DECLARE_SOA_COLUMN(RunNumber, runNumber, int32_t);
+DECLARE_SOA_COLUMN(Bc, bc, int);
+DECLARE_SOA_COLUMN(TotalTracks, totalTracks, int);
+DECLARE_SOA_COLUMN(NumContrib, numContrib, int8_t);
+DECLARE_SOA_COLUMN(RctOk, rctOk, int);
+// DECLARE_SOA_COLUMN(GlobalNonPVtracks, globalNonPVtracks, int);
+// DECLARE_SOA_COLUMN(PosX, posX, float);
+// DECLARE_SOA_COLUMN(PosY, posY, float);
+DECLARE_SOA_COLUMN(PosZ, posZ, float);
+DECLARE_SOA_COLUMN(FlagUPC, flagUPC, bool);
+DECLARE_SOA_COLUMN(OccupancyInTime, occupancyInTime, int);
+DECLARE_SOA_COLUMN(HadronicRate, hadronicRate, double);
+DECLARE_SOA_COLUMN(Trs, trs, bool);
+DECLARE_SOA_COLUMN(Trofs, trofs, bool);
+DECLARE_SOA_COLUMN(Hmpr, hmpr, bool);
+DECLARE_SOA_COLUMN(Tfb, tfb, bool);
+DECLARE_SOA_COLUMN(ItsRofb, itsRofb, bool);
+DECLARE_SOA_COLUMN(Sbp, sbp, bool);
+DECLARE_SOA_COLUMN(ZvtxFT0vsPv, zvtxFT0vsPv, bool);
+DECLARE_SOA_COLUMN(VtxITSTPC, vtxITSTPC, bool);
+DECLARE_SOA_COLUMN(ZdcAenergy, zdcAenergy, float);
+DECLARE_SOA_COLUMN(ZdcCenergy, zdcCenergy, float);
+DECLARE_SOA_COLUMN(Qtot, qtot, int8_t);
+// FIT info
+DECLARE_SOA_COLUMN(TotalFT0AmplitudeA, totalFT0AmplitudeA, float);
+DECLARE_SOA_COLUMN(TotalFT0AmplitudeC, totalFT0AmplitudeC, float);
+DECLARE_SOA_COLUMN(TotalFV0AmplitudeA, totalFV0AmplitudeA, float);
+// DECLARE_SOA_COLUMN(TimeFT0A, timeFT0A, float);
+// DECLARE_SOA_COLUMN(TimeFT0C, timeFT0C, float);
+// DECLARE_SOA_COLUMN(TimeFV0A, timeFV0A, float);
+// tracks
+DECLARE_SOA_COLUMN(TrkPx, trkPx, float[4]);
+DECLARE_SOA_COLUMN(TrkPy, trkPy, float[4]);
+DECLARE_SOA_COLUMN(TrkPz, trkPz, float[4]);
+DECLARE_SOA_COLUMN(TrkSign, trkSign, int8_t[4]);
+DECLARE_SOA_COLUMN(TrkDCAxy, trkDCAxy, float[4]);
+DECLARE_SOA_COLUMN(TrkDCAz, trkDCAz, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCcr, trkTPCcr, int[4]);
+DECLARE_SOA_COLUMN(TrkTPCfind, trkTPCfind, int[4]);
+DECLARE_SOA_COLUMN(TrkTPCchi2, trkTPCchi2, float[4]);
+DECLARE_SOA_COLUMN(TrkITSchi2, trkITSchi2, float[4]);
+DECLARE_SOA_COLUMN(TrkITScl, trkITScl, int[4]);
+
+DECLARE_SOA_COLUMN(TrkTPCsignal, trkTPCsignal, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCnSigmaEl, trkTPCnSigmaEl, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCnSigmaPi, trkTPCnSigmaPi, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCnSigmaKa, trkTPCnSigmaKa, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCnSigmaPr, trkTPCnSigmaPr, float[4]);
+DECLARE_SOA_COLUMN(TrkTPCnSigmaMu, trkTPCnSigmaMu, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFbeta, trkTOFbeta, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFnSigmaEl, trkTOFnSigmaEl, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFnSigmaPi, trkTOFnSigmaPi, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFnSigmaKa, trkTOFnSigmaKa, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFnSigmaPr, trkTOFnSigmaPr, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFnSigmaMu, trkTOFnSigmaMu, float[4]);
+DECLARE_SOA_COLUMN(TrkTOFchi2, trkTOFchi2, float[4]);
+
+} // end of namespace tau_tree
+DECLARE_SOA_TABLE(TauFourTracks, "AOD", "TAUFOURTRACK",
+                  tau_tree::RunNumber, tau_tree::Bc, tau_tree::TotalTracks, tau_tree::NumContrib,
+                  tau_tree::RctOk,
+                  // tau_tree::GlobalNonPVtracks,
+                  // tau_tree::PosX, tau_tree::PosY,
+                  tau_tree::PosZ,
+                  tau_tree::FlagUPC, tau_tree::OccupancyInTime, tau_tree::HadronicRate, tau_tree::ZdcAenergy, tau_tree::ZdcCenergy,
+                  tau_tree::Qtot,
+                  tau_tree::Trs, tau_tree::Trofs, tau_tree::Hmpr,
+                  tau_tree::Tfb, tau_tree::ItsRofb, tau_tree::Sbp, tau_tree::ZvtxFT0vsPv, tau_tree::VtxITSTPC,
+                  tau_tree::TotalFT0AmplitudeA, tau_tree::TotalFT0AmplitudeC, tau_tree::TotalFV0AmplitudeA,
+                  // tau_tree::TimeFT0A, tau_tree::TimeFT0C, tau_tree::TimeFV0A,
+                  tau_tree::TrkPx, tau_tree::TrkPy, tau_tree::TrkPz,
+                  tau_tree::TrkSign,
+                  tau_tree::TrkDCAxy, tau_tree::TrkDCAz,
+                  tau_tree::TrkTPCcr,
+                  tau_tree::TrkTPCfind, tau_tree::TrkTPCchi2, tau_tree::TrkITSchi2, tau_tree::TrkITScl,
+                  tau_tree::TrkTPCsignal, tau_tree::TrkTPCnSigmaEl, tau_tree::TrkTPCnSigmaPi, tau_tree::TrkTPCnSigmaKa, tau_tree::TrkTPCnSigmaPr, tau_tree::TrkTPCnSigmaMu,
+                  tau_tree::TrkTOFbeta, tau_tree::TrkTOFnSigmaEl, tau_tree::TrkTOFnSigmaPi, tau_tree::TrkTOFnSigmaKa, tau_tree::TrkTOFnSigmaPr, tau_tree::TrkTOFnSigmaMu,
+                  tau_tree::TrkTOFchi2);
+
+} // end of namespace o2::aod
+
 struct TauTau13topo {
+  Produces<o2::aod::TauFourTracks> tauFourTracks;
+
   SGSelector sgSelector;
   // configurables
   Configurable<float> cutFV0{"cutFV0", 10000., "FV0A threshold"};
@@ -55,7 +153,7 @@ struct TauTau13topo {
   ConfigurableAxis ptAxis{"ptAxis", {120, 0., 4.}, "#it{p} (GeV/#it{c})"};
   //  ConfigurableAxis etaAxis{"etaAxis", {100, -2., 2.}, "#eta"};
   ConfigurableAxis dedxAxis{"dedxAxis", {100, 20., 160.}, "dE/dx"};
-  ConfigurableAxis minvAxis{"minvAxis", {100, 0.4, 3.5}, "M_{inv} (GeV/#it{c}^{2})"};
+  ConfigurableAxis minvAxis{"minvAxis", {100, 0.5, 5.0}, "M_{inv} (GeV/#it{c}^{2})"};
   ConfigurableAxis phiAxis{"phiAxis", {120, 0., 3.2}, "#phi"};
   //  ConfigurableAxis vectorAxis{"vectorAxis", {100, 0., 2.}, "A_{V}"};
   //  ConfigurableAxis scalarAxis{"scalarAxis", {100, -1., 1.}, "A_{S}"};
@@ -64,7 +162,7 @@ struct TauTau13topo {
   // cut selection configurables
   Configurable<float> zvertexcut{"zvertexcut", 10., "Z vertex cut"};
   Configurable<float> trkEtacut{"trkEtacut", 0.9, "max track eta cut"};
-  Configurable<bool> sameSign{"sameSign", {}, "Switch: same(true) or opposite(false) sign"};
+  Configurable<bool> sameSign{"sameSign", {}, "Switch: same (true) - BG or opposite (false) - SIGNAL sign"};
   Configurable<float> ptTotcut{"ptTotcut", 0.15, "min pt of all 4 tracks cut"};
   Configurable<float> minAnglecut{"minAnglecut", 0.05, "min angle between tracks cut"};
   Configurable<float> minNsigmaElcut{"minNsigmaElcut", -2., "min Nsigma for Electrons cut"};
@@ -73,8 +171,8 @@ struct TauTau13topo {
   Configurable<float> maxNsigmaPrVetocut{"maxNsigmaPrVetocut", 3., "max Nsigma for Proton veto cut"};
   Configurable<float> maxNsigmaKaVetocut{"maxNsigmaKaVetocut", 3., "max Nsigma for Kaon veto cut"};
   Configurable<float> minPtEtrkcut{"minPtEtrkcut", 0.25, "min Pt for El track cut"};
-  Configurable<bool> mFITvetoFlag{"mFITvetoFlag", {}, "To apply FIT veto"};
-  Configurable<int> mFITvetoWindow{"mFITvetoWindow", 6, "FIT veto window"};
+  Configurable<bool> mFITvetoFlag{"mFITvetoFlag", true, "To apply FIT veto"};
+  Configurable<int> mFITvetoWindow{"mFITvetoWindow", 2, "FIT veto window"};
   Configurable<bool> useFV0ForVeto{"useFV0ForVeto", 0, "use FV0 for veto"};
   Configurable<bool> useFDDAForVeto{"useFDDAForVeto", 0, "use FDDA for veto"};
   Configurable<bool> useFDDCForVeto{"useFDDCForVeto", 0, "use FDDC for veto"};
@@ -85,8 +183,11 @@ struct TauTau13topo {
   Configurable<float> deltaPhiMincut{"deltaPhiMincut", 0., "delta phi electron - 3 pi direction cut"};
   Configurable<int> nTPCcrossedRowsMinCut{"nTPCcrossedRowsMinCut", 50, "min N_crossed TPC rows for electron candidate"};
   Configurable<float> nSigma3piMaxCut{"nSigma3piMaxCut", 5., "n sigma 3 pi max cut"};
+  Configurable<float> whichPIDCut{"whichPIDCut", 1., "type of PID selection: 1-TPC,2-sigma(TPC+TOF),3-hardcoded ptCut,default=1"};
 
   Configurable<int> generatorIDMC{"generatorIDMC", -1, "MC generator ID"};
+  Configurable<bool> removeNoTOFrunsInData{"removeNoTOFrunsInData", 1, "1-remove or 0-keep no TOF runs"};
+  Configurable<float> occupancyCut{"occupancyCut", 10000., "occupancy cut"};
 
   // Configurable<bool> DGactive{"DGactive", false, "Switch on DGproducer"};
   // Configurable<bool> SGactive{"SGactive", true, "Switch on SGproducer"};
@@ -107,6 +208,10 @@ struct TauTau13topo {
     "registry1MC",
     {}};
 
+  HistogramRegistry registrySkim{
+    "registrySkim",
+    {}};
+
   void init(InitContext&)
   {
     // pdg = TDatabasePDG::Instance();
@@ -125,1239 +230,1408 @@ struct TauTau13topo {
     const AxisSpec scalarAxis{100, -1., 1., "A_{S}"};
     const AxisSpec axisZDC{50, -1., 14., "#it{E} (TeV)"};
     const AxisSpec axisInvMass4trk{160, 0.5, 8.5, "#it{M}^{4trk}_{inv} (GeV/#it{c}^{2})"};
+    const AxisSpec acoAxis{100, 0., 1., "A^{1+3}"};
 
-    registry.add("global/RunNumber", "Run number; Run; Collisions", {HistType::kTH1F, {{150, 544013, 545367}}});
-    registry.add("global/GapSide", "Associated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
-    registry.add("global/GapSideTrue", "Recalculated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
+    if (doprocessDataSG) {
+      registry.add("global/RunNumber", "Run number; Run; Collisions", {HistType::kTH1F, {{150, 544013, 545367}}});
+      registry.add("global/GapSide", "Associated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
+      registry.add("global/GapSideTrue", "Recalculated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
 
-    registry.add("global/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("global/hZNACtime", "ZNA vs ZNC time; #it{time}_{ZNA} (ns); #it{time}_{ZNC} (ns); Collisions", {HistType::kTH2F, {{100, -10., 10.}, {100, -10., 10.}}});
-    // registry.add("global/hZNACenergyTest", "ZNA or ZNC energy; #it{E}_{ZNA,ZNC} (GeV); Collisions", {HistType::kTH1F, {{100,-1000,0}}});
+      registry.add("global/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("global/hZNACtime", "ZNA vs ZNC time; #it{time}_{ZNA} (ns); #it{time}_{ZNC} (ns); Collisions", {HistType::kTH2F, {{100, -10., 10.}, {100, -10., 10.}}});
+      // registry.add("global/hZNACenergyTest", "ZNA or ZNC energy; #it{E}_{ZNA,ZNC} (GeV); Collisions", {HistType::kTH1F, {{100,-1000,0}}});
 
-    registry.add("global/hVertexXY", "Vertex position in x and y direction; #it{V}_{x} (cm); #it{V}_{y} (cm); Collisions", {HistType::kTH2F, {{50, -0.05, 0.05}, {50, -0.02, 0.02}}});
-    registry.add("global/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
-    registry.add("global/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    // registry.add("global/hNTracksGlobal", ";N_{tracks,global};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registry.add("global/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registry.add("global/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("global/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
-    registry.add("global/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
-    registry.add("global/hTrackEfficiencyPVGlobal", "0-All,1-ntpc,2-rat,3-chitpc,4chiits,5-dcaz,6-dcaxy,7pt,8eta;Track efficiency; Entries", {HistType::kTH1F, {{15, 0, 15}}});
-    registry.add("global/hTrackEtaPhiPVGlobal", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
+      registry.add("global/hVertexXY", "Vertex position in x and y direction; #it{V}_{x} (cm); #it{V}_{y} (cm); Collisions", {HistType::kTH2F, {{50, -0.05, 0.05}, {50, -0.02, 0.02}}});
+      registry.add("global/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
+      registry.add("global/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      // registry.add("global/hNTracksGlobal", ";N_{tracks,global};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registry.add("global/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registry.add("global/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("global/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
+      registry.add("global/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
+      registry.add("global/hTrackEfficiencyPVGlobal", "0-All,1-ntpc,2-rat,3-chitpc,4chiits,5-dcaz,6-dcaxy,7pt,8eta;Track efficiency; Entries", {HistType::kTH1F, {{15, 0, 15}}});
+      registry.add("global/hTrackPVGood", "0-All,1-ntpc,2-rat,3-chitpc,4chiits,5-dcaz,6-dcaxy,7pt,8eta;Track efficiency; Entries", {HistType::kTH1F, {{15, 0, 15}}});
+      registry.add("global/hTrackEtaPhiPVGlobal", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
 
-    registry.add("global/hSignalTPCvsPtPV", ";Pt;TPC Signal", {HistType::kTH2F, {axispt, {200, 0., 200}}});
-    registry.add("global/hITSbitPVtrk", "ITS bit for PV tracks; Layer hit;Entries", {HistType::kTH1F, {{10, 0., 10.}}});
-    registry.add("global/hITSnbitsVsEtaPVtrk", "n ITS bits vs #eta for PV tracks; #eta;Layer hit;Entries", {HistType::kTH2F, {axiseta, {8, -1., 7.}}});
-    registry.add("global/hITSbitVsEtaPVtrk", "ITS bit vs #eta for PV tracks; #eta;Layer hit;Entries", {HistType::kTH2F, {axiseta, {8, 0., 8.}}});
-    registry.add("global/hEventEff", "Event cut efficiency: 0-All,1-PV=4,2-Qtot=0,3-El;Cut;entries", {HistType::kTH1F, {{27, -2., 25.}}});
-    registry.add("global/hNCombAfterCut", "Combinations after cut: 0-All,5-M3pi,10-Dphi,15-N_{e},20-N_{v#pi},25-Pt,30-Vcal,35-N_{vp},40-N_{vK},45-Tot;N_{comb};entries", {HistType::kTH1F, {{60, 0., 60.}}});
-    // registry.add("global/hInvMassElTrack", ";M_{inv}^{2};entries", {HistType::kTH1F, {{100, -0.01, 0.49}}});
-    registry.add("global/hDeltaAngleTrackPV", ";#Delta#alpha;entries", {HistType::kTH1F, {{136, 0., 3.2}}}); // 0.49
-    registry.add("global/hTrkCheck", ";track type;entries", {HistType::kTH1F, {{16, -1, 15}}});
+      registry.add("global/hSignalTPCvsPtPV", ";Pt;TPC Signal", {HistType::kTH2F, {axispt, {200, 0., 200}}});
+      registry.add("global/hITSbitPVtrk", "ITS bit for PV tracks; Layer hit;Entries", {HistType::kTH1F, {{10, 0., 10.}}});
+      registry.add("global/hITSnbitsVsEtaPVtrk", "n ITS bits vs #eta for PV tracks; #eta;Layer hit;Entries", {HistType::kTH2F, {axiseta, {8, -1., 7.}}});
+      registry.add("global/hITSbitVsEtaPVtrk", "ITS bit vs #eta for PV tracks; #eta;Layer hit;Entries", {HistType::kTH2F, {axiseta, {8, 0., 8.}}});
+      registry.add("global/hEventEff", "Event cut efficiency: 0-All,1-PV=4,2-Qtot=0,3-El;Cut;entries", {HistType::kTH1F, {{27, -2., 25.}}});
+      registry.add("global/hNCombAfterCut", "Combinations after cut: 0-All,5-M3pi,10-Dphi,15-N_{e},20-N_{v#pi},25-Pt,30-Vcal,35-N_{vp},40-N_{vK},45-Tot;N_{comb};entries", {HistType::kTH1F, {{60, 0., 60.}}});
+      // registry.add("global/hInvMassElTrack", ";M_{inv}^{2};entries", {HistType::kTH1F, {{100, -0.01, 0.49}}});
+      registry.add("global/hDeltaAngleTrackPV", ";#Delta#alpha;entries", {HistType::kTH1F, {{136, 0., 3.2}}}); // 0.49
+      registry.add("global/hTrkCheck", ";track type;entries", {HistType::kTH1F, {{16, -1, 15}}});
 
-    registry.add("global/hRecFlag", ";Reconstruction Flag;events", {HistType::kTH1F, {{10, 0., 10.}}});
-    registry.add("global/hOccupancyInTime", ";Occupancy;events", {HistType::kTH1F, {{100, 0., 10000.}}});
+      registry.add("global/hRecFlag", ";Reconstruction Flag;events", {HistType::kTH1F, {{10, 0., 10.}}});
+      registry.add("global/hOccupancyInTime", ";Occupancy;events", {HistType::kTH1F, {{100, 0., 10000.}}});
 
-    registry.add("global1/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
-    registry.add("global1/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registry.add("global1/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registry.add("global1/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
-    registry.add("global1/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
-    registry.add("global1/hTrackPVTotCharge", "Q_{Tot};Q_{Tot}; Entries", {HistType::kTH1F, {{11, -5, 6}}});
+      registry.add("global1/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
+      registry.add("global1/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registry.add("global1/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registry.add("global1/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
+      registry.add("global1/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {140, -3.5, 3.5}}});
+      registry.add("global1/hTrackPVTotCharge", "Q_{Tot};Q_{Tot}; Entries", {HistType::kTH1F, {{11, -5, 6}}});
 
-    // cut0
-    registry.add("control/cut0/h3piMassComb", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut0/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut0/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut0/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut0/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut0/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut0/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut0/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut0/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut0/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut0
+      registry.add("control/cut0/h3piMassComb", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut0/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut0/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut0/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut0/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/hsigma3PiNew", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/hsigma2PiNew", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}};#sigma^{2#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/hsigma1PiNew", "#sqrt{#sigma_{1}^{2 }};#sigma^{1#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut0/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut0/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut0/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    registry.add("control/cut0/hInvMass2ElAll", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 9.}}});
-    registry.add("control/cut0/hInvMass2ElCoh", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 4.}}});
-    registry.add("control/cut0/hGamPtCoh", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut0/hGamPtCohIM0", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut0/hN2gamma", "Number of gamma pairs among 3 comb;N_{#gamma#gamma};entries", {HistType::kTH1F, {{20, 0., 20.}}});
-    registry.add("control/cut0/hGamAS", ";A_{S};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
-    registry.add("control/cut0/hGamAV", ";A_{V};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
-    registry.add("control/cut0/hInvMass2GamCoh", "Inv Mass of 2 Gamma from coherent peak;M_{inv}^{2#gamma};entries", {HistType::kTH1F, {{160, 0.5, 4.5}}});
-    registry.add("control/cut0/hDeltaPhi2GamCoh", "Delta Phi of 2 Gamma from coherent peak;#Delta#phi^{2#gamma};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut0/hInvMass2ElAll", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 9.}}});
+      registry.add("control/cut0/hInvMass2ElCoh", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 4.}}});
+      registry.add("control/cut0/hGamPtCoh", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut0/hGamPtCohIM0", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut0/hN2gamma", "Number of gamma pairs among 3 comb;N_{#gamma#gamma};entries", {HistType::kTH1F, {{20, 0., 20.}}});
+      registry.add("control/cut0/hGamAS", ";A_{S};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
+      registry.add("control/cut0/hGamAV", ";A_{V};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
+      registry.add("control/cut0/hInvMass2GamCoh", "Inv Mass of 2 Gamma from coherent peak;M_{inv}^{2#gamma};entries", {HistType::kTH1F, {{160, 0.5, 4.5}}});
+      registry.add("control/cut0/hDeltaPhi2GamCoh", "Delta Phi of 2 Gamma from coherent peak;#Delta#phi^{2#gamma};entries", {HistType::kTH1F, {phiAxis}});
 
-    // // cut1
-    // registry.add("control/cut1/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    // registry.add("control/cut1/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    // registry.add("control/cut1/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    // registry.add("control/cut1/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    // registry.add("control/cut1/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    // registry.add("control/cut1/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    // //    registry.add("control/cut1/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    // registry.add("control/cut1/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    // registry.add("control/cut1/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registry.add("control/cut1/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registry.add("control/cut1/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    // registry.add("control/cut1/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    // registry.add("control/cut1/hDcaZ", "All 4 tracks dca ;dca_{Z};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
-    // registry.add("control/cut1/hDcaXY", "All 4 tracks dca ;dca_{XY};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
-    // registry.add("control/cut1/hChi2TPC", "All 4 tracks Chi2 ;Chi2_{TPC};entries", {HistType::kTH1F, {{48, -2, 10.}}});
-    // registry.add("control/cut1/hChi2ITS", "All 4 tracks Chi2 ;Chi2_{ITS};entries", {HistType::kTH1F, {{44, -2, 20.}}});
-    // registry.add("control/cut1/hChi2TOF", "All 4 tracks Chi2 ;Chi2_{TOF};entries", {HistType::kTH1F, {{48, -2, 10.}}});
-    // registry.add("control/cut1/hTPCnclsFindable", "All 4 tracks NclFind ;N_{TPC,cl,findable};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    // registry.add("control/cut1/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registry.add("control/cut1/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registry.add("control/cut1/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    // registry.add("control/cut1/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    // registry.add("control/cut1/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    // registry.add("control/cut1/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // // cut1
+      // registry.add("control/cut1/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      // registry.add("control/cut1/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      // registry.add("control/cut1/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      // registry.add("control/cut1/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      // registry.add("control/cut1/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      // registry.add("control/cut1/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      // //    registry.add("control/cut1/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      // registry.add("control/cut1/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      // registry.add("control/cut1/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registry.add("control/cut1/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registry.add("control/cut1/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      // registry.add("control/cut1/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      // registry.add("control/cut1/hDcaZ", "All 4 tracks dca ;dca_{Z};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
+      // registry.add("control/cut1/hDcaXY", "All 4 tracks dca ;dca_{XY};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
+      // registry.add("control/cut1/hChi2TPC", "All 4 tracks Chi2 ;Chi2_{TPC};entries", {HistType::kTH1F, {{48, -2, 10.}}});
+      // registry.add("control/cut1/hChi2ITS", "All 4 tracks Chi2 ;Chi2_{ITS};entries", {HistType::kTH1F, {{44, -2, 20.}}});
+      // registry.add("control/cut1/hChi2TOF", "All 4 tracks Chi2 ;Chi2_{TOF};entries", {HistType::kTH1F, {{48, -2, 10.}}});
+      // registry.add("control/cut1/hTPCnclsFindable", "All 4 tracks NclFind ;N_{TPC,cl,findable};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      // registry.add("control/cut1/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registry.add("control/cut1/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registry.add("control/cut1/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      // registry.add("control/cut1/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      // registry.add("control/cut1/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      // registry.add("control/cut1/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    //   // cut1a for 2<m(4pi)<2.3 GeV
-    //    registry.add("control/cut1/cut1a/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registry.add("control/cut1/cut1a/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registry.add("control/cut1/cut1a/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registry.add("control/cut1/cut1a/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registry.add("control/cut1/cut1a/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registry.add("control/cut1/cut1a/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut1/cut1a/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    //    registry.add("control/cut1/cut1a/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //    registry.add("control/cut1/cut1a/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut1/cut1a/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //    registry.add("control/cut1/cut1a/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //    registry.add("control/cut1/cut1a/hDcaZ", "All 4 tracks dca ;dca_{Z};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
-    //    registry.add("control/cut1/cut1a/hDcaXY", "All 4 tracks dca ;dca_{XY};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
-    //    registry.add("control/cut1/cut1a/hChi2TPC", "All 4 tracks Chi2 ;Chi2_{TPC};entries", {HistType::kTH1F, {{48, -2, 10.}}});
-    //    registry.add("control/cut1/cut1a/hChi2ITS", "All 4 tracks Chi2 ;Chi2_{ITS};entries", {HistType::kTH1F, {{44, -2, 20.}}});
-    //    registry.add("control/cut1/cut1a/hTPCnclsFindable", "All 4 tracks NclFind ;N_{TPC,cl,findable};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registry.add("control/cut1/cut1a/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut1/cut1a/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //    registry.add("control/cut1/cut1a/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //   // cut1a for 2<m(4pi)<2.3 GeV
+      //    registry.add("control/cut1/cut1a/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registry.add("control/cut1/cut1a/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registry.add("control/cut1/cut1a/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registry.add("control/cut1/cut1a/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registry.add("control/cut1/cut1a/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registry.add("control/cut1/cut1a/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut1/cut1a/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      //    registry.add("control/cut1/cut1a/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registry.add("control/cut1/cut1a/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut1/cut1a/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registry.add("control/cut1/cut1a/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registry.add("control/cut1/cut1a/hDcaZ", "All 4 tracks dca ;dca_{Z};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
+      //    registry.add("control/cut1/cut1a/hDcaXY", "All 4 tracks dca ;dca_{XY};entries", {HistType::kTH1F, {{100, -0.05, 0.05}}});
+      //    registry.add("control/cut1/cut1a/hChi2TPC", "All 4 tracks Chi2 ;Chi2_{TPC};entries", {HistType::kTH1F, {{48, -2, 10.}}});
+      //    registry.add("control/cut1/cut1a/hChi2ITS", "All 4 tracks Chi2 ;Chi2_{ITS};entries", {HistType::kTH1F, {{44, -2, 20.}}});
+      //    registry.add("control/cut1/cut1a/hTPCnclsFindable", "All 4 tracks NclFind ;N_{TPC,cl,findable};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registry.add("control/cut1/cut1a/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut1/cut1a/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    registry.add("control/cut1/cut1a/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
 
-    // cut20
-    registry.add("control/cut20/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut20/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut20/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut20/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut20/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut20/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut20/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut20/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut20/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut20/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut20
+      registry.add("control/cut20/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut20/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut20/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut20/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut20/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut20/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut20/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut20/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut20/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut20/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    registry.add("control/cut20/hInvMass2ElCoh", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 4.}}});
-    registry.add("control/cut20/hGamPtCohIM0", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut20/hGamAS", ";A_{S};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
-    registry.add("control/cut20/hGamAV", ";A_{V};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
-    registry.add("control/cut20/hInvMass2GamCoh", "Inv Mass of 2 Gamma from coherent peak;M_{inv}^{2#gamma};entries", {HistType::kTH1F, {{160, 0., 4.}}});
-    registry.add("control/cut20/hDeltaPhi2GamCoh", "Delta Phi of 2 Gamma from coherent peak;#Delta#phi^{2#gamma};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut20/hInvMass2ElCoh", "Inv Mass of 2 Electrons from coherent peak;M_{inv}^{2e};entries", {HistType::kTH1F, {{150, -0.1, 4.}}});
+      registry.add("control/cut20/hGamPtCohIM0", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut20/hGamAS", ";A_{S};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
+      registry.add("control/cut20/hGamAV", ";A_{V};entries", {HistType::kTH1F, {{100, 0, 0.2}}});
+      registry.add("control/cut20/hInvMass2GamCoh", "Inv Mass of 2 Gamma from coherent peak;M_{inv}^{2#gamma};entries", {HistType::kTH1F, {{160, 0., 4.}}});
+      registry.add("control/cut20/hDeltaPhi2GamCoh", "Delta Phi of 2 Gamma from coherent peak;#Delta#phi^{2#gamma};entries", {HistType::kTH1F, {phiAxis}});
 
-    // cut21
-    registry.add("control/cut21/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut21/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut21/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut21/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut21/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut21/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut21/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut21/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut21/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut21/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut21
+      registry.add("control/cut21/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut21/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut21/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut21/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut21/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut21/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut21/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut21/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut21/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut21/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut22
-    registry.add("control/cut22/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut22/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut22/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut22/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut22/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut22/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut22/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut22/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut22/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut22/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut22
+      registry.add("control/cut22/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut22/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut22/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut22/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut22/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut22/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut22/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut22/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut22/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut22/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    //     // cut23
-    //     registry.add("control/cut23/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //     registry.add("control/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //     registry.add("control/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //     registry.add("control/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //     registry.add("control/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //     registry.add("control/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //     //    registry.add("control/cut23/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    //     registry.add("control/cut23/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //     registry.add("control/cut23/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //     registry.add("control/cut23/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //     registry.add("control/cut23/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //     registry.add("control/cut23/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //     registry.add("control/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //     registry.add("control/cut23/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //     registry.add("control/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //     registry.add("control/cut23/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //     registry.add("control/cut23/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    //     registry.add("control/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut23 occupancy
+      registry.add("control/cut23/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut23/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut23/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut23/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut23/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut23/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut23/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut23/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut23/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut23/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut24
-    registry.add("control/cut24/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut24/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut24/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut24/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut24/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut24/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut24/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut24/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut24/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut24/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut24
+      registry.add("control/cut24/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut24/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut24/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut24/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut24/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut24/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut24/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut24/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut24/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut24/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut25
-    registry.add("control/cut25/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut25/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut25/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut25/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut25/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut25/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut25/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut25/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut25/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut25/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut25
+      registry.add("control/cut25/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut25/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut25/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut25/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut25/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut25/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut25/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut25/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut25/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut25/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut26
-    registry.add("control/cut26/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut26/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut26/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut26/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut26/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut26/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut26/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut26/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut26/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut26/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut26
+      registry.add("control/cut26/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut26/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut26/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut26/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut26/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut26/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut26/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut26/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut26/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut26/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut27
-    registry.add("control/cut27/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut27/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut27/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut27/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut27/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut27/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut27/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut27/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut27/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut27/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut27
+      registry.add("control/cut27/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut27/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut27/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut27/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut27/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut27/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut27/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut27/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut27/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut27/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut28
-    registry.add("control/cut28/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut28/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut28/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut28/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut28/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut28/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut28/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut28/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut28/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut28/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut28
+      registry.add("control/cut28/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut28/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut28/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut28/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut28/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut28/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut28/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut28/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut28/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut28/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut29
-    registry.add("control/cut29/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut29/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut29/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut29/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut29/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut29/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut29/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut29/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut29/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut29/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut29
+      registry.add("control/cut29/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut29/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut29/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut29/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut29/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut29/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut29/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut29/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut29/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut29/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut30
-    registry.add("control/cut30/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut30/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut30/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut30/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut30/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut30/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut30/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut30/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut30/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut30/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut30
+      registry.add("control/cut30/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut30/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut30/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut30/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut30/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut30/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut30/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut30/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut30/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut30/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    //    // cut31
-    //    registry.add("control/cut31/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registry.add("control/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registry.add("control/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registry.add("control/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registry.add("control/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registry.add("control/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    //    registry.add("control/cut31/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    //    registry.add("control/cut31/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //    registry.add("control/cut31/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut31/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut31/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //    registry.add("control/cut31/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //    registry.add("control/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut31/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //    registry.add("control/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registry.add("control/cut31/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //    registry.add("control/cut31/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    //    registry.add("control/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    // cut31
+      //    registry.add("control/cut31/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registry.add("control/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registry.add("control/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registry.add("control/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registry.add("control/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registry.add("control/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    //    registry.add("control/cut31/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      //    registry.add("control/cut31/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registry.add("control/cut31/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut31/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut31/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registry.add("control/cut31/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registry.add("control/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut31/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    registry.add("control/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registry.add("control/cut31/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //    registry.add("control/cut31/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      //    registry.add("control/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    //    // cut32
-    //    registry.add("control/cut32/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registry.add("control/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registry.add("control/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registry.add("control/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registry.add("control/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registry.add("control/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    //    registry.add("control/cut32/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    //    registry.add("control/cut32/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //    registry.add("control/cut32/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut32/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut32/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //    registry.add("control/cut32/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //    registry.add("control/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry.add("control/cut32/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //    registry.add("control/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registry.add("control/cut32/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //    registry.add("control/cut32/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    //    registry.add("control/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    // cut33
-    registry.add("control/cut33/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut33/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut33/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut33/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut33/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut33/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut33/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut33/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut33/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut33/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    // cut32
+      //    registry.add("control/cut32/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registry.add("control/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registry.add("control/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registry.add("control/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registry.add("control/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registry.add("control/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    //    registry.add("control/cut32/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      //    registry.add("control/cut32/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registry.add("control/cut32/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut32/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut32/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registry.add("control/cut32/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registry.add("control/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut32/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    registry.add("control/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registry.add("control/cut32/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //    registry.add("control/cut32/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      //    registry.add("control/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      // cut33
+      registry.add("control/cut33/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut33/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut33/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut33/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut33/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut33/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut33/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut33/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut33/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut33/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut34
-    registry.add("control/cut34/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registry.add("control/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registry.add("control/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registry.add("control/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registry.add("control/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registry.add("control/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registry.add("control/cut34/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
-    registry.add("control/cut34/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registry.add("control/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut34/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut34/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registry.add("control/cut34/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registry.add("control/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("control/cut34/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registry.add("control/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry.add("control/cut34/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry.add("control/cut34/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
-    registry.add("control/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut34
+      registry.add("control/cut34/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut34/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut34/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut34/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut34/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut34/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut34/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut34/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut34/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // pid El
-    registry.add("pidTPC/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut0CohPsi2s", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // cut35
+      registry.add("control/cut35/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registry.add("control/cut35/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registry.add("control/cut35/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registry.add("control/cut35/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registry.add("control/cut35/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registry.add("control/cut35/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registry.add("control/cut35/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      registry.add("control/cut35/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registry.add("control/cut35/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut35/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut35/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registry.add("control/cut35/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registry.add("control/cut35/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("control/cut35/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registry.add("control/cut35/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry.add("control/cut35/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry.add("control/cut35/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("control/cut35/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // registry.add("pidTPC/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // pid separately for each cut (what we reject)
-    registry.add("pidTPC/hpvsdedxElHipCut2", "rejected, IM hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut3", "rejected, DP hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut4", "rejected, El hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut5", "rejected, vPi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut6", "rejected, Pt hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut7", "rejected, vVc hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut8", "rejected, pTot hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut9", "rejected, vPr hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut10", "rejected, vKa hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut11", "rejected, nCR hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut12", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut13", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      //    // cut36
+      //    registry.add("control/cut36/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registry.add("control/cut36/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registry.add("control/cut36/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registry.add("control/cut36/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registry.add("control/cut36/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registry.add("control/cut36/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    //    registry.add("control/cut36/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      //    registry.add("control/cut36/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registry.add("control/cut36/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut36/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut36/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registry.add("control/cut36/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registry.add("control/cut36/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut36/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    registry.add("control/cut36/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registry.add("control/cut36/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //    registry.add("control/cut36/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      //    registry.add("control/cut36/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      //    // cut37
+      //    registry.add("control/cut37/h3piMassComb", "3#pi mass, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registry.add("control/cut37/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registry.add("control/cut37/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registry.add("control/cut37/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registry.add("control/cut37/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registry.add("control/cut37/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    //    registry.add("control/cut37/h13EtaSum", ";#eta^{1-prong}+#eta^{3-prong};entries", {HistType::kTH1F, {{100, -4., 4.}}});
+      //    registry.add("control/cut37/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registry.add("control/cut37/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut37/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut37/h3piMassVsPt", "3#pi mass vs Pt, 1 entry per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registry.add("control/cut37/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registry.add("control/cut37/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry.add("control/cut37/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    registry.add("control/cut37/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registry.add("control/cut37/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //    registry.add("control/cut37/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      //    registry.add("control/cut37/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // pid sequentialy
-    registry.add("pidTPC/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut21", "vPi+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut22", "vVc+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut23", "Pt+22 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut24", "vPr+23 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut26", "IM+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut27", "DP+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut28", "CR+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut29", "s3pi+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut30", "ptTot+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut31", "FIT+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut33", "eTOF+1 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registry.add("pidTPC/hpvsdedxElHipCut34", "piTOF+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid El
+      registry.add("pidTPC/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut0CohPsi2s", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    registry.add("pidTPC/hpvsdedxElHipCut40", "All from gamma hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid separately for each cut (what we reject)
+      registry.add("pidTPC/hpvsdedxElHipCut2", "rejected, IM hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut3", "rejected, DP hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut4", "rejected, El hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut5", "rejected, vPi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut6", "rejected, Pt hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut7", "rejected, vVc hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut8", "rejected, pTot hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut9", "rejected, vPr hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut10", "rejected, vKa hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut11", "rejected, nCR hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut12", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut13", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // pid 3pi
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    //     registry.add("pidTPC3pi/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // pid sequentialy 3pi
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut21", "vPi+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut22", "vVc+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut23", "Pt+22 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut24", "vPr+23 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut26", "ptTot+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut27", "FIT+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registry.add("pidTPC3pi/hpvsdedxElHipCut28", "TOF+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid sequentialy
+      registry.add("pidTPC/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut21", "vPi+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut22", "vVc+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut23", "Occ+35 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut24", "vPr+23 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut26", "IM+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut27", "DP+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut28", "CR+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut29", "s3pi+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut30", "ptTot+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut31", "FIT+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut33", "eTOF+1 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut34", "piTOF+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registry.add("pidTPC/hpvsdedxElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC/hpvsdedxElHipCut36", "Good+35 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC/hpvsdedxElHipCut37", "TOFgood+36 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // final electron spectrum
-    registry.add("global/hFinalPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
+      registry.add("pidTPC/hpvsdedxElHipCut40", "All from gamma hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // fit histos
-    registry.add("fit/bbFT0Abit", "FT0A bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
-    registry.add("fit/bbFT0Cbit", "FT0C bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
-    registry.add("fit/bbFV0Abit", "FV0A bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
-    registry.add("fit/bbFDDAbit", "FDDA bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
-    registry.add("fit/bbFDDCbit", "FDDC bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
-    registry.add("fit/bbFT0Aamplitude", "FT0A amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
-    registry.add("fit/bbFT0Camplitude", "FT0C amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
-    registry.add("fit/bbFT0ACamplitude", "FT0A vs FT0C amplitude;Amplitude FT0A;Amplitude FT0C;entries", {HistType::kTH2F, {{100, -5., 95.}, {100, -5., 95.}}});
-    registry.add("fit/bbFV0Aamplitude", "FV0A amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
-    registry.add("fit/bbFDDAamplitude", "FDDA amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
-    registry.add("fit/bbFDDCamplitude", "FDDC amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
-    registry.add("fit/bbFDDACamplitude", "FDDA vs FDDC amplitude;Amplitude FDDA;Amplitude FDDC;entries", {HistType::kTH2F, {{100, -5., 95.}, {100, -5., 95.}}});
-    registry.add("fit/timeFT0", "FT0 time;time FT0A; time FT0C;entries", {HistType::kTH2F, {{100, -5., 35.}, {100, -5., 35.}}});
-    registry.add("fit/timeFDD", "FDD time;time FDDA; time FDDC;entries", {HistType::kTH2F, {{100, -5., 35.}, {100, -5., 35.}}});
+      // pid 3pi
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      //     registry.add("pidTPC3pi/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid sequentialy 3pi
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut21", "vPi+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut22", "vVc+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut23", "Pt+22 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut24", "vPr+23 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut26", "ptTot+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut27", "FIT+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registry.add("pidTPC3pi/hpvsdedxElHipCut28", "TOF+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // tof histos
-    registry.add("pidTOF/hpvsNsigmaElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut20", "El hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry.add("pidTOF/hpvsNsigmaElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    // registry.add("pidTOF/hpvsNsigmaElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100,-5.,5.}}});
+      // final electron spectrum
+      registry.add("global/hFinalPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {{40, 0., 5.}}});
 
-    registry.add("pidTOF/h3piTOFchi2", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("pidTOF/h3piTOFchi2Cut34", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("pidTOF/h3piTOFchi2Cut30", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry.add("pidTOF/h3piTOFchi2Cut27", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      // fit histos
+      registry.add("fit/bbFT0Abit", "FT0A bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
+      registry.add("fit/bbFT0Cbit", "FT0C bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
+      registry.add("fit/bbFV0Abit", "FV0A bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
+      registry.add("fit/bbFDDAbit", "FDDA bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
+      registry.add("fit/bbFDDCbit", "FDDC bits;bit;entries", {HistType::kTH1F, {{32, 0., 32.}}});
+      registry.add("fit/bbFT0Aamplitude", "FT0A amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
+      registry.add("fit/bbFT0Camplitude", "FT0C amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
+      registry.add("fit/bbFT0ACamplitude", "FT0A vs FT0C amplitude;Amplitude FT0A;Amplitude FT0C;entries", {HistType::kTH2F, {{100, -5., 95.}, {100, -5., 95.}}});
+      registry.add("fit/bbFV0Aamplitude", "FV0A amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
+      registry.add("fit/bbFDDAamplitude", "FDDA amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
+      registry.add("fit/bbFDDCamplitude", "FDDC amplitude;Amplitude;entries", {HistType::kTH1F, {{100, -5., 95.}}});
+      registry.add("fit/bbFDDACamplitude", "FDDA vs FDDC amplitude;Amplitude FDDA;Amplitude FDDC;entries", {HistType::kTH2F, {{100, -5., 95.}, {100, -5., 95.}}});
+      registry.add("fit/timeFT0", "FT0 time;time FT0A; time FT0C;entries", {HistType::kTH2F, {{100, -5., 35.}, {100, -5., 35.}}});
+      registry.add("fit/timeFDD", "FDD time;time FDDA; time FDDC;entries", {HistType::kTH2F, {{100, -5., 35.}, {100, -5., 35.}}});
+
+      // tof histos
+      registry.add("pidTOF/hpvsNsigmaElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut20", "El hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry.add("pidTOF/hpvsNsigmaElHipCut23", "Occ+35 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      // registry.add("pidTOF/hpvsNsigmaElHipCut36", "Good+23 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      // registry.add("pidTOF/hpvsNsigmaElHipCut37", "GoodTof+36 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+
+      registry.add("pidTOF/h3piTOFchi2", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("pidTOF/h3piTOFchi2Cut34", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("pidTOF/h3piTOFchi2Cut30", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("pidTOF/h3piTOFchi2Cut27", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("pidTOF/h3piTOFchi2Cut35", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry.add("pidTOF/h3piTOFchi2Cut23", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registry.add("pidTOF/h3piTOFchi2Cut36", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registry.add("pidTOF/h3piTOFchi2Cut37", "tof chi2;chi2 TOF;events", {HistType::kTH1F, {{100, 0., 10.}}});
+
+      // histograms mass3pi vs acoponarity
+      registry.add("control/cut0/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut20/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut33/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut21/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut24/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut25/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut28/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut22/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut29/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut26/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut34/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut30/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut27/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut35/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry.add("control/cut23/h3piMassVsAco", "3#pi mass vs acoplanarity, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+
+    } // end of data histograms
 
     // MC part
     // histograms filled by processSimpleMCSG
     // CollisionMC histograms
-    registry1MC.add("globalMC/hGeneratorID", ";Generator ID;events", {HistType::kTH1F, {{100, 0., 1000.}}});
-    registryMC.add("globalMC/hMCZvertex", ";V_{Z}^{MC} (cm);events", {HistType::kTH1F, {{100, -25., 25.}}});
-    registryMC.add("globalMC/hMCefficiency", ";Cut Number;events", {HistType::kTH1F, {{12, 0., 12.}}});
-    registryMC.add("globalMC/hMCnPart", ";N_{part};Type;events", {HistType::kTH2F, {{25, 0., 25.}, {10, 0, 10}}});
-    registryMC.add("globalMC/hMCetaGen", ";#eta^{gen};N^{MC particles}", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("globalMC/hMCphiGen", ";#phi^{gen};N^{MC particles}", {HistType::kTH1F, {{100, 0., 6.4}}});
-    registryMC.add("globalMC/hMCyGen", ";y^{gen};N^{MC particles}", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("globalMC/hMCptGen", ";p_{T}^{gen};N^{MC particles}", {HistType::kTH1F, {{100, 0., 4.}}});
+    if (doprocessEfficiencyMCSG || doprocessSimpleMCSG) {
+      registryMC.add("globalMC/hMCZvertex", ";V_{Z}^{MC} (cm);events", {HistType::kTH1F, {{100, -25., 25.}}});
+      registryMC.add("globalMC/hMCefficiency", ";Cut Number;events", {HistType::kTH1F, {{28, -8., 20.}}});
 
-    // MC reconstructed with information from MC true
-    registryMC.add("globalMCrec/hMCetaGenCol", ";#eta^{genCol};events", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("globalMCrec/hMCphiGenCol", ";#phi^{genCol};events", {HistType::kTH1F, {{100, 0., 6.4}}});
-    registryMC.add("globalMCrec/hMCyGenCol", ";y^{genCol};events", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("globalMCrec/hMCptGenCol", ";p_{T}^{genCol};events", {HistType::kTH1F, {{100, 0., 4.}}});
+      // efficiency el
+      registryMC.add("efficiencyMCEl/effiEl", ";Efficiency e3#pi;events", {HistType::kTH1F, {{70, 0., 70.}}});
+      // efficiency pi
+      registryMC.add("efficiencyMCPi/effiPi", ";Efficiency #pi3#pi;events", {HistType::kTH1F, {{20, 0., 20.}}});
+      // efficiency mu
+      registryMC.add("efficiencyMCMu/effiMu", ";Efficiency #mu3#pi;events", {HistType::kTH1F, {{20, 0., 20.}}});
+    }
 
-    registryMC.add("globalMCrec/GapSide", "Associated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
-    registryMC.add("globalMCrec/GapSideTrue", "Recalculated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
-    registryMC.add("globalMCrec/hVertexXY", "Vertex position in x and y direction; #it{V}_{x} (cm); #it{V}_{y} (cm); Collisions", {HistType::kTH2F, {{50, -0.05, 0.05}, {50, -0.02, 0.02}}});
-    registryMC.add("globalMCrec/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
-    registryMC.add("globalMCrec/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registryMC.add("globalMCrec/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registryMC.add("globalMCrec/hNGhostTracks", ";N_{tracks};events", {HistType::kTH1D, {{10, 0., 10.}}});
-    registryMC.add("globalMCrec/hNGhostTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{10, 0., 10.}}});
-    registryMC.add("globalMCrec/hQtot", ";Q_{tot};events", {HistType::kTH1F, {{10, -5., 5.}}});
-    registryMC.add("globalMCrec/hTrackToMCMatch", ";Match};events", {HistType::kTH1F, {{2, 0., 2.}}});
-    registryMC.add("globalMCrec/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("globalMCrec/hZNACtime", "ZNA vs ZNC time; #it{time}_{ZNA} (ns); #it{time}_{ZNC} (ns); Collisions", {HistType::kTH2F, {{100, -10., 10.}, {100, -10., 10.}}});
+    if (doprocessSimpleMCSG) {
+      registryMC.add("globalMC/hMCnPart", ";N_{part};Type;events", {HistType::kTH2F, {{25, 0., 25.}, {10, 0, 10}}});
 
-    registry1MC.add("globalMCrec/hRecFlag", ";Reconstruction Flag;events", {HistType::kTH1F, {{10, 0., 10.}}});
-    registry1MC.add("globalMCrec/hOccupancyInTime", ";Occupancy;events", {HistType::kTH1F, {{100, 0., 10000.}}});
+      registryMC.add("globalMC/hMCetaGen", ";#eta^{gen};N^{MC particles}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("globalMC/hMCphiGen", ";#phi^{gen};N^{MC particles}", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("globalMC/hMCyGen", ";y^{gen};N^{MC particles}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("globalMC/hMCptGen", ";p_{T}^{gen};N^{MC particles}", {HistType::kTH1F, {{100, 0., 4.}}});
 
-    // registryMC.add("globalMCrec/hPtSpectrumElGen0", "Gen.;p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});//effiEl = 3 // hpTelec
-    // registryMC.add("globalMCrec/hPtSpectrumElGen1", "Gen.;p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});//effiEl = 4, but still on MC sample
-    registryMC.add("globalMCrec/hPtSpectrumElRec0", "Rec0;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 4, reconstruction
-    registryMC.add("globalMCrec/hPtSpectrumElRec1", "Rec1;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 7, SGProducer
-    registryMC.add("globalMCrec/hPtSpectrumElRec2", "Rec2;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 9, DoubleGap
-    registryMC.add("globalMCrec/hPtSpectrumElRec3", "Rec3;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 11, PVtracks=4
-    registryMC.add("globalMCrec/hPtSpectrumElRec4", "Rec4;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 13, Zvertex
-    registryMC.add("globalMCrec/hPtSpectrumElRec5", "Rec5;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 15, eta acceptance
-    registryMC.add("globalMCrec/hPtSpectrumElRec6", "Rec6;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 17, pT threshold
-    registryMC.add("globalMCrec/hPtSpectrumElRec7", "Rec7;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 19, Qtot
-    registryMC.add("globalMCrec/hPtSpectrumElRec8", "Rec8;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 21, NTOF>0
-    registryMC.add("globalMCrec/hPtSpectrumElRec9", "Rec9;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 23, FIT empty
+      // tau
+      registryMC.add("tauMC/hNtaus", ";N^{#tau};N_events ", {HistType::kTH1F, {{6, -1., 5.}}});
 
-    // global1 when we require SGProducer + double gap + nPVtracks=4
-    registryMC.add("global1MCrec/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
-    registryMC.add("global1MCrec/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registryMC.add("global1MCrec/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
-    registryMC.add("global1MCrec/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("global1MCrec/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {128, -0.05, 6.35}}});
-    registryMC.add("global1MCrec/hTrackPVTotCharge", "Q_{Tot};Q_{Tot}; Entries", {HistType::kTH1F, {{11, -5, 6}}});
+      registryMC.add("tauMC/hMCeta", ";#eta^{#tau};N^{#tau} ", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("tauMC/hMCy", ";y^{#tau};N^{#tau}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("tauMC/hMCphi", ";#phi^{#tau};N^{#tau}", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("tauMC/hMCpt", ";#it{p}_{T}^{#tau};N^{#tau}", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    registryMC.add("global1MCrec/hpTGenRecTracksPV", ";p_{T}^{Rec. tracks,PV} (GeV/c);p_{T}^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, 0., 4.}, {100, 0., 4.}}});
-    registryMC.add("global1MCrec/hDeltapTGenRecVsRecpTTracksPV", ";#Delta p_{T}^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -4., 4.}, {100, 0., 4.}}});
-    registryMC.add("global1MCrec/hEtaGenRecTracksPV", ";#eta^{Rec. tracks,PV} (GeV/c);#eta^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, -2., 2.}, {100, -2., 2.}}});
-    registryMC.add("global1MCrec/hDeltaEtaGenRecVsRecpTTracksPV", ";#Delta #eta^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -0.25, 0.25}, {100, 0., 4.}}});
-    registryMC.add("global1MCrec/hPhiGenRecTracksPV", ";#phi^{Rec. tracks,PV} (GeV/c);#phi^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, 0., 6.4}, {100, 0., 6.4}}});
-    registryMC.add("global1MCrec/hDeltaPhiGenRecVsRecpTTracksPV", ";#Delta #phi^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -0.5, 0.5}, {100, 0., 4.}}});
+      registryMC.add("tauMC/hMCdeltaeta", ";#Delta#eta^{#tau};events ", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("tauMC/hMCdeltaphi", ";#Delta#phi^{#tau}(deg.);events", {HistType::kTH1F, {{100, 131., 181}}});
 
-    // pid El in MC true
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // pid separately for each cut (what we reject)
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut2", "rejected, IM hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut3", "rejected, DP hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut4", "rejected, El hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut5", "rejected, vPi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut6", "rejected, Pt hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut7", "rejected, vVc hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut8", "rejected, pTot hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut9", "rejected, vPr hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut10", "rejected, vKa hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut11", "rejected, nCR hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut12", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // pid sequentialy
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    //   registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut23", "Pt+22 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    //    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut31", "FIT+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    //    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // electron
+      registryMC.add("electronMC/hMCeta", ";#eta^{e};N^{e}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("electronMC/hMCy", ";y^{e};N^{e}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("electronMC/hMCphi", ";#phi^{e};N^{e}", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("electronMC/hMCpt", ";#it{p}_{T}^{e};N^{e}", {HistType::kTH1F, {{400, 0., 10.}}});
 
-    // pid Pi in MC true
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut23", "Pt+22 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut31", "FIT+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    // registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
-    registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // muon
+      registryMC.add("muonMC/hMCeta", ";#eta^{#mu};N^{#mu}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("muonMC/hMCy", ";y^{#mu};N^{#mu}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("muonMC/hMCphi", ";#phi^{#mu};N^{#mu}", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("muonMC/hMCpt", ";#it{p}_{T}^{#mu};N^{#mu}", {HistType::kTH1F, {{400, 0., 10.}}});
 
-    // El PID in TOF MC true
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut20", "El hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
-    registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      // pion
+      registryMC.add("pionMC/hMCeta", ";#eta^{#pi};N^{#pi}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("pionMC/hMCy", ";y^{#pi};N^{#pi}", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("pionMC/hMCphi", ";#phi^{#pi};N^{#pi}", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("pionMC/hMCpt", ";#it{p}_{T}^{#pi};N^{#pi}", {HistType::kTH1F, {{400, 0., 10.}}});
 
-    // cut0
-    registryMC.add("controlMCtrue/cut0/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut0/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut0/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut0/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut0/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut0/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut0/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    registryMC.add("controlMCtrue/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut0/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registry1MC.add("controlMCtrue/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut0/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCcomb/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registry1MC.add("controlMCcomb/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // efficiency mu
+      registryMC.add("efficiencyMCMu/hpTmuon", ";p_{T}^{#mu, gen} (GeV/c);events", {HistType::kTH1F, {{200, 0., 5.}}});
 
-    // cut20 MC
-    registryMC.add("controlMCtrue/cut20/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut20/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut20/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut20/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut20/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut20/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut20/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut20/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut20/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // efficiency pi
+      registryMC.add("efficiencyMCPi/hpTpi", ";p_{T}^{#pi, gen} (GeV/c);events", {HistType::kTH1F, {{200, 0., 5.}}});
 
-    // cut21 MC
-    registryMC.add("controlMCtrue/cut21/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut21/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut21/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut21/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut21/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut21/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut21/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut21/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut21/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // efficiency el
+      registryMC.add("efficiencyMCEl/hpTelec", ";p_{T}^{e, gen} (GeV/c);events", {HistType::kTH1F, {axispt}});
+    }
 
-    // cut24 MC
-    registryMC.add("controlMCtrue/cut24/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut24/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut24/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut24/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut24/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut24/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut24/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut24/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut24/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+    if (doprocessEfficiencyMCSG) {
+      // MC reconstructed with information from MC true
+      registry1MC.add("globalMC/hGeneratorID", ";Generator ID;events", {HistType::kTH1F, {{100, 0., 1000.}}});
 
-    // cut25 MC
-    registryMC.add("controlMCtrue/cut25/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut25/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut25/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut25/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut25/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut25/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut25/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut25/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut25/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("globalMCrec/hMCetaGenCol", ";#eta^{genCol};events", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("globalMCrec/hMCphiGenCol", ";#phi^{genCol};events", {HistType::kTH1F, {{100, 0., 6.4}}});
+      registryMC.add("globalMCrec/hMCyGenCol", ";y^{genCol};events", {HistType::kTH1F, {{100, -5., 5.}}});
+      registryMC.add("globalMCrec/hMCptGenCol", ";p_{T}^{genCol};events", {HistType::kTH1F, {{100, 0., 4.}}});
 
-    // cut28 MC
-    registryMC.add("controlMCtrue/cut28/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut28/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut28/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut28/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut28/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut28/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut28/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut28/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut28/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("globalMCrec/GapSide", "Associated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
+      registryMC.add("globalMCrec/GapSideTrue", "Recalculated gap side; gap index; Collisions", {HistType::kTH1F, {{5, -1, 4}}});
+      registryMC.add("globalMCrec/hVertexXY", "Vertex position in x and y direction; #it{V}_{x} (cm); #it{V}_{y} (cm); Collisions", {HistType::kTH2F, {{50, -0.05, 0.05}, {50, -0.02, 0.02}}});
+      registryMC.add("globalMCrec/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
+      registryMC.add("globalMCrec/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registryMC.add("globalMCrec/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registryMC.add("globalMCrec/hNGhostTracks", ";N_{tracks};events", {HistType::kTH1D, {{10, 0., 10.}}});
+      registryMC.add("globalMCrec/hNGhostTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{10, 0., 10.}}});
+      registryMC.add("globalMCrec/hQtot", ";Q_{tot};events", {HistType::kTH1F, {{10, -5., 5.}}});
+      registryMC.add("globalMCrec/hTrackToMCMatch", ";Match};events", {HistType::kTH1F, {{2, 0., 2.}}});
+      registryMC.add("globalMCrec/hZNACenergy", "ZNA vs ZNC energy; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("globalMCrec/hZNACtime", "ZNA vs ZNC time; #it{time}_{ZNA} (ns); #it{time}_{ZNC} (ns); Collisions", {HistType::kTH2F, {{100, -10., 10.}, {100, -10., 10.}}});
 
-    // cut22 MC
-    registryMC.add("controlMCtrue/cut22/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut22/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut22/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut22/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut22/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut22/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut22/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut22/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut22/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("globalMCrec/hRecFlag", ";Reconstruction Flag;events", {HistType::kTH1F, {{10, 0., 10.}}});
+      registry1MC.add("globalMCrec/hOccupancyInTime", ";Occupancy;events", {HistType::kTH1F, {{100, 0., 10000.}}});
 
-    //    //cut23 MC
-    //    registryMC.add("controlMCtrue/cut23/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registryMC.add("controlMCtrue/cut23/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //    registryMC.add("controlMCtrue/cut23/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //    registryMC.add("controlMCtrue/cut23/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //    registryMC.add("controlMCtrue/cut23/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registryMC.add("controlMCtrue/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registryMC.add("controlMCtrue/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registryMC.add("controlMCtrue/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registryMC.add("controlMCtrue/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registryMC.add("controlMCtrue/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registryMC.add("controlMCtrue/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registryMC.add("controlMCtrue/cut23/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //    registryMC.add("controlMCtrue/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry1MC.add("controlMCtrue/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    // registryMC.add("controlMCtrue/cut23/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //    // registryMC.add("controlMCtrue/cut23/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    //
-    //    registryMC.add("controlMCcomb/cut23/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registryMC.add("controlMCcomb/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registryMC.add("controlMCcomb/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registryMC.add("controlMCcomb/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registryMC.add("controlMCcomb/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registryMC.add("controlMCcomb/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registryMC.add("controlMCcomb/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registryMC.add("controlMCcomb/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry1MC.add("controlMCcomb/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("globalMCrec/hPtSpectrumElGen0", "Gen.;p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});//effiEl = 3 // hpTelec
+      // registryMC.add("globalMCrec/hPtSpectrumElGen1", "Gen.;p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});//effiEl = 4, but still on MC sample
+      registryMC.add("globalMCrec/hPtSpectrumElRec0", "Rec0;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 4, reconstruction
+      registryMC.add("globalMCrec/hPtSpectrumElRec1", "Rec1;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 7, SGProducer
+      registryMC.add("globalMCrec/hPtSpectrumElRec2", "Rec2;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 9, DoubleGap
+      registryMC.add("globalMCrec/hPtSpectrumElRec3", "Rec3;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 11, PVtracks=4
+      registryMC.add("globalMCrec/hPtSpectrumElRec4", "Rec4;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 13, Zvertex
+      registryMC.add("globalMCrec/hPtSpectrumElRec5", "Rec5;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 15, eta acceptance
+      registryMC.add("globalMCrec/hPtSpectrumElRec6", "Rec6;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 17, pT threshold
+      registryMC.add("globalMCrec/hPtSpectrumElRec7", "Rec7;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 19, Qtot
+      registryMC.add("globalMCrec/hPtSpectrumElRec8", "Rec8;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 21, NTOF>0
+      registryMC.add("globalMCrec/hPtSpectrumElRec9", "Rec9;#it{p}_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}}); // effiEl = 23, FIT empty
 
-    // cut29 MC
-    registryMC.add("controlMCtrue/cut29/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut29/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut29/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut29/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut29/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut29/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut29/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut29/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut29/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // global1 when we require SGProducer + double gap + nPVtracks=4
+      registryMC.add("global1MCrec/hVertexZ", "Vertex position in z direction; #it{V}_{z} (cm); Collisions", {HistType::kTH1F, {{100, -25., 25.}}});
+      registryMC.add("global1MCrec/hNTracks", ";N_{tracks};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registryMC.add("global1MCrec/hNTracksPV", ";N_{tracks,PV};events", {HistType::kTH1D, {{20, 0., 20.}}});
+      registryMC.add("global1MCrec/hTrackPtPV", ";p_T^{trk}; Entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("global1MCrec/hTrackEtaPhiPV", ";Eta;Phi;", {HistType::kTH2D, {axiseta, {128, -0.05, 6.35}}});
+      registryMC.add("global1MCrec/hTrackPVTotCharge", "Q_{Tot};Q_{Tot}; Entries", {HistType::kTH1F, {{11, -5, 6}}});
 
-    // cut26 MC
-    registryMC.add("controlMCtrue/cut26/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut26/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut26/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut26/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut26/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut26/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut26/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut26/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut26/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("global1MCrec/hpTGenRecTracksPV", ";p_{T}^{Rec. tracks,PV} (GeV/c);p_{T}^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, 0., 4.}, {100, 0., 4.}}});
+      registryMC.add("global1MCrec/hDeltapTGenRecVsRecpTTracksPV", ";#Delta p_{T}^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -4., 4.}, {100, 0., 4.}}});
+      registryMC.add("global1MCrec/hEtaGenRecTracksPV", ";#eta^{Rec. tracks,PV} (GeV/c);#eta^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, -2., 2.}, {100, -2., 2.}}});
+      registryMC.add("global1MCrec/hDeltaEtaGenRecVsRecpTTracksPV", ";#Delta #eta^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -0.25, 0.25}, {100, 0., 4.}}});
+      registryMC.add("global1MCrec/hPhiGenRecTracksPV", ";#phi^{Rec. tracks,PV} (GeV/c);#phi^{Gen} (GeV/c);events", {HistType::kTH2D, {{100, 0., 6.4}, {100, 0., 6.4}}});
+      registryMC.add("global1MCrec/hDeltaPhiGenRecVsRecpTTracksPV", ";#Delta #phi^{Rec.-Gen. tracks,PV} (GeV/c);p_{T}^{Rec. tracks,PV} (GeV/c);events", {HistType::kTH2D, {{100, -0.5, 0.5}, {100, 0., 4.}}});
 
-    // cut30 MC
-    registryMC.add("controlMCtrue/cut30/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut30/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut30/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut30/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut30/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut30/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut30/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut30/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut30/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // pid El in MC true
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut1", "All hip;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid separately for each cut (what we reject)
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut2", "rejected, IM hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut3", "rejected, DP hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut4", "rejected, El hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut5", "rejected, vPi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut6", "rejected, Pt hip; #it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut7", "rejected, vVc hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut8", "rejected, pTot hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut9", "rejected, vPr hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut10", "rejected, vKa hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut11", "rejected, nCR hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut12", "rejected, s3pi hip;#it{p}_{trk} (GeV/#it{c}); d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // pid sequentialy
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut23", "Occ+35 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // cut27 MC
-    registryMC.add("controlMCtrue/cut27/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut27/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut27/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut27/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut27/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut27/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut27/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut27/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut27/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut31", "FIT+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      //    registryMC.add("pidTPCMCEltrue/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    //   //cut31 MC
-    //   registryMC.add("controlMCtrue/cut31/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //   registryMC.add("controlMCtrue/cut31/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //   registryMC.add("controlMCtrue/cut31/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //   registryMC.add("controlMCtrue/cut31/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //   registryMC.add("controlMCtrue/cut31/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //   registryMC.add("controlMCtrue/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //   registryMC.add("controlMCtrue/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //   registryMC.add("controlMCtrue/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //   registryMC.add("controlMCtrue/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //   registryMC.add("controlMCtrue/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //   registryMC.add("controlMCtrue/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //   registryMC.add("controlMCtrue/cut31/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //   registryMC.add("controlMCtrue/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //   registry1MC.add("controlMCtrue/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //   // registryMC.add("controlMCtrue/cut31/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //   // registryMC.add("controlMCtrue/cut31/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //   //
-    //   registryMC.add("controlMCcomb/cut31/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //   registryMC.add("controlMCcomb/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //   registryMC.add("controlMCcomb/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //   registryMC.add("controlMCcomb/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //   registryMC.add("controlMCcomb/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //   registryMC.add("controlMCcomb/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //   registryMC.add("controlMCcomb/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //   registryMC.add("controlMCcomb/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //   registry1MC.add("controlMCcomb/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // pid Pi in MC true
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});dE/dx_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut20", "El hip;    #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut23", "Occ+35 hip; #it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    //    //cut32 MC
-    //    registryMC.add("controlMCtrue/cut32/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registryMC.add("controlMCtrue/cut32/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    //    registryMC.add("controlMCtrue/cut32/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    //    registryMC.add("controlMCtrue/cut32/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    //    registryMC.add("controlMCtrue/cut32/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registryMC.add("controlMCtrue/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registryMC.add("controlMCtrue/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registryMC.add("controlMCtrue/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registryMC.add("controlMCtrue/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registryMC.add("controlMCtrue/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registryMC.add("controlMCtrue/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registryMC.add("controlMCtrue/cut32/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    //    registryMC.add("controlMCtrue/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry1MC.add("controlMCtrue/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    // registryMC.add("controlMCtrue/cut32/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    //    // registryMC.add("controlMCtrue/cut32/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    //
-    //    registryMC.add("controlMCcomb/cut32/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    //    registryMC.add("controlMCcomb/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    //    registryMC.add("controlMCcomb/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    //    registryMC.add("controlMCcomb/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    //    registryMC.add("controlMCcomb/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    //    registryMC.add("controlMCcomb/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    //    registryMC.add("controlMCcomb/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    //    registryMC.add("controlMCcomb/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //    registry1MC.add("controlMCcomb/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut31", "FIT+27 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
+      // registryMC.add("pidTPCMCPitrue/hpvsdedxElHipCut32", "TOF+31 hip;#it{p}_{trk} (GeV/#it{c});d#it{E}/d#it{x}_{trk}", {HistType::kTH2F, {axisp, dedxAxis}});
 
-    // cut33 MC
-    registryMC.add("controlMCtrue/cut33/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut33/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut33/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut33/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut33/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut33/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut33/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut33/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut33/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // El PID in TOF MC true
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut0", "In hip ;#it{p}_{trk}(GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut20", "El hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut33", "eTOF+20 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut21", "vPi+33 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut24", "vPr+21 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut25", "vKa+24 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut28", "CR+25 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut22", "vVc+28 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut29", "s3pi+22 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut26", "IM+29 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut34", "piTOF+26 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut30", "ptTot+34 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut27", "DP+30 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut35", "ZDC+27 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
+      registry1MC.add("pidTOFMCEltrue/hpvsNsigmaElHipCut23", "Occ+27 hip;#it{p}_{trk} (GeV/#it{c});N#sigma El^{TOF}_{trk}", {HistType::kTH2F, {axisp, {100, -5., 5.}}});
 
-    // cut34 MC
-    //     registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {axisInvMass4trk}});
-    registryMC.add("controlMCtrue/cut34/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut34/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut34/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut34/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut34/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut34/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut34/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut34/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut0
+      registryMC.add("controlMCtrue/cut0/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut0/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut0/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut0/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut0/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut0/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut0/hsigma3PiNew", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut0/hsigma2PiNew", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}};#sigma^{2#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut0/hsigma1PiNew", "#sqrt{#sigma_{1}^{2 }};#sigma^{1#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // cut35 MC
-    //     registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registryMC.add("controlMCtrue/cut35/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {axisInvMass4trk}});
-    registryMC.add("controlMCtrue/cut35/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut35/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
-    registryMC.add("controlMCtrue/cut35/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
-    registryMC.add("controlMCtrue/cut35/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCtrue/cut35/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCtrue/cut35/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCtrue/cut35/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCtrue/cut35/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCtrue/cut35/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCtrue/cut35/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCtrue/cut35/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
-    registryMC.add("controlMCtrue/cut35/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCtrue/cut35/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    // registryMC.add("controlMCtrue/cut35/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
-    // registryMC.add("controlMCtrue/cut35/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    //
-    registryMC.add("controlMCcomb/cut35/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
-    registryMC.add("controlMCcomb/cut35/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut35/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
-    registryMC.add("controlMCcomb/cut35/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
-    registryMC.add("controlMCcomb/cut35/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
-    registryMC.add("controlMCcomb/cut35/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
-    registryMC.add("controlMCcomb/cut35/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
-    registryMC.add("controlMCcomb/cut35/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
-    registry1MC.add("controlMCcomb/cut35/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut0/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      registryMC.add("controlMCtrue/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut0/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registry1MC.add("controlMCtrue/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut0/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut0/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut0/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut0/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut0/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut0/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut0/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCcomb/cut0/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registry1MC.add("controlMCcomb/cut0/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // ptSpectrum of electron for MC true and combinatorics
-    registryMC.add("controlMCtrue/cut0/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut20/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut21/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut22/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut23/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut24/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut25/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut26/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut27/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut28/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut29/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut30/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut31/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    // registryMC.add("controlMCtrue/cut32/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut33/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut34/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCtrue/cut35/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      // cut20 MC
+      registryMC.add("controlMCtrue/cut20/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut20/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut20/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut20/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut20/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut20/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut20/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut20/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut20/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut20/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut20/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut20/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut20/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut20/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut20/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut20/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut20/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    registryMC.add("controlMCcomb/cut0/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
-    registryMC.add("controlMCcomb/cut20/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut21/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut22/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut23/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut24/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut25/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut26/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut27/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut28/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut29/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut30/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut31/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut32/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut33/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut34/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    registryMC.add("controlMCcomb/cut35/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
-    // zrobic hpTspectrumEl dla cut 0,20-35: registry.get<TH1>(HIST("global/hFinalPtSpectrumEl"))->Fill(tmpPt[i]);
+      // cut21 MC
+      registryMC.add("controlMCtrue/cut21/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut21/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut21/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut21/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut21/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut21/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut21/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut21/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut21/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut21/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut21/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut21/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut21/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut21/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut21/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut21/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut21/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // tau
-    registryMC.add("tauMC/hMCeta", ";#eta^{#tau};N^{#tau} ", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("tauMC/hMCy", ";y^{#tau};N^{#tau}", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("tauMC/hMCphi", ";#phi^{#tau};N^{#tau}", {HistType::kTH1F, {{100, 0., 6.4}}});
-    registryMC.add("tauMC/hMCpt", ";#it{p}_{T}^{#tau};N^{#tau}", {HistType::kTH1F, {{100, 0., 10.}}});
+      // cut24 MC
+      registryMC.add("controlMCtrue/cut24/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut24/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut24/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut24/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut24/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut24/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut24/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut24/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut24/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut24/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut24/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut24/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut24/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut24/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut24/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut24/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut24/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    registryMC.add("tauMC/hMCdeltaeta", ";#Delta#eta^{#tau};events ", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("tauMC/hMCdeltaphi", ";#Delta#phi^{#tau}(deg.);events", {HistType::kTH1F, {{100, 131., 181}}});
+      // cut25 MC
+      registryMC.add("controlMCtrue/cut25/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut25/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut25/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut25/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut25/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut25/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut25/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut25/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut25/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut25/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut25/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut25/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut25/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut25/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut25/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut25/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut25/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // electron
-    registryMC.add("electronMC/hMCeta", ";#eta^{e};N^{e}", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("electronMC/hMCy", ";y^{e};N^{e}", {HistType::kTH1F, {{100, -5., 5.}}});
-    registryMC.add("electronMC/hMCphi", ";#phi^{e};N^{e}", {HistType::kTH1F, {{100, 0., 6.4}}});
-    registryMC.add("electronMC/hMCpt", ";#it{p}_{T}^{e};N^{e}", {HistType::kTH1F, {{400, 0., 10.}}});
+      // cut28 MC
+      registryMC.add("controlMCtrue/cut28/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut28/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut28/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut28/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut28/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut28/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut28/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut28/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut28/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut28/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut28/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut28/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut28/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut28/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut28/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut28/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut28/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // efficiency mu
-    registryMC.add("efficiencyMCMu/effiMu", ";Efficiency #mu3#pi;events", {HistType::kTH1F, {{20, 0., 20.}}});
-    registryMC.add("efficiencyMCMu/hpTmuon", ";p_{T}^{#mu, gen} (GeV/c);events", {HistType::kTH1F, {{200, 0., 5.}}});
+      // cut22 MC
+      registryMC.add("controlMCtrue/cut22/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut22/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut22/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut22/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut22/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut22/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut22/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut22/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut22/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut22/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut22/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut22/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut22/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut22/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut22/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut22/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut22/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // efficiency pi
-    registryMC.add("efficiencyMCPi/effiPi", ";Efficiency #pi3#pi;events", {HistType::kTH1F, {{20, 0., 20.}}});
-    registryMC.add("efficiencyMCPi/hpTpi", ";p_{T}^{#pi, gen} (GeV/c);events", {HistType::kTH1F, {{200, 0., 5.}}});
+      // cut29 MC
+      registryMC.add("controlMCtrue/cut29/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut29/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut29/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut29/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut29/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut29/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut29/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut29/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut29/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut29/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut29/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut29/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut29/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut29/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut29/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut29/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut29/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // efficiency el
-    registryMC.add("efficiencyMCEl/effiEl", ";Efficiency e3#pi;events", {HistType::kTH1F, {{70, 0., 70.}}});
-    registryMC.add("efficiencyMCEl/hpTelec", ";p_{T}^{e, gen} (GeV/c);events", {HistType::kTH1F, {axispt}});
+      // cut26 MC
+      registryMC.add("controlMCtrue/cut26/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut26/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut26/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut26/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut26/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut26/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut26/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut26/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut26/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut26/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut26/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut26/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut26/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut26/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut26/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut26/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut26/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // efficiency el
-    registryMC.add("efficiencyMCEl/hMCdeltaAlphaEpi", ";#Delta#alpha^{e-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
-    registryMC.add("efficiencyMCEl/hMCdeltaAlphaPiPi", ";#Delta#alpha^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
-    registryMC.add("efficiencyMCEl/hMCdeltaPhiEpi", ";#Delta#phi^{e-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
-    registryMC.add("efficiencyMCEl/hMCdeltaPhiPipi", ";#Delta#phi^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
-    registryMC.add("efficiencyMCEl/hMCvirtCal", ";virt Cal. #Delta #alpha^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, 0., 2.}}});
-    registryMC.add("efficiencyMCEl/hMCScalar", ";A_{S}^{#pi-#pi(3x), gen};events", {HistType::kTH1F, {{100, 0., 1.}}});
-    registryMC.add("efficiencyMCEl/hMCVector", ";A_{V}^{#pi-#pi(3x), gen};events", {HistType::kTH1F, {{100, 0., 2.}}});
+      // cut30 MC
+      registryMC.add("controlMCtrue/cut30/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut30/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut30/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut30/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut30/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut30/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut30/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut30/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut30/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut30/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut30/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut30/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut30/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut30/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut30/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut30/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut30/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-    // missing eta vs phi
-    registryMC.add("efficiencyMCEl/hMCptEl", ";p_{T}^{e, true} (GeV/c) ;events", {HistType::kTH1F, {{200, 0., 5.}}});
-    // registryMC.add("efficiencyMCEl/hMCpt4trk",";p_{T}^{4 MC part.} (GeV/c) ;events",{HistType::kTH1F,{{100, 0., 5.}}});
-    registryMC.add("efficiencyMCEl/hMCpt4trk", ";p_{T}^{4 MC part.} (GeV/c) ;events", {HistType::kTH1F, {axispt}});
-    // registryMC.add("efficiencyMCEl/hMCinvmass4pi",";M_{inv}^{4#pi true} (GeV/c^{2}) ;events",{HistType::kTH1F,{{100, 0.4, 5.4}}});
-    registryMC.add("efficiencyMCEl/hMCinvmass4pi", ";M_{inv}^{4#pi true} (GeV/c^{2}) ;events", {HistType::kTH1F, {axisInvMass4trk}});
-    registryMC.add("efficiencyMCEl/hMCinvmass3pi", ";M_{inv}^{3#pi true} (GeV/c^{2}) ;events", {HistType::kTH1F, {{100, 0.4, 2.4}}});
-    registryMC.add("efficiencyMCEl/hMCdeltaphi13", ";#Delta#phi^{1-3 true} ;events", {HistType::kTH1F, {{100, 0., 3.2}}});
-  }
+      // cut27 MC
+      registryMC.add("controlMCtrue/cut27/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut27/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut27/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut27/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut27/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut27/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut27/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut27/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut27/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut27/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut27/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut27/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut27/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut27/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut27/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut27/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut27/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-  float eta(float px, float py, float pz)
-  // Just a simple function to return pseudorapidity
-  {
-    float arg = -2.; // outside valid range for std::atanh
-    float mom = std::sqrt(px * px + py * py + pz * pz);
-    if (mom != 0)
-      arg = pz / mom;
-    if (-1. < arg && arg < 1.)
-      return std::atanh(arg); // definition of eta
-    return -999.;
-  }
+      //   //cut31 MC
+      //   registryMC.add("controlMCtrue/cut31/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //   registryMC.add("controlMCtrue/cut31/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //   registryMC.add("controlMCtrue/cut31/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //   registryMC.add("controlMCtrue/cut31/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //   registryMC.add("controlMCtrue/cut31/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //   registryMC.add("controlMCtrue/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //   registryMC.add("controlMCtrue/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //   registryMC.add("controlMCtrue/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //   registryMC.add("controlMCtrue/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //   registryMC.add("controlMCtrue/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //   registryMC.add("controlMCtrue/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //   registryMC.add("controlMCtrue/cut31/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //   registryMC.add("controlMCtrue/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //   registry1MC.add("controlMCtrue/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //   // registryMC.add("controlMCtrue/cut31/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //   // registryMC.add("controlMCtrue/cut31/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //   //
+      //   registryMC.add("controlMCcomb/cut31/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //   registryMC.add("controlMCcomb/cut31/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //   registryMC.add("controlMCcomb/cut31/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //   registryMC.add("controlMCcomb/cut31/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //   registryMC.add("controlMCcomb/cut31/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //   registryMC.add("controlMCcomb/cut31/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //   registryMC.add("controlMCcomb/cut31/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //   registryMC.add("controlMCcomb/cut31/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //   registry1MC.add("controlMCcomb/cut31/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-  float phi(float px, float py)
-  // Just a simple function to return azimuthal angle from 0 to 2pi
-  {
-    if (px != 0)
-      return (std::atan2(py, px) + o2::constants::math::PI);
-    return -999.;
-  }
+      //    //cut32 MC
+      //    registryMC.add("controlMCtrue/cut32/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registryMC.add("controlMCtrue/cut32/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      //    registryMC.add("controlMCtrue/cut32/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      //    registryMC.add("controlMCtrue/cut32/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      //    registryMC.add("controlMCtrue/cut32/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registryMC.add("controlMCtrue/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registryMC.add("controlMCtrue/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registryMC.add("controlMCtrue/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registryMC.add("controlMCtrue/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registryMC.add("controlMCtrue/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registryMC.add("controlMCtrue/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registryMC.add("controlMCtrue/cut32/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      //    registryMC.add("controlMCtrue/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry1MC.add("controlMCtrue/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    // registryMC.add("controlMCtrue/cut32/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      //    // registryMC.add("controlMCtrue/cut32/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    //
+      //    registryMC.add("controlMCcomb/cut32/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      //    registryMC.add("controlMCcomb/cut32/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      //    registryMC.add("controlMCcomb/cut32/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      //    registryMC.add("controlMCcomb/cut32/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      //    registryMC.add("controlMCcomb/cut32/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      //    registryMC.add("controlMCcomb/cut32/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      //    registryMC.add("controlMCcomb/cut32/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      //    registryMC.add("controlMCcomb/cut32/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //    registry1MC.add("controlMCcomb/cut32/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
 
-  float pt(float px, float py)
-  // Just a simple function to return pt
-  {
-    return std::sqrt(px * px + py * py);
-  }
+      // cut33 MC
+      registryMC.add("controlMCtrue/cut33/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut33/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut33/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut33/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut33/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut33/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut33/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut33/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut33/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut33/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut33/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut33/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut33/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut33/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut33/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut33/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut33/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+
+      // cut34 MC
+      //     registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {axisInvMass4trk}});
+      registryMC.add("controlMCtrue/cut34/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut34/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut34/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut34/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut34/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut34/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut34/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut34/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut34/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut34/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut34/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut34/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut34/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut34/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut34/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut34/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+
+      // cut35 MC
+      //     registryMC.add("controlMCtrue/cut34/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut35/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {axisInvMass4trk}});
+      registryMC.add("controlMCtrue/cut35/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut35/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut35/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut35/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut35/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut35/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut35/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut35/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut35/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut35/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut35/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut35/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut35/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut35/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut35/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut35/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut35/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut35/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut35/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut35/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut35/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut35/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut35/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut35/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+
+      // cut23 MC
+      registryMC.add("controlMCtrue/cut23/h4piMass", "4#pi mass;M_{inv}^{4#pi} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registryMC.add("controlMCtrue/cut23/h4trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut23/h4trkMassVsPt", "4-track mass vs Pt;M_{inv}^{4track} (GeV/c^{2});p_{T}^{4track} (GeV/c);entries", {HistType::kTH2F, {{100, 1, 5.}, axispt}});
+      registryMC.add("controlMCtrue/cut23/hZNACenergy", "ZNA vs ZNC energy, cut0; #it{E}_{ZNA} (GeV); #it{E}_{ZNC} (GeV); Collisions", {HistType::kTH2F, {axisZDC, axisZDC}});
+      registryMC.add("controlMCtrue/cut23/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCtrue/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCtrue/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCtrue/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCtrue/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCtrue/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCtrue/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCtrue/cut23/h3piMassVsPt", "3#pi mass vs Pt, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});p_{T}^{3#pi} (GeV/c);entries", {HistType::kTH2F, {minvAxis, axispt}});
+      registryMC.add("controlMCtrue/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCtrue/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      // registryMC.add("controlMCtrue/cut23/hNtofTrk", ";N_{TOF trk}; Entries", {HistType::kTH1F, {{7, 0., 7.}}});
+      // registryMC.add("controlMCtrue/cut23/h3pi1eMass", "3#pi+e mass;M_{inv}^{3#pi+e} (GeV/c^{2});entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      //
+      registryMC.add("controlMCcomb/cut23/h3piMass", "3#pi mass, up to 4 entries per event ;M_{inv}^{3#pi} (GeV/c^{2});entries", {HistType::kTH1F, {minvAxis}});
+      registryMC.add("controlMCcomb/cut23/h3trkPtTot", ";p_{T} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut23/hDeltaPhi13topo", "#Delta #varphi 1+3 topo, 4 entries/event;#Delta#varphi^{1+3};entries", {HistType::kTH1F, {phiAxis}});
+      registryMC.add("controlMCcomb/cut23/h13AssymPt1ProngAver", ";Delta Pt/Sum Pt (1Prong,Aver Pt)", {HistType::kTH1F, {{100, -1., 1.}}});
+      registryMC.add("controlMCcomb/cut23/h13Vector", ";A_{V};entries", {HistType::kTH1F, {vectorAxis}});
+      registryMC.add("controlMCcomb/cut23/h13Scalar", ";A_{S};entries", {HistType::kTH1F, {scalarAxis}});
+      registryMC.add("controlMCcomb/cut23/hTPCnCrossedRows", "N crossed rows ;N_{TPC,crossed rows};entries", {HistType::kTH1F, {{160, 0, 160.}}});
+      registryMC.add("controlMCcomb/cut23/hsigma3Pi", "#sqrt{#sigma_{1}^{2 }+#sigma_{2}^{2}+#sigma_{3}^{2}};#sigma^{3#pi};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+      registry1MC.add("controlMCcomb/cut23/hTofChi2El", ";TOF #chi^{2};entries", {HistType::kTH1F, {{100, 0., 10.}}});
+
+      // ptSpectrum of electron for MC true and combinatorics
+      registryMC.add("controlMCtrue/cut0/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut20/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut21/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut22/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut23/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut24/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut25/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut26/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut27/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut28/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut29/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut30/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut31/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      // registryMC.add("controlMCtrue/cut32/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut33/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut34/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCtrue/cut35/hPtSpectrumEl", ";p_{T}^{e} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+
+      registryMC.add("controlMCcomb/cut0/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {ptAxis}});
+      registryMC.add("controlMCcomb/cut20/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut21/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut22/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut23/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut24/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut25/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut26/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut27/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut28/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut29/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut30/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut31/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut32/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut33/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut34/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      registryMC.add("controlMCcomb/cut35/hPtSpectrumEl", ";p_{T}^{comb} (GeV/c);entries", {HistType::kTH1F, {axispt}});
+      // zrobic hpTspectrumEl dla cut 0,20-35: registry.get<TH1>(HIST("global/hFinalPtSpectrumEl"))->Fill(tmpPt[i]);
+
+      // efficiency el
+      registryMC.add("efficiencyMCEl/hMCdeltaAlphaEpi", ";#Delta#alpha^{e-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
+      registryMC.add("efficiencyMCEl/hMCdeltaAlphaPiPi", ";#Delta#alpha^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
+      registryMC.add("efficiencyMCEl/hMCdeltaPhiEpi", ";#Delta#phi^{e-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
+      registryMC.add("efficiencyMCEl/hMCdeltaPhiPipi", ";#Delta#phi^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, -0.1, 3.2}}});
+      registryMC.add("efficiencyMCEl/hMCvirtCal", ";virt Cal. #Delta #alpha^{#pi-#pi(3x), gen} (rad);events", {HistType::kTH1F, {{100, 0., 2.}}});
+      registryMC.add("efficiencyMCEl/hMCScalar", ";A_{S}^{#pi-#pi(3x), gen};events", {HistType::kTH1F, {{100, 0., 1.}}});
+      registryMC.add("efficiencyMCEl/hMCVector", ";A_{V}^{#pi-#pi(3x), gen};events", {HistType::kTH1F, {{100, 0., 2.}}});
+
+      // missing eta vs phi
+      registryMC.add("efficiencyMCEl/hMCptEl", ";p_{T}^{e, true} (GeV/c) ;events", {HistType::kTH1F, {{200, 0., 5.}}});
+      // registryMC.add("efficiencyMCEl/hMCpt4trk",";p_{T}^{4 MC part.} (GeV/c) ;events",{HistType::kTH1F,{{100, 0., 5.}}});
+      registryMC.add("efficiencyMCEl/hMCpt4trk", ";p_{T}^{4 MC part.} (GeV/c) ;events", {HistType::kTH1F, {axispt}});
+      // registryMC.add("efficiencyMCEl/hMCinvmass4pi",";M_{inv}^{4#pi true} (GeV/c^{2}) ;events",{HistType::kTH1F,{{100, 0.4, 5.4}}});
+      registryMC.add("efficiencyMCEl/hMCinvmass4pi", ";M_{inv}^{4#pi true} (GeV/c^{2}) ;events", {HistType::kTH1F, {axisInvMass4trk}});
+      registryMC.add("efficiencyMCEl/hMCinvmass3pi", ";M_{inv}^{3#pi true} (GeV/c^{2}) ;events", {HistType::kTH1F, {{100, 0.4, 2.4}}});
+      registryMC.add("efficiencyMCEl/hMCdeltaphi13", ";#Delta#phi^{1-3 true} ;events", {HistType::kTH1F, {{100, 0., 3.2}}});
+
+      // histograms mass3pi vs acoponarity MC true
+      registry1MC.add("controlMCtrue/cut0/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut20/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut33/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut21/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut24/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut25/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut28/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut22/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut29/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut26/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut34/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut30/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut27/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut35/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCtrue/cut23/h3piMassVsAco", "3#pi mass vs acoplanarity MC sig ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+
+      // histograms mass3pi vs acoponarity MC comb
+      registry1MC.add("controlMCcomb/cut0/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut20/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut33/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut21/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut24/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut25/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut28/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut22/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut29/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut26/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut34/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut30/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut27/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut35/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+      registry1MC.add("controlMCcomb/cut23/h3piMassVsAco", "3#pi mass vs acoplanarity MC comb ;M_{inv}^{3#pi} (GeV/c^{2});A^{1+3};entries", {HistType::kTH2F, {minvAxis, acoAxis}});
+
+    } // end of MC histograms processEfficiencyMCSG
+
+    if (doprocessDoSkim) {
+      registrySkim.add("skim/efficiency", ";efficeincy;events", {HistType::kTH1F, {{10, 0., 10.}}});
+    }
+
+  } // end of init method
+
+  //  float eta(float px, float py, float pz)
+  //  // Just a simple function to return pseudorapidity
+  //  {
+  //    float arg = -2.; // outside valid range for std::atanh
+  //    float mom = std::sqrt(px * px + py * py + pz * pz);
+  //    if (mom != 0)
+  //      arg = pz / mom;
+  //    if (-1. < arg && arg < 1.)
+  //      return std::atanh(arg); // definition of eta
+  //    return -999.;
+  //  }
+
+  //  float phi(float px, float py)
+  //  // Just a simple function to return azimuthal angle from 0 to 2pi
+  //  {
+  //    if (px != 0)
+  //      return (std::atan2(py, px) + o2::constants::math::PI);
+  //    return -999.;
+  //  }
+
+  //  float pt(float px, float py)
+  //  // Just a simple function to return pt
+  //  {
+  //    return std::sqrt(px * px + py * py);
+  //  }
 
   float rapidity(float energy, float pz)
   // Just a simple function to return track rapidity
@@ -1376,13 +1650,14 @@ struct TauTau13topo {
     return angle;
   }
 
-  float invariantMass(float E, float px, float py, float pz)
-  // Just a simple function to return invariant mass
-  {
-    return std::sqrt(E * E - px * px - py * py - pz * pz);
-  }
+  //  float invariantMass(float E, float px, float py, float pz)
+  //  // Just a simple function to return invariant mass
+  //  {
+  //    return std::sqrt(E * E - px * px - py * py - pz * pz);
+  //  }
 
-  float calculateDeltaPhi(TLorentzVector p, TLorentzVector p1)
+  //  float calculateDeltaPhi(TLorentzVector p, TLorentzVector p1)
+  float calculateDeltaPhi(ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p, ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p1)
   {
     //    float delta = p.Phi();
     float delta = RecoDecay::constrainAngle(p.Phi());
@@ -1435,8 +1710,10 @@ struct TauTau13topo {
   // helper function to calculate scalar asymmetry
   float scalarAsymMC(auto particle1, auto particle2)
   {
-    auto pt1 = pt(particle1.px(), particle1.py());
-    auto pt2 = pt(particle2.px(), particle2.py());
+    // auto pt1 = pt(particle1.px(), particle1.py());
+    auto pt1 = RecoDecay::pt(particle1.px(), particle1.py());
+    // auto pt2 = pt(particle2.px(), particle2.py());
+    auto pt2 = RecoDecay::pt(particle2.px(), particle2.py());
     auto delta = pt1 - pt2;
     return std::abs(delta) / (pt1 + pt2);
   }
@@ -1470,6 +1747,8 @@ struct TauTau13topo {
     registry.get<TH1>(HIST("control/cut") + HIST(kHistoname[mode]) + HIST("/hTPCnCrossedRows"))->Fill(nCRtpc);
     registry.get<TH1>(HIST("control/cut") + HIST(kHistoname[mode]) + HIST("/hPtSpectrumEl"))->Fill(ptelec);
     registry.get<TH1>(HIST("control/cut") + HIST(kHistoname[mode]) + HIST("/hTofChi2El"))->Fill(tofchi2);
+    float aco = 1. - pi3deltaPhi / o2::constants::math::PI;
+    registry.get<TH2>(HIST("control/cut") + HIST(kHistoname[mode]) + HIST("/h3piMassVsAco"))->Fill(pi3invMass, aco);
   }
 
   // fill control histograms per track in MC true
@@ -1490,6 +1769,8 @@ struct TauTau13topo {
     registryMC.get<TH1>(HIST("controlMCtrue/cut") + HIST(kHistoname[mode]) + HIST("/hPtSpectrumEl"))->Fill(ptelec);
     // registryMC.get<TH1>(HIST("controlMCtrue/cut") + HIST(kHistoname[mode]) + HIST("/h13EtaSum"))->Fill(pi3etasum);
     registry1MC.get<TH1>(HIST("controlMCtrue/cut") + HIST(kHistoname[mode]) + HIST("/hTofChi2El"))->Fill(tofchi2);
+    float aco = 1. - pi3deltaPhi / o2::constants::math::PI;
+    registry1MC.get<TH2>(HIST("controlMCtrue/cut") + HIST(kHistoname[mode]) + HIST("/h3piMassVsAco"))->Fill(pi3invMass, aco);
   }
 
   // fill control histograms per track in MC true
@@ -1510,6 +1791,8 @@ struct TauTau13topo {
     registryMC.get<TH1>(HIST("controlMCcomb/cut") + HIST(kHistoname[mode]) + HIST("/hPtSpectrumEl"))->Fill(ptelec);
     // registryMC.get<TH1>(HIST("controlMCtrue/cut") + HIST(kHistoname[mode]) + HIST("/h13EtaSum"))->Fill(pi3etasum);
     registry1MC.get<TH1>(HIST("controlMCcomb/cut") + HIST(kHistoname[mode]) + HIST("/hTofChi2El"))->Fill(tofchi2);
+    float aco = 1. - pi3deltaPhi / o2::constants::math::PI;
+    registry1MC.get<TH2>(HIST("controlMCcomb/cut") + HIST(kHistoname[mode]) + HIST("/h3piMassVsAco"))->Fill(pi3invMass, aco);
   }
 
   template <typename T>
@@ -1552,22 +1835,245 @@ struct TauTau13topo {
     return -1;
   }
 
+  // global track check + histogram cuts separatelly
+  template <typename T>
+  bool isGlobalTrackCheck(T track)
+  {
+    bool isGlobalTrack = true;
+    registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(0., 1.);
+    if (track.tpcNClsCrossedRows() > 70) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(1., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.tpcNClsFindable() == 0) {
+      isGlobalTrack = false;
+    } else {
+      if (track.tpcNClsCrossedRows() / track.tpcNClsFindable() > 0.8) {
+        registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(2., 1.);
+      } else {
+        isGlobalTrack = false;
+      }
+    }
+    if (track.tpcChi2NCl() < 4.) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(3., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.itsChi2NCl() < 36.) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(4., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.dcaZ() < 2.) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(5., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.dcaXY() < 0.0105 * 0.035 / std::pow(track.pt(), 1.1)) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(6., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.pt() > 0.1) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(7., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (std::abs(RecoDecay::eta(std::array<double, 3>{track.px(), track.py(), track.pz()})) < 0.8) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(8., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.hasITS()) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(9., 1.);
+      // old version
+      // clustermap1 = trk.itsClusterMap();
+      // for (int bitNo = 0; bitNo < 7; bitNo++) {
+      //   if (TESTBIT(clustermap1, bitNo)) { // check ITS bits/layers for each PV track
+      //     registry.get<TH1>(HIST("global/hITSbitPVtrk"))->Fill(bitNo, 1.);
+      //     registry.get<TH2>(HIST("global/hITSbitVsEtaPVtrk"))->Fill(p.Eta(), bitNo, 1.);
+      //     nITSbits++;
+      //   }
+      // } // end of loop over ITS bits
+      //
+      // isInnerITS = TESTBIT(clustermap1, 0) || TESTBIT(clustermap1, 1) || TESTBIT(clustermap1, 2);
+      // if (isInnerITS) {
+      //   registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(10., 1.);
+      // } else {
+      //   isGlobalTrack = false;
+      // }
+      //
+    } else {
+      isGlobalTrack = false;
+    }
+    if (track.hasTPC()) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(11., 1.);
+    } else {
+      isGlobalTrack = false;
+    }
+    // final global track
+    if (isGlobalTrack) {
+      registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(13., 1.);
+    }
+    return isGlobalTrack;
+  } // end of function
+
+  // analysis track quality check with histogram filling
+  template <typename T>
+  bool isGoodTrackCheckHisto(T track)
+  {
+    bool isGoodTrack = true;
+    registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(0., 1.);
+    if (track.hasTPC()) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(1., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.tpcChi2NCl() < 4.) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(2., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.itsChi2NCl() < 36.) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(3., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.dcaZ() < 2.) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(4., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.dcaXY() < 0.0105 * 0.035 / std::pow(track.pt(), 1.1)) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(5., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+
+    if (track.tpcNClsCrossedRows() > 50) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(6., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.tpcNClsFindable() == 0) {
+      isGoodTrack = false;
+    } else {
+      if (track.tpcNClsCrossedRows() / track.tpcNClsFindable() > 0.8) {
+        registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(7., 1.);
+      } else {
+        isGoodTrack = false;
+      }
+    }
+    if (isGoodTrack) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(13., 1.);
+    }
+    return isGoodTrack;
+  }
+
+  // analysis track quality check
+  template <typename T>
+  bool isGoodTrackCheck(T track)
+  {
+    if (!track.hasTPC())
+      return false;
+    if (track.tpcChi2NCl() >= 4.)
+      return false;
+    if (track.itsChi2NCl() >= 36.)
+      return false;
+    // if (track.dcaZ() >= 2.) return false;
+    // if (track.dcaXY() >= 0.0105 * 0.035 / std::pow(track.pt(), 1.1)) return false;
+    if (track.tpcNClsCrossedRows() <= 50)
+      return false;
+    if (track.tpcNClsFindable() == 0)
+      return false;
+    if (track.tpcNClsCrossedRows() / track.tpcNClsFindable() <= 0.8)
+      return false;
+    return true;
+  }
+
+  // analysis track quality check
+  template <typename T>
+  bool isGoodTOFTrackCheckHisto(T track)
+  {
+    bool isGoodTrack = true;
+    if (track.hasTOF()) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(8., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    if (track.hasTOF() && track.tofChi2() < 3) {
+      registry.get<TH1>(HIST("global/hTrackPVGood"))->Fill(9., 1.);
+    } else {
+      isGoodTrack = false;
+    }
+    return isGoodTrack;
+  }
+
+  // analysis track quality check
+  template <typename T>
+  bool isGoodTOFTrackCheck(T track)
+  {
+    if (!track.hasTOF())
+      return false;
+    if (track.tofChi2() >= 3)
+      return false;
+    return true;
+  }
+
+  // check ITS clusters, how many -1,0,1,7 + 10 if 0,1,2 layers were fired
+  // analysis track quality check
+  template <typename T>
+  int numberOfItsClustersCheck(T track)
+  {
+    if (!track.hasITS())
+      return -1;
+    int nITSbits = 0;
+    int firstThreeLayers = 0;
+    uint32_t clusterSizes = track.itsClusterSizes();
+    for (int layer = 0; layer < 7; layer++) {
+      if ((clusterSizes >> (layer * 4)) & 0xf) {
+        nITSbits++;
+        if (layer < 3)
+          firstThreeLayers++;
+      }
+    } // end of loop over ITS bits
+    if (firstThreeLayers == 3)
+      nITSbits += 10;
+
+    return nITSbits;
+  }
+
+  // RCT check
+  template <typename C>
+  int isGoodRCTflag(C const& coll)
+  {
+    if (sgSelector.isCBTHadronZdcOk(coll))
+      return 4;
+    else if (sgSelector.isCBTHadronOk(coll))
+      return 3;
+    else if (sgSelector.isCBTZdcOk(coll))
+      return 2;
+    else if (sgSelector.isCBTOk(coll))
+      return 1;
+    else
+      return 0;
+  }
+
   //  using UDCollisionsFull = soa::Join<aod::UDCollisions, aod::UDCollisionsSels>;
   //  using UDCollisionFull = UDCollisionsFull::iterator;
   using UDTracksFull = soa::Join<aod::UDTracks, aod::UDTracksPID, aod::UDTracksExtra, aod::UDTracksFlags, aod::UDTracksDCA>;
-  using UDCollisionsFull2 = soa::Join<aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced>;
+  // using UDCollisionsFull2 = soa::Join<aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced>; // without occupancy cut
+  using UDCollisionsFull2 = soa::Join<aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced, aod::UDCollisionSelExtras>;
   using UDCollisionFull2 = UDCollisionsFull2::iterator;
 
   // PVContributors
   Filter pVContributorFilter = aod::udtrack::isPVContributor == true;
   using PVTracks = soa::Filtered<UDTracksFull>;
 
-  //  using LabeledTracks = soa::Join<aod::Tracks, aod::McTrackLabels, aod::TracksExtra, aod::pidTPCFullEl, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr>;
-  using LabeledTracks = soa::Join<aod::UDTracks, aod::UDMcTrackLabels, aod::UDTracksExtra, aod::UDTracksPID, aod::UDTracksFlags, aod::UDTracksDCA>;
-  Preslice<aod::UDTracks> perCollision = aod::udtrack::udCollisionId;
   // PVContributors in MC handling
-  Filter pVContributorFilterMC = aod::udtrack::isPVContributor == true;
-  using PVTracksMC = soa::Filtered<LabeledTracks>;
+  //  Filter pVContributorFilterMC = aod::udtrack::isPVContributor == true;
+  //  using PVTracksMC = soa::Filtered<LabeledTracks>;
 
   //  void processDG(UDCollisionFull const& dgcand, UDTracksFull const& dgtracks)
   //  {
@@ -1579,10 +2085,19 @@ struct TauTau13topo {
   // void processSG(UDCollisionFull2 const& dgcand, UDTracksFull const& dgtracks)
   void processDataSG(UDCollisionFull2 const& dgcand, UDTracksFull const& dgtracks, PVTracks const& PVContributors)
   {
-    registry.get<TH1>(HIST("global/hEventEff"))->Fill(0., 1.);
+    registry.get<TH1>(HIST("global/hEventEff"))->Fill(-2., 1.);
     registry.get<TH1>(HIST("global/RunNumber"))->Fill(dgcand.runNumber());
+    if (removeNoTOFrunsInData) {
+      if (dgcand.runNumber() == 544091 || dgcand.runNumber() == 544095 || dgcand.runNumber() == 544121 || dgcand.runNumber() == 544451)
+        return;
+    }
+    registry.get<TH1>(HIST("global/hEventEff"))->Fill(-1., 1.);
     registry.get<TH1>(HIST("global/hRecFlag"))->Fill(dgcand.flags()); // reconstruction with upc settings flag
-    // registry.get<TH1>(HIST("global/hOccupancyInTime"))->Fill(dgcand.occupancyInTime());
+    registry.get<TH1>(HIST("global/hOccupancyInTime"))->Fill(dgcand.occupancyInTime());
+
+    if (dgcand.occupancyInTime() >= occupancyCut)
+      return;
+    registry.get<TH1>(HIST("global/hEventEff"))->Fill(0., 1.);
 
     int gapSide = dgcand.gapSide();
     int truegapSide = sgSelector.trueGap(dgcand, cutFV0, cutFT0A, cutFT0C, cutZDC);
@@ -1633,16 +2148,18 @@ struct TauTau13topo {
     int nEtaIn15 = 0;
     int nITSbits = -1;
     int npT100 = 0;
-    TLorentzVector p;
+    //    TLorentzVector p;
+    ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p;
     // auto const pionMass = MassPiPlus;
     // auto const electronMass = MassElectron;
     bool flagGlobalCheck = true;
-    bool isGlobalTrack = true;
+    // bool isGlobalTrack = true;
     int qtot = 0;
     // loop over PV contributors
     for (const auto& trk : PVContributors) {
       qtot += trk.sign();
-      p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      // p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      p.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
       registry.get<TH1>(HIST("global/hTrackPtPV"))->Fill(p.Pt());
       if (std::abs(p.Eta()) < trkEtacut)
         nEtaIn15++; // 1.5 is a default
@@ -1652,95 +2169,14 @@ struct TauTau13topo {
         npT100++;
 
       if (flagGlobalCheck) {
-        registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(0., 1.);
-        if (trk.tpcNClsCrossedRows() > 70) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(1., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.tpcNClsFindable() == 0) {
-          isGlobalTrack = false;
-        } else {
-          if (trk.tpcNClsCrossedRows() / trk.tpcNClsFindable() > 0.8) {
-            registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(2., 1.);
-          } else {
-            isGlobalTrack = false;
-          }
-        }
-
-        if (trk.tpcChi2NCl() < 4.) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(3., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.itsChi2NCl() < 36.) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(4., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.dcaZ() < 2.) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(5., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.dcaXY() < 0.0105 * 0.035 / std::pow(trk.pt(), 1.1)) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(6., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.pt() > 0.1) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(7., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (std::abs(p.Eta()) < 0.8) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(8., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.hasITS()) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(9., 1.);
-
-          // old version
-          // clustermap1 = trk.itsClusterMap();
-          // for (int bitNo = 0; bitNo < 7; bitNo++) {
-          //   if (TESTBIT(clustermap1, bitNo)) { // check ITS bits/layers for each PV track
-          //     registry.get<TH1>(HIST("global/hITSbitPVtrk"))->Fill(bitNo, 1.);
-          //     registry.get<TH2>(HIST("global/hITSbitVsEtaPVtrk"))->Fill(p.Eta(), bitNo, 1.);
-          //     nITSbits++;
-          //   }
-          // } // end of loop over ITS bits
-          //
-          // isInnerITS = TESTBIT(clustermap1, 0) || TESTBIT(clustermap1, 1) || TESTBIT(clustermap1, 2);
-          // if (isInnerITS) {
-          //   registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(10., 1.);
-          // } else {
-          //   isGlobalTrack = false;
-          // }
-          //
-        } else {
-          isGlobalTrack = false;
-        }
-
-        if (trk.hasTPC()) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(11., 1.);
-        } else {
-          isGlobalTrack = false;
-        }
-
-        // final global track
-        if (isGlobalTrack) {
-          registry.get<TH1>(HIST("global/hTrackEfficiencyPVGlobal"))->Fill(13., 1.);
+        if (isGlobalTrackCheck(trk)) {
           registry.get<TH2>(HIST("global/hTrackEtaPhiPVGlobal"))->Fill(p.Eta(), p.Phi());
         }
       } // end of flag check global
+
+      // check track selection
+      isGoodTrackCheckHisto(trk);
+      isGoodTOFTrackCheckHisto(trk);
 
       // new version
       if (trk.hasITS()) { // ITS track
@@ -1797,7 +2233,9 @@ struct TauTau13topo {
     registry.get<TH1>(HIST("global1/hNTracks"))->Fill(dgtracks.size());
     registry.get<TH1>(HIST("global1/hNTracksPV"))->Fill(PVContributors.size());
     for (const auto& trk : PVContributors) {
-      p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      // p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      // p.SetXYZT(trk.px(), trk.py(), trk.pz(), energy(trk.px(), trk.py(), trk.pz(), MassPiPlus));
+      p.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
       registry.get<TH1>(HIST("global1/hTrackPtPV"))->Fill(p.Pt());
       registry.get<TH2>(HIST("global1/hTrackEtaPhiPV"))->Fill(p.Eta(), p.Phi());
     }
@@ -1934,41 +2372,50 @@ struct TauTau13topo {
     float nSigmaEl[4];
     float nSigmaPi[4];
     float nSigma3Pi[4] = {0., 0., 0., 0.};
+    float nSigma3PiNew[4] = {0., 0., 0., 0.};
     float nSigmaPr[4];
     float nSigmaKa[4];
     // float dcaZ[4];
     // float dcaXY[4];
     // float chi2TPC[4];
     // float chi2ITS[4];
-    float chi2TOF[4];
+    float chi2TOF[4] = {-1., -1., -1., -1.};
     // float nclTPCfind[4];
     float nclTPCcrossedRows[4];
     bool trkHasTof[4];
+    bool trkHasTpc[4];
     float mass3pi1e[4];
     double trkTime[4];
     float trkTimeRes[4];
     double trkTimeTot = 0.;
     float trkTimeResTot = 10000.;
+    int nPiHasTPC[4] = {0, 0, 0, 0};
 
     // 2 gamma from 4 electrons
     // 12 34 | 01 23 |//1 //6 | 0 5 |counter<3?counter:5-counter counter<3?0:1
     // 13 24 | 02 13 |//2 //5 | 1 4 |
     // 14 23 | 03 12 |//3 //4 | 2 3 |
-    TLorentzVector p1, p2;
-    TLorentzVector gammaPair[3][2];
-    float invMass2El[3][2];
+    // TLorentzVector p1, p2;
+    ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p1, p2;
+    // TLorentzVector gammaPair[3][2];
+    ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> gammaPair[3][2];
+    float invMass2El[3][2]; // inv. mass squared
     int counterTmp = 0;
     bool flagIMGam2ePV[4] = {true, true, true, true};
 
     for (const auto& trk : PVContributors) {
-      p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassElectron);
+      // p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassElectron);
+      p.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassElectron));
       for (const auto& trk1 : PVContributors) {
         if (trk.index() >= trk1.index())
           continue;
-        p1.SetXYZM(trk1.px(), trk1.py(), trk1.pz(), MassElectron);
-        invMass2El[(counterTmp < 3 ? counterTmp : 5 - counterTmp)][(counterTmp < 3 ? 0 : 1)] = (p + p1).Mag2();
+        if (trk1.hasTPC())
+          nPiHasTPC[trk.index()]++;
+        // p1.SetXYZM(trk1.px(), trk1.py(), trk1.pz(), MassElectron);
+        p1.SetXYZT(trk1.px(), trk1.py(), trk1.pz(), RecoDecay::e(trk1.px(), trk1.py(), trk1.pz(), MassElectron));
+        invMass2El[(counterTmp < 3 ? counterTmp : 5 - counterTmp)][(counterTmp < 3 ? 0 : 1)] = (p + p1).mag2();
         gammaPair[(counterTmp < 3 ? counterTmp : 5 - counterTmp)][(counterTmp < 3 ? 0 : 1)] = (p + p1);
-        registry.get<TH1>(HIST("control/cut0/hInvMass2ElAll"))->Fill((p + p1).Mag2());
+        registry.get<TH1>(HIST("control/cut0/hInvMass2ElAll"))->Fill((p + p1).mag2());
         counterTmp++;
         if ((p + p1).M() < 0.015) {
           flagIMGam2ePV[trk.index()] = false;
@@ -1978,15 +2425,17 @@ struct TauTau13topo {
     } // end of loop over PVContributors
 
     // first loop to add all the tracks together
-    p = TLorentzVector(0., 0., 0., 0.);
+    // p = TLorentzVector(0., 0., 0., 0.);
+    p.SetXYZT(0., 0., 0., 0.);
     for (const auto& trk : PVContributors) {
-      p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      // p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      p1.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
       p += p1;
       scalarPtsum += trk.pt();
     } // end of loop over PVContributors
 
     float pttot = p.Pt();
-    float mass4pi = p.Mag();
+    float mass4pi = p.mag();
 
     TVector3 v1(0, 0, 0);
     TVector3 vtmp(0, 0, 0);
@@ -1994,17 +2443,25 @@ struct TauTau13topo {
     // remove combinatoric
     bool flagVcalPV[4] = {false, false, false, false};
 
+    // bool trkIsGood[4] = {false, false, false, false};
+    bool trkIsTOFGood[4] = {false, false, false, false};
+
     // second loop to calculate 1 by 1 each combinatorial variable
     counterTmp = 0;
     int tmpTrkCheck = -1;
     for (const auto& trk : PVContributors) {
+      // trkIsGood[counterTmp] =
+      isGoodTrackCheck(trk);
+      trkIsTOFGood[counterTmp] = isGoodTOFTrackCheck(trk);
       tmpTrkCheck = trackCheck(trk); // check detectors associated to track
       registry.get<TH1>(HIST("global/hTrkCheck"))->Fill(tmpTrkCheck);
 
       // inv mass of 3pi + 1e
-      p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
-      p2.SetXYZM(trk.px(), trk.py(), trk.pz(), MassElectron);
-      mass3pi1e[counterTmp] = (p - p1 + p2).Mag();
+      // p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      p1.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
+      // p2.SetXYZM(trk.px(), trk.py(), trk.pz(), MassElectron);
+      p2.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassElectron));
+      mass3pi1e[counterTmp] = (p - p1 + p2).mag();
 
       v1.SetXYZ(trk.px(), trk.py(), trk.pz());
       for (const auto& trk1 : PVContributors) {
@@ -2020,29 +2477,46 @@ struct TauTau13topo {
       nSigmaEl[counterTmp] = trk.tpcNSigmaEl();
       nSigmaPi[counterTmp] = trk.tpcNSigmaPi();
       nSigma3Pi[3] += (nSigmaPi[counterTmp] * nSigmaPi[counterTmp]);
-      // nSigmaPr[counterTmp] = trk.tpcNSigmaPr();
-      nSigmaPr[counterTmp] = std::sqrt(trk.tofNSigmaPr() * trk.tofNSigmaPr() + trk.tpcNSigmaPr() * trk.tpcNSigmaPr());
-      //      nSigmaKa[counterTmp] = trk.tpcNSigmaKa();
-      nSigmaKa[counterTmp] = std::sqrt(trk.tofNSigmaKa() * trk.tofNSigmaKa() + trk.tpcNSigmaKa() * trk.tpcNSigmaKa());
+      if (trk.hasTPC())
+        nSigma3PiNew[3] += (nSigmaPi[counterTmp] * nSigmaPi[counterTmp]);
+
+      if (whichPIDCut == 1) { // TPC only
+        nSigmaPr[counterTmp] = trk.tpcNSigmaPr();
+        nSigmaKa[counterTmp] = trk.tpcNSigmaKa();
+      } else if (whichPIDCut == 2) { // TPC + TOF sigma
+        nSigmaPr[counterTmp] = std::sqrt(trk.tofNSigmaPr() * trk.tofNSigmaPr() + trk.tpcNSigmaPr() * trk.tpcNSigmaPr());
+        nSigmaKa[counterTmp] = std::sqrt(trk.tofNSigmaKa() * trk.tofNSigmaKa() + trk.tpcNSigmaKa() * trk.tpcNSigmaKa());
+      } else if (whichPIDCut == 3) { // TPC + TOF hardcoded pt
+        nSigmaPr[counterTmp] = (trk.pt() < 1.5 ? trk.tofNSigmaPr() : trk.tpcNSigmaPr());
+        nSigmaKa[counterTmp] = (trk.pt() < 1.3 ? trk.tofNSigmaKa() : trk.tpcNSigmaKa());
+      } else {
+        nSigmaPr[counterTmp] = trk.tpcNSigmaPr();
+        nSigmaKa[counterTmp] = trk.tpcNSigmaKa();
+      }
+
       // dcaZ[counterTmp] = trk.dcaZ();
       // dcaXY[counterTmp] = trk.dcaXY();
       // chi2TPC[counterTmp] = trk.tpcChi2NCl();
       // chi2ITS[counterTmp] = trk.itsChi2NCl();
-      chi2TOF[counterTmp] = trk.tofChi2();
+      if (trk.hasTOF())
+        chi2TOF[counterTmp] = trk.tofChi2();
       // nclTPCfind[counterTmp] = trk.tpcNClsFindable();
       nclTPCcrossedRows[counterTmp] = trk.tpcNClsCrossedRows();
-      trkHasTof[counterTmp] = trk.hasTOF();
+      // trkHasTof[counterTmp] = trk.hasTOF();
+      trkHasTof[counterTmp] = isGoodTOFTrackCheck(trk);
+      trkHasTpc[counterTmp] = trk.hasTPC();
       trkTime[counterTmp] = trk.trackTime();
       trkTimeRes[counterTmp] = trk.trackTimeRes();
 
-      p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      // p1.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      p1.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
       tmpMomentum[counterTmp] = p1.P();
       tmpPt[counterTmp] = p1.Pt();
       tmpDedx[counterTmp] = trk.tpcSignal();
       tmpTofNsigmaEl[counterTmp] = trk.tofNSigmaEl();
 
       deltaPhiTmp = calculateDeltaPhi(p - p1, p1);
-      pi3invMass[counterTmp] = (p - p1).Mag();
+      pi3invMass[counterTmp] = (p - p1).mag();
       pi3pt[counterTmp] = (p - p1).Pt();
       pi3deltaPhi[counterTmp] = deltaPhiTmp;
       pi3assymav[counterTmp] = (p1.Pt() - (scalarPtsum - p1.Pt()) / 3.) / (p1.Pt() + (scalarPtsum - p1.Pt()) / 3.);
@@ -2084,6 +2558,19 @@ struct TauTau13topo {
       nSigma3Pi[i] = nSigma3Pi[3] - (nSigmaPi[i] * nSigmaPi[i]);
       nSigma3Pi[i] = std::sqrt(nSigma3Pi[i]);
       registry.get<TH1>(HIST("control/cut0/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+      // nsigma3PiNew calculation
+      if (trkHasTpc[i]) {
+        nSigma3PiNew[i] = nSigma3PiNew[3] - (nSigmaPi[i] * nSigmaPi[i]);
+      }
+      nSigma3PiNew[i] = std::sqrt(nSigma3PiNew[i]);
+
+      if (nPiHasTPC[i] == 3)
+        registry.get<TH1>(HIST("control/cut0/hsigma3PiNew"))->Fill(nSigma3PiNew[i]);
+      if (nPiHasTPC[i] == 2)
+        registry.get<TH1>(HIST("control/cut0/hsigma2PiNew"))->Fill(nSigma3PiNew[i]);
+      if (nPiHasTPC[i] == 1)
+        registry.get<TH1>(HIST("control/cut0/hsigma1PiNew"))->Fill(nSigma3PiNew[i]);
+      //
       registry.get<TH1>(HIST("control/cut0/h3pi1eMass"))->Fill(mass3pi1e[i]);
     } // end of loop over 4 tracks
 
@@ -2590,7 +3077,8 @@ struct TauTau13topo {
         for (int j = 0; j < 4; j++) {
           if (i == j)
             continue;
-          if (trkHasTof[j]) {
+          // if (trkHasTof[j]) {
+          if (trkIsTOFGood[j]) {
             otherTOFtracks[i]++;
             registry.get<TH1>(HIST("pidTOF/h3piTOFchi2"))->Fill(chi2TOF[j]);
           }
@@ -2649,6 +3137,7 @@ struct TauTau13topo {
       registry.get<TH2>(HIST("control/cut30/h4trkMassVsPt"))->Fill(mass4pi, pttot);
       registry.get<TH1>(HIST("control/cut30/hNtofTrk"))->Fill(nTofTrk);
       registry.get<TH2>(HIST("control/cut30/hZNACenergy"))->Fill(energyZNA, energyZNC);
+      registry.get<TH1>(HIST("global/hRecFlag"))->Fill(5 + 2 + dgcand.flags()); // reconstruction with upc settings flag
       for (int i = 0; i < 4; i++) {
         if (flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && (otherTOFtracks[i] >= 1)) {
           registry.get<TH2>(HIST("pidTPC/hpvsdedxElHipCut30"))->Fill(tmpMomentum[i], tmpDedx[i]);
@@ -2677,6 +3166,7 @@ struct TauTau13topo {
       registry.get<TH2>(HIST("control/cut27/h4trkMassVsPt"))->Fill(mass4pi, pttot);
       registry.get<TH1>(HIST("control/cut27/hNtofTrk"))->Fill(nTofTrk);
       registry.get<TH2>(HIST("control/cut27/hZNACenergy"))->Fill(energyZNA, energyZNC);
+      registry.get<TH1>(HIST("global/hRecFlag"))->Fill(5 + 2 + 2 + dgcand.flags()); // reconstruction with upc settings flag
       for (int i = 0; i < 4; i++) {
         if (flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && (otherTOFtracks[i] >= 1) && flagDP[i]) {
           registry.get<TH2>(HIST("pidTPC/hpvsdedxElHipCut27"))->Fill(tmpMomentum[i], tmpDedx[i]);
@@ -2700,6 +3190,64 @@ struct TauTau13topo {
       }
       return;
     } // end of Dphi
+
+    //
+    // skip events with znac energy cut 35
+    //
+    if (energyZNA >= 1. || energyZNC >= 1.) {
+      if (verbose) {
+        LOGF(info, "<tautau13topo> Candidate rejected: ZNA, ZNC are %f, %f", energyZNA, energyZNC);
+      }
+      return;
+    } else {
+      registry.get<TH1>(HIST("global/hEventEff"))->Fill(22., 1.);
+      registry.get<TH1>(HIST("control/cut35/h4trkPtTot"))->Fill(pttot);
+      registry.get<TH1>(HIST("control/cut35/h4piMass"))->Fill(mass4pi);
+      registry.get<TH2>(HIST("control/cut35/h4trkMassVsPt"))->Fill(mass4pi, pttot);
+      registry.get<TH1>(HIST("control/cut35/hNtofTrk"))->Fill(nTofTrk);
+      registry.get<TH2>(HIST("control/cut35/hZNACenergy"))->Fill(energyZNA, energyZNC);
+      for (int i = 0; i < 4; i++) {
+        if (flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && (otherTOFtracks[i] >= 1) && flagDP[i]) {
+          registry.get<TH2>(HIST("pidTPC/hpvsdedxElHipCut35"))->Fill(tmpMomentum[i], tmpDedx[i]);
+          registry.get<TH2>(HIST("pidTOF/hpvsNsigmaElHipCut35"))->Fill(tmpMomentum[i], tmpTofNsigmaEl[i]);
+          fillControlHistos<35>(pi3invMass[i], pi3pt[i], pi3deltaPhi[i], pi3assymav[i], pi3vector[i], pi3scalar[i], nclTPCcrossedRows[i], tmpPt[i], chi2TOF[i]);
+          registry.get<TH2>(HIST("control/cut35/h3piMassVsPt"))->Fill(pi3invMass[i], pi3pt[i]);
+          registry.get<TH1>(HIST("control/cut35/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+          registry.get<TH1>(HIST("control/cut35/h3pi1eMass"))->Fill(mass3pi1e[i]);
+        } else if (!flagEl[i] && trkHasTof[i]) {
+          registry.get<TH1>(HIST("pidTOF/h3piTOFchi2Cut35"))->Fill(chi2TOF[i]);
+        }
+      }
+    } // end of ZNAC energy cut35
+
+    //
+    // skip events with occupancy >=1000
+    //
+    if (dgcand.occupancyInTime() >= 1000) {
+      if (verbose) {
+        LOGF(info, "<tautau13topo> Candidate rejected: occupancy is %f", dgcand.occupancyInTime());
+      }
+      return;
+    } else {
+      registry.get<TH1>(HIST("global/hEventEff"))->Fill(23., 1.);
+      registry.get<TH1>(HIST("control/cut23/h4trkPtTot"))->Fill(pttot);
+      registry.get<TH1>(HIST("control/cut23/h4piMass"))->Fill(mass4pi);
+      registry.get<TH2>(HIST("control/cut23/h4trkMassVsPt"))->Fill(mass4pi, pttot);
+      registry.get<TH1>(HIST("control/cut23/hNtofTrk"))->Fill(nTofTrk);
+      registry.get<TH2>(HIST("control/cut23/hZNACenergy"))->Fill(energyZNA, energyZNC);
+      for (int i = 0; i < 4; i++) {
+        if (flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && (otherTOFtracks[i] >= 1) && flagDP[i]) {
+          registry.get<TH2>(HIST("pidTPC/hpvsdedxElHipCut23"))->Fill(tmpMomentum[i], tmpDedx[i]);
+          registry.get<TH2>(HIST("pidTOF/hpvsNsigmaElHipCut23"))->Fill(tmpMomentum[i], tmpTofNsigmaEl[i]);
+          fillControlHistos<23>(pi3invMass[i], pi3pt[i], pi3deltaPhi[i], pi3assymav[i], pi3vector[i], pi3scalar[i], nclTPCcrossedRows[i], tmpPt[i], chi2TOF[i]);
+          registry.get<TH2>(HIST("control/cut23/h3piMassVsPt"))->Fill(pi3invMass[i], pi3pt[i]);
+          registry.get<TH1>(HIST("control/cut23/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+          registry.get<TH1>(HIST("control/cut23/h3pi1eMass"))->Fill(mass3pi1e[i]);
+        } else if (!flagEl[i] && trkHasTof[i]) {
+          registry.get<TH1>(HIST("pidTOF/h3piTOFchi2Cut23"))->Fill(chi2TOF[i]);
+        }
+      }
+    } // end of occupancy < 1000 cut23
 
     // // only 1 electron
     // if (counterTotal == 1) {
@@ -2777,18 +3325,21 @@ struct TauTau13topo {
   void processSimpleMCSG(aod::McCollision const& mcCollision, aod::McParticles const& mcParticles)
   {
     registryMC.get<TH1>(HIST("globalMC/hMCZvertex"))->Fill(mcCollision.posZ());
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(0., 1.);
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-8., 1.);
     registryMC.get<TH1>(HIST("efficiencyMCEl/effiEl"))->Fill(0., 1.);
     registryMC.get<TH1>(HIST("efficiencyMCMu/effiMu"))->Fill(0., 1.);
     registryMC.get<TH1>(HIST("efficiencyMCPi/effiPi"))->Fill(0., 1.);
 
     // check how many physical primaries
-    // int countPrim = 0;
-    int countGen = 0;
-    int countBoth = 0;
-    int countCharged = 0;
-    int countChargedFromTau = 0;
+    int countPrim = 0;
+    int countGen = 0;            // generator
+    int countBoth = 0;           // generator + primary
+    int countCharged = 0;        // generator + primary + charged
+    int countChargedFromTau = 0; // generator + primary + charged + from tau
     int countTau = 0;
+
+    int countChargedOnly = 0;        // charged only
+    int countChargedOnlyFromTau = 0; // charged only and from tau
 
     float etaTau[2];
     float phiTau[2];
@@ -2819,10 +3370,13 @@ struct TauTau13topo {
 
     // loop over MC particles
     for (const auto& mcParticle : mcParticles) {
+      if (verbose) {
+        LOGF(info, "<processSimpleMCSG> mcParticle pdg %d, gen %d, prim %d, bkg %d, process %d", mcParticle.pdgCode(), mcParticle.producedByGenerator(), mcParticle.isPhysicalPrimary(), mcParticle.fromBackgroundEvent(), mcParticle.getProcess());
+      }
       // primaries
-      // if (mcParticle.isPhysicalPrimary()) {
-      // countPrim++;
-      // }
+      if (mcParticle.isPhysicalPrimary()) {
+        countPrim++;
+      }
       //
       // MC particles produced by generator only
       //
@@ -2830,7 +3384,8 @@ struct TauTau13topo {
         countGen++;
         if (mcParticle.isPhysicalPrimary()) {
           countBoth++;
-          if (mcParticle.pdgCode() != 22 && std::abs(mcParticle.pdgCode()) != 12 && std::abs(mcParticle.pdgCode()) != 14 && std::abs(mcParticle.pdgCode()) != 16 && mcParticle.pdgCode() != 130 && mcParticle.pdgCode() != 111) {
+          // if (mcParticle.pdgCode() != 22 && std::abs(mcParticle.pdgCode()) != 12 && std::abs(mcParticle.pdgCode()) != 14 && std::abs(mcParticle.pdgCode()) != 16 && mcParticle.pdgCode() != 130 && mcParticle.pdgCode() != 111) {
+          if (mcParticle.pdgCode() != kGamma && std::abs(mcParticle.pdgCode()) != kNuE && std::abs(mcParticle.pdgCode()) != kNuMu && std::abs(mcParticle.pdgCode()) != kNuTau && mcParticle.pdgCode() != kK0Long && mcParticle.pdgCode() != kPi0) {
             countCharged++;
 
             registryMC.get<TH1>(HIST("globalMC/hMCetaGen"))->Fill(mcParticle.eta());
@@ -2840,18 +3395,41 @@ struct TauTau13topo {
 
             if (mcParticle.has_mothers()) {
               auto const& mother = mcParticle.mothers_first_as<aod::McParticles>();
-              if (std::abs(mother.pdgCode()) == 15) {
+              // if (std::abs(mother.pdgCode()) == 15) {
+              if (std::abs(mother.pdgCode()) == kTauMinus) {
                 countChargedFromTau++;
               } // mother is tau
             } // mc particle has mother
           } // veto neutral particles
-        } // physicsl primary
+        } // physics primary
       } // generator produced by
+
+      // special case only for UPCgen, charged but not taus
+      if (std::abs(mcParticle.pdgCode()) != kTauMinus && mcParticle.pdgCode() != kGamma && std::abs(mcParticle.pdgCode()) != kNuE && std::abs(mcParticle.pdgCode()) != kNuMu && std::abs(mcParticle.pdgCode()) != kNuTau && mcParticle.pdgCode() != kK0Long && mcParticle.pdgCode() != kPi0) {
+        countChargedOnly++;
+        // case for UPCgen when all particles are not pimaries
+        if (!mcParticle.isPhysicalPrimary()) {
+          // all charged particles, not only from 1+3 topo
+          registryMC.get<TH1>(HIST("globalMC/hMCetaGen"))->Fill(mcParticle.eta());
+          registryMC.get<TH1>(HIST("globalMC/hMCphiGen"))->Fill(mcParticle.phi());
+          registryMC.get<TH1>(HIST("globalMC/hMCyGen"))->Fill(mcParticle.y());
+          registryMC.get<TH1>(HIST("globalMC/hMCptGen"))->Fill(mcParticle.pt());
+        } // end of UPCgen case
+
+        if (mcParticle.has_mothers()) {
+          auto const& mother = mcParticle.mothers_first_as<aod::McParticles>();
+          if (std::abs(mother.pdgCode()) == kTauMinus) { // 15
+            countChargedOnlyFromTau++;
+          } // mother is tau
+        } // mc particle has mother
+      } // veto neutral particles
+      // end of special case only for UPCgen
 
       //
       // tau+/-
       //
-      if (std::abs(mcParticle.pdgCode()) == 15) { // tau+/-
+      // if (std::abs(mcParticle.pdgCode()) == 15) { // tau+/-
+      if (std::abs(mcParticle.pdgCode()) == kTauMinus) { // 15 = tau+/-
         countTau++;
         if (countTau <= 2) {
           etaTau[countTau - 1] = mcParticle.eta();
@@ -2868,16 +3446,18 @@ struct TauTau13topo {
         if (mcParticle.has_daughters()) {
           for (const auto& daughter : mcParticle.daughters_as<aod::McParticles>()) {
             // pions from tau
-            if (std::abs(daughter.pdgCode()) == 211) { // 211 = pi+
+            if (std::abs(daughter.pdgCode()) == kPiPlus) { // 211 = pi+
               pionCounter++;
               tmpPionIndex = daughter.index(); // returns index of daughter of tau, not in the event, not in the MC particles
               if (std::abs(daughter.eta()) > 0.9)
                 partFromTauInEta = false;
             } // end of pion check
+
             // electron from tau
-            if (std::abs(daughter.pdgCode()) == 11) { // 11 = electron
-              if (daughter.pdgCode() == 11)
+            if (std::abs(daughter.pdgCode()) == kElectron) { // 11 = electron
+              if (daughter.pdgCode() == kElectron)
                 flagElPlusElMinus = true;
+
               registryMC.get<TH1>(HIST("electronMC/hMCeta"))->Fill(daughter.eta());
               registryMC.get<TH1>(HIST("electronMC/hMCphi"))->Fill(daughter.phi());
               registryMC.get<TH1>(HIST("electronMC/hMCy"))->Fill(daughter.y());
@@ -2890,10 +3470,17 @@ struct TauTau13topo {
               if (std::abs(daughter.eta()) > 0.9)
                 partFromTauInEta = false;
             } // end of electron check
+
             // muon from tau
-            if (std::abs(daughter.pdgCode()) == 13) {
-              if (daughter.pdgCode() == 13)
+            if (std::abs(daughter.pdgCode()) == kMuonMinus) { // 13
+              if (daughter.pdgCode() == kMuonMinus)           // 13
                 flagMuPlusMuMinus = true;
+
+              registryMC.get<TH1>(HIST("muonMC/hMCeta"))->Fill(daughter.eta());
+              registryMC.get<TH1>(HIST("muonMC/hMCphi"))->Fill(daughter.phi());
+              registryMC.get<TH1>(HIST("muonMC/hMCy"))->Fill(daughter.y());
+              registryMC.get<TH1>(HIST("muonMC/hMCpt"))->Fill(daughter.pt());
+
               muonFound = !muonFound;
               partPt = static_cast<float>(daughter.pt());
               // LOGF(info,"mu pt %f",daughter.pt());
@@ -2901,6 +3488,7 @@ struct TauTau13topo {
                 partFromTauInEta = false;
             } // end of muon check
           } // end of loop over daughters
+
           if (pionCounter == 3) {
             threePionsFound = true;
           } // end of 3pi check
@@ -2908,8 +3496,14 @@ struct TauTau13topo {
             singlePionFound = true;
             singlePionIndex = tmpPionIndex;
             auto mcPartTmp = mcParticle.daughters_as<aod::McParticles>().begin() + singlePionIndex;
-            if (mcPartTmp.pdgCode() == -211)
+            if (mcPartTmp.pdgCode() == kPiMinus) // -211
               flagPiPlusPiMinus = true;
+
+            registryMC.get<TH1>(HIST("pionMC/hMCeta"))->Fill(mcPartTmp.eta());
+            registryMC.get<TH1>(HIST("pionMC/hMCphi"))->Fill(mcPartTmp.phi());
+            registryMC.get<TH1>(HIST("pionMC/hMCy"))->Fill(mcPartTmp.y());
+            registryMC.get<TH1>(HIST("pionMC/hMCpt"))->Fill(mcPartTmp.pt());
+
             partPt = static_cast<float>(mcPartTmp.pt());
             // motherOfSinglePionIndex = mcParticle.index();
             if (std::abs(mcPartTmp.eta()) > 0.9)
@@ -2922,6 +3516,7 @@ struct TauTau13topo {
     // LOGF(info,"pt after %f",partPt);
 
     // tau related things
+    registryMC.get<TH1>(HIST("tauMC/hNtaus"))->Fill(countTau);
     if (countTau == 2) {
       registryMC.get<TH1>(HIST("tauMC/hMCdeltaeta"))->Fill(etaTau[0] - etaTau[1]);
       registryMC.get<TH1>(HIST("tauMC/hMCdeltaphi"))->Fill(calculateDeltaPhi(phiTau[0], phiTau[1]) * 180. / o2::constants::math::PI);
@@ -2971,43 +3566,97 @@ struct TauTau13topo {
     registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countBoth, 2);
     registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countCharged, 3);
     registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countChargedFromTau, 4);
-    if (countChargedFromTau != 4)
-      return;
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(1., 1.);
-    if (electronFound && flagElPlusElMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(2., 1.); // e-
-    else if (electronFound && !flagElPlusElMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(3., 1.); // e+
-    if (muonFound && flagMuPlusMuMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(4., 1.); // mu-
-    else if (muonFound && !flagMuPlusMuMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(5., 1.); // mu+
-    if (singlePionFound && flagPiPlusPiMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(6., 1.); // pi-
-    else if (singlePionFound && !flagPiPlusPiMinus)
-      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(7., 1.); // pi+
+    registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countPrim, 5);
+    registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countChargedOnly, 6);
+    registryMC.get<TH2>(HIST("globalMC/hMCnPart"))->Fill(countChargedOnlyFromTau, 7);
 
-    if (!tauInRapidity)
-      return;
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(8., 1.);
-    if (!partFromTauInEta)
-      return;
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(9., 1.);
+    if (countChargedFromTau == 2 || countChargedOnlyFromTau == 2) {
+      // 2 tracks candidates
+      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-7., 1.);
+    }
+    if (countChargedFromTau == 6 || countChargedOnlyFromTau == 6) {
+      // 6 tracks candidates
+      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-6., 1.);
+    }
 
+    // if (countChargedFromTau != 4)
+    //   return;
+    if (countChargedFromTau == 4 || countChargedOnlyFromTau == 4) {
+      // 4 tracks candidates
+      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-5., 1.); // 4 tracks
+      if (electronFound && flagElPlusElMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-4., 1.); // e-
+      else if (electronFound && !flagElPlusElMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-3., 1.); // e+
+      if (muonFound && flagMuPlusMuMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-2., 1.); // mu-
+      else if (muonFound && !flagMuPlusMuMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(-1., 1.); // mu+
+      if (singlePionFound && flagPiPlusPiMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(0., 1.); // pi-
+      else if (singlePionFound && !flagPiPlusPiMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(1., 1.); // pi+
+
+      if (!tauInRapidity)
+        return;
+      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(2., 1.);
+      if (!partFromTauInEta)
+        return;
+      registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(3., 1.);
+
+      if (electronFound && flagElPlusElMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(4., 1.); // e-
+      else if (electronFound && !flagElPlusElMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(5., 1.); // e+
+      if (muonFound && flagMuPlusMuMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(6., 1.); // mu-
+      else if (muonFound && !flagMuPlusMuMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(7., 1.); // mu+
+      if (singlePionFound && flagPiPlusPiMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(8., 1.); // pi-
+      else if (singlePionFound && !flagPiPlusPiMinus)
+        registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(9., 1.); // pi+
+
+    } // end of 4 tracks candidate events
   } // end of processSimpleMCSG
 
+  // using LabeledTracks = soa::Join<aod::Tracks, aod::McTrackLabels, aod::TracksExtra, aod::pidTPCFullEl, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr>;
+  using LabeledTracks = soa::Join<aod::UDTracks, aod::UDMcTrackLabels, aod::UDTracksExtra, aod::UDTracksPID, aod::UDTracksFlags, aod::UDTracksDCA>;
+  Preslice<aod::UDTracks> perCollision = aod::udtrack::udCollisionId;
+  // ZDC is not reproduced in MC, it is for a consistency
+  using FullMcUdCollisions = soa::Join<aod::UDMcCollsLabels, aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced, aod::UDCollisionSelExtras>;
+  // using FullMcUdCollisions = soa::Join<aod::UDMcCollsLabels, aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDCollisionSelExtras>;
+  // PresliceUnsorted<FullMcUdCollisions> colPerMcCollision = aod::udcollision::udMcCollisionId;
+  // PresliceUnsorted<aod::UDMcParticles> partPerMcCollision = aod::udmcparticle::udMcCollisionId;
+
   void processEfficiencyMCSG(aod::UDMcCollision const& mcCollision,
-                             soa::SmallGroups<soa::Join<aod::UDMcCollsLabels, aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced>> const& collisions,
+                             // void processEfficiencyMCSG(aod::UDMcCollisions const& mcCollisions,
+                             // soa::SmallGroups<soa::Join<aod::UDMcCollsLabels, aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced>> const& collisions,
+                             // soa::SmallGroups<soa::Join<aod::UDMcCollsLabels, aod::UDCollisions, aod::UDCollisionsSels, aod::SGCollisions, aod::UDZdcsReduced, aod::UDCollisionSelExtras>> const& collisions,
+                             soa::SmallGroups<FullMcUdCollisions> const& collisions,
+                             // FullMcUdCollisions const& collisionsFull,
                              LabeledTracks const& tracks,
                              aod::UDMcParticles const& mcParticles)
+  // aod::UDMcParticles const& mcParts)
   {
+    // LOGF(info, "<tautau13topo_MC> Per DF: UDMcParticles size %d, UDMcCollisions size %d, FullMcUdCollisions size %d",  mcParts.size(), mcCollisions.size(), collisionsFull.size());
+    // LOGF(info, "<tautau13topo_MC> Per DF: UDMcParticles size %d, UDMcCollisions size %d, FullMcUdCollisions size %d",  mcParts.size(), mcCollisions.size(), collisions.size());
+    LOGF(info, "<tautau13topo_MCSG> UDMcCollision size %d, SmallGroups FullMcUdCollisions size %d, UDtracks %d, UDMcParticles %d", mcCollision.size(), collisions.size(), tracks.size(), mcParticles.size());
+
+    // loop over generated collisions
+    // for (const auto &mcCollision : mcCollisions) {
+    // LOGF(info, "<tautau13topo_MC> Per mcCollision not sliced: UDMcParticles size %d, FullMcUdCollisions size %d",  mcParts.size(), collisionsFull.size());
+
     if (verbose) {
       LOGF(info, "<tautau13topo_MC> GeneratorIDtot %d", mcCollision.generatorsID());
       // below is not implemented in UDMcCollisions
       // LOGF(info,"<tautau13topo_MC> GeneratorIDtot %d, GenID %d, subGenID %d, source %d", mcCollision.generatorsID(), mcCollision.getGeneratorId(), mcCollision.getSubGeneratorId(), mcCollision.getSourceId());
     }
+    // registry1MC.get<TH1>(HIST("globalMC/hGeneratorID"))->Fill(mcCollision.getGeneratorID());
     registry1MC.get<TH1>(HIST("globalMC/hGeneratorID"))->Fill(mcCollision.generatorsID());
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(10., 1.);
     if (!(generatorIDMC < 0)) { // do not check generatorsID process if generatorIDMC < 0
+      // if (mcCollision.getGeneratorID() != generatorIDMC)
       if (mcCollision.generatorsID() != generatorIDMC)
         return;
     }
@@ -3025,21 +3674,38 @@ struct TauTau13topo {
     bool tauInRapidity = true;
     bool partFromTauInEta = true;
 
+    // TLorentzVector tmp(0., 0., 0., 0.);
+    ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> tmp(0., 0., 0., 0.);
+
+    // get reconstructed collisions associated to generated collision
+    // auto const& collisions  = collisionsFull.sliceBy(colPerMcCollision, mcCollision.globalIndex());
+    // LOGF(info, "<tautau13topo_MC> per mcCollisions sliced collisions.size %d",  collisions.size());
+
+    // get MC particles associated to generated collision
+    // auto const& mcParticles  = mcParts.sliceBy(partPerMcCollision, mcCollision.globalIndex());
+    // LOGF(info, "<tautau13topo_MC> per mcCollisions sliced mcParticles.size %d",  mcParticles.size());
+
     for (const auto& mcParticle : mcParticles) {
+      // LOGF(info, "<tautau13topo_MC> mcParticle pdg %d",  mcParticle.pdgCode());
       if (mcParticle.isPhysicalPrimary()) {
-        if (mcParticle.pdgCode() != 22 && std::abs(mcParticle.pdgCode()) != 12 && std::abs(mcParticle.pdgCode()) != 14 && std::abs(mcParticle.pdgCode()) != 16 && mcParticle.pdgCode() != 130 && mcParticle.pdgCode() != 111) {
+        // if (mcParticle.pdgCode() != 22 && std::abs(mcParticle.pdgCode()) != 12 && std::abs(mcParticle.pdgCode()) != 14 && std::abs(mcParticle.pdgCode()) != 16 && mcParticle.pdgCode() != 130 && mcParticle.pdgCode() != 111) {
+        if (mcParticle.pdgCode() != kGamma && std::abs(mcParticle.pdgCode()) != kNuE && std::abs(mcParticle.pdgCode()) != kNuMu && std::abs(mcParticle.pdgCode()) != kNuTau && mcParticle.pdgCode() != kK0Long && mcParticle.pdgCode() != kPi0) {
           if (mcParticle.has_mothers()) {
             auto const& mother = mcParticle.mothers_first_as<aod::UDMcParticles>();
-            if (std::abs(mother.pdgCode()) == 15) {
+            // LOGF(info, "<tautau13topo_MC> mcParticle has mother %d",mother.pdgCode());
+            tmp.SetPxPyPzE(mother.px(), mother.py(), mother.pz(), mother.e());
+            if (std::abs(mother.pdgCode()) == kTauMinus) { // 15
               if (std::abs(rapidity(mother.e(), mother.pz())) > 0.9)
+                // if (std::abs(tmp.Rapidity()) > 0.9)
                 tauInRapidity = false;
-              if (std::abs(eta(mcParticle.px(), mcParticle.py(), mcParticle.pz())) > 0.9)
+              if (std::abs(RecoDecay::eta(std::array<double, 3>{mcParticle.px(), mcParticle.py(), mcParticle.pz()})) > 0.9)
+                // if (std::abs(tmp.Eta()) > 0.9)
                 partFromTauInEta = false;
 
-              if (std::abs(mcParticle.pdgCode()) == 11) {
+              if (std::abs(mcParticle.pdgCode()) == kElectron) { // 11
                 index1ProngMC = mcParticle.index();
                 is1ProngElectronMC = true;
-              } else if (std::abs(mcParticle.pdgCode()) == 13) {
+              } else if (std::abs(mcParticle.pdgCode()) == kMuonMinus) { // 13
                 index1ProngMC = mcParticle.index();
                 // is1ProngMuonMC = true;
               }
@@ -3053,25 +3719,27 @@ struct TauTau13topo {
               }
               count++;
               if (collisions.size() > 0) {
-                registryMC.get<TH1>(HIST("globalMCrec/hMCetaGenCol"))->Fill(eta(mcParticle.px(), mcParticle.py(), mcParticle.pz()));
-                registryMC.get<TH1>(HIST("globalMCrec/hMCphiGenCol"))->Fill(phi(mcParticle.px(), mcParticle.py()));
+                registryMC.get<TH1>(HIST("globalMCrec/hMCetaGenCol"))->Fill(RecoDecay::eta(std::array<double, 3>{mcParticle.px(), mcParticle.py(), mcParticle.pz()}));
+                registryMC.get<TH1>(HIST("globalMCrec/hMCphiGenCol"))->Fill(RecoDecay::phi(mcParticle.px(), mcParticle.py()));
                 registryMC.get<TH1>(HIST("globalMCrec/hMCyGenCol"))->Fill(rapidity(mcParticle.e(), mcParticle.pz()));
-                registryMC.get<TH1>(HIST("globalMCrec/hMCptGenCol"))->Fill(pt(mcParticle.px(), mcParticle.py()));
+                registryMC.get<TH1>(HIST("globalMCrec/hMCptGenCol"))->Fill(RecoDecay::pt(mcParticle.px(), mcParticle.py()));
               }
             } // mother is tau
           } // has mothers
         } // charged particles
       } // end if isPhysicalPrimary
-
     } // end loop over mcParticle
 
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(11., 1.);
     if (count != 4)
       return;
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(12., 1.);
     if (!tauInRapidity)
       return;
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(13., 1.);
     if (!partFromTauInEta)
       return;
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(10., 1.); // just to confirm there is exactly the same selection
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(14., 1.); // just to confirm there is exactly the same selection
 
     if (index1ProngMC < 0) { // pion case + 3pi
       // bool onlyPi = true;
@@ -3085,10 +3753,10 @@ struct TauTau13topo {
       // // motherIndex[i] = (tmpMC.mothers_first_as<aod::UDMcParticles>()).globalIndex();
       // }
       int motherIndex1Pi = motherIndex[0];
-      int motherIndexNew = -1;
+      int motherIndexNew = 3; // was -1
       int nDifferences = 0;
       for (int i = 1; i < 4; i++) {
-        if (motherIndex1Pi != motherIndex[i]) { // the same mother index
+        if (motherIndex1Pi != motherIndex[i]) { // the same mother (tau) index
           nDifferences++;
           motherIndexNew = i;
         }
@@ -3101,8 +3769,8 @@ struct TauTau13topo {
       // if (!onlyPi) LOGF(info, "ERROR: should be 4 pions, but they are not!");
     } // end of special check for pi + 3pi
 
-    int index3ProngMC[3];
-    if (index1ProngMC > 0) { // electron or muon case + 3pi
+    int index3ProngMC[3] = {0, 0, 0}; // initialised of request
+    if (index1ProngMC > 0) {          // electron or muon case + 3pi
       int index3pi = 0;
       for (int i = 0; i < 4; i++) {
         if (index1ProngMC == indexProngMC[i])
@@ -3120,7 +3788,8 @@ struct TauTau13topo {
     auto const& tmpPion2MC = mcParticles.begin() + index3ProngMC[1];
     auto const& tmpPion3MC = mcParticles.begin() + index3ProngMC[2];
 
-    if (std::abs(tmpPion1MC.pdgCode()) == 211 && std::abs(tmpPion2MC.pdgCode()) == 211 && std::abs(tmpPion3MC.pdgCode()) == 211)
+    // if (std::abs(tmpPion1MC.pdgCode()) == 211 && std::abs(tmpPion2MC.pdgCode()) == 211 && std::abs(tmpPion3MC.pdgCode()) == 211)
+    if (std::abs(tmpPion1MC.pdgCode()) == kPiPlus && std::abs(tmpPion2MC.pdgCode()) == kPiPlus && std::abs(tmpPion3MC.pdgCode()) == kPiPlus) // 211 211 211
       is3prong3PiMC = true;
 
     //
@@ -3140,13 +3809,13 @@ struct TauTau13topo {
     registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaAlphaEpi"))->Fill(deltaAlpha2);
     registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaAlphaEpi"))->Fill(deltaAlpha3);
     //
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(phi(tmp1ProngMC.px(), tmp1ProngMC.py()), phi(tmpPion1MC.px(), tmpPion1MC.py())));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(phi(tmp1ProngMC.px(), tmp1ProngMC.py()), phi(tmpPion2MC.px(), tmpPion2MC.py())));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(phi(tmp1ProngMC.px(), tmp1ProngMC.py()), phi(tmpPion3MC.px(), tmpPion3MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmp1ProngMC.px(), tmp1ProngMC.py()), RecoDecay::phi(tmpPion1MC.px(), tmpPion1MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmp1ProngMC.px(), tmp1ProngMC.py()), RecoDecay::phi(tmpPion2MC.px(), tmpPion2MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiEpi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmp1ProngMC.px(), tmp1ProngMC.py()), RecoDecay::phi(tmpPion3MC.px(), tmpPion3MC.py())));
     //
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(phi(tmpPion1MC.px(), tmpPion1MC.py()), phi(tmpPion2MC.px(), tmpPion2MC.py())));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(phi(tmpPion1MC.px(), tmpPion1MC.py()), phi(tmpPion3MC.px(), tmpPion3MC.py())));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(phi(tmpPion2MC.px(), tmpPion2MC.py()), phi(tmpPion3MC.px(), tmpPion3MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmpPion1MC.px(), tmpPion1MC.py()), RecoDecay::phi(tmpPion2MC.px(), tmpPion2MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmpPion1MC.px(), tmpPion1MC.py()), RecoDecay::phi(tmpPion3MC.px(), tmpPion3MC.py())));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaPhiPipi"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmpPion2MC.px(), tmpPion2MC.py()), RecoDecay::phi(tmpPion3MC.px(), tmpPion3MC.py())));
 
     //
     auto deltaAlphaPi1 = deltaAlpha(tmpPion1MC, tmpPion2MC);
@@ -3159,13 +3828,13 @@ struct TauTau13topo {
     float energyInCone = 0;
     float angleLimit = 0.5;
     if (deltaAlpha1 < angleLimit) {
-      energyInCone += pt(tmpPion1MC.px(), tmpPion1MC.py());
+      energyInCone += RecoDecay::pt(tmpPion1MC.px(), tmpPion1MC.py());
     }
     if (deltaAlpha2 < angleLimit) {
-      energyInCone += pt(tmpPion2MC.px(), tmpPion2MC.py());
+      energyInCone += RecoDecay::pt(tmpPion2MC.px(), tmpPion2MC.py());
     }
     if (deltaAlpha3 < angleLimit) {
-      energyInCone += pt(tmpPion3MC.px(), tmpPion3MC.py());
+      energyInCone += RecoDecay::pt(tmpPion3MC.px(), tmpPion3MC.py());
     }
     registryMC.get<TH1>(HIST("efficiencyMCEl/hMCvirtCal"))->Fill(energyInCone);
     //
@@ -3178,22 +3847,24 @@ struct TauTau13topo {
     registryMC.get<TH1>(HIST("efficiencyMCEl/hMCVector"))->Fill(vectorAsym(tmp1ProngMC, tmpPion3MC));
 
     // add eta phi
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCptEl"))->Fill(pt(tmp1ProngMC.px(), tmp1ProngMC.py()));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCptEl"))->Fill(RecoDecay::pt(tmp1ProngMC.px(), tmp1ProngMC.py()));
 
     float px3pi = tmpPion1MC.px() + tmpPion2MC.px() + tmpPion3MC.px();
     float py3pi = tmpPion1MC.py() + tmpPion2MC.py() + tmpPion3MC.py();
     float pz3pi = tmpPion1MC.pz() + tmpPion2MC.pz() + tmpPion3MC.pz();
     float en3pi = tmpPion1MC.e() + tmpPion2MC.e() + tmpPion3MC.e();
 
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCpt4trk"))->Fill(pt(tmp1ProngMC.px() + px3pi, tmp1ProngMC.py() + py3pi));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass4pi"))->Fill(invariantMass(tmp1ProngMC.e() + en3pi, tmp1ProngMC.px() + px3pi, tmp1ProngMC.py() + py3pi, tmp1ProngMC.pz() + pz3pi));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass3pi"))->Fill(invariantMass(en3pi, px3pi, py3pi, pz3pi));
-    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaphi13"))->Fill(calculateDeltaPhi(phi(tmp1ProngMC.px(), tmp1ProngMC.py()), phi(px3pi, py3pi)));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCpt4trk"))->Fill(RecoDecay::pt(tmp1ProngMC.px() + px3pi, tmp1ProngMC.py() + py3pi));
+    // registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass4pi"))->Fill(invariantMass(tmp1ProngMC.e() + en3pi, tmp1ProngMC.px() + px3pi, tmp1ProngMC.py() + py3pi, tmp1ProngMC.pz() + pz3pi));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass4pi"))->Fill(RecoDecay::m(std::array<double, 3>{(tmp1ProngMC.px() + px3pi), (tmp1ProngMC.py() + py3pi), (tmp1ProngMC.pz() + pz3pi)}, (tmp1ProngMC.e() + en3pi)));
+    // registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass3pi"))->Fill(invariantMass(en3pi, px3pi, py3pi, pz3pi));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCinvmass3pi"))->Fill(RecoDecay::m(std::array<double, 3>{px3pi, py3pi, pz3pi}, en3pi));
+    registryMC.get<TH1>(HIST("efficiencyMCEl/hMCdeltaphi13"))->Fill(calculateDeltaPhi(RecoDecay::phi(tmp1ProngMC.px(), tmp1ProngMC.py()), RecoDecay::phi(px3pi, py3pi)));
 
     // reconstructed event
     if (collisions.size() < 1)
       return;
-    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(11., 1.); // there is at least 1 collision associated to MC collision
+    registryMC.get<TH1>(HIST("globalMC/hMCefficiency"))->Fill(15., 1.); // there is at least 1 collision associated to MC collision
     if (is1ProngElectronMC && is3prong3PiMC) {
       registryMC.get<TH1>(HIST("efficiencyMCEl/effiEl"))->Fill(4., 1.);
       if (collisions.size() == 1)
@@ -3251,7 +3922,7 @@ struct TauTau13topo {
         } // end of loop over FIT bits
 
         registry1MC.get<TH1>(HIST("globalMCrec/hRecFlag"))->Fill(collision.flags()); // reconstruction with upc settings flag
-        // registry1MC.get<TH1>(HIST("globalMCrec/hOccupancyInTime"))->Fill(collision.occupancyInTime());
+        registry1MC.get<TH1>(HIST("globalMCrec/hOccupancyInTime"))->Fill(collision.occupancyInTime());
 
         matchedElIndexToData = -1;
         reconstructedPtElMatchedToMC = -1;
@@ -3317,7 +3988,7 @@ struct TauTau13topo {
             nPVTracks++;
             trackCharge += track.sign();
             // if (std::abs(eta(track.px(),track.py(),track.pz())) >= trkEtacut) allInEtaAcceptance = false;
-            if (std::abs(eta(track.px(), track.py(), track.pz())) < trkEtacut)
+            if (std::abs(RecoDecay::eta(std::array<double, 3>{track.px(), track.py(), track.pz()})) < trkEtacut)
               nTrkInEtaRange++;
             if (track.pt() > 0.1)
               nTrkAbovePtThreshold++;
@@ -3450,45 +4121,53 @@ struct TauTau13topo {
         registryMC.get<TH1>(HIST("global1MCrec/hNTracks"))->Fill(groupedTracks.size());
         registryMC.get<TH1>(HIST("global1MCrec/hNTracksPV"))->Fill(nPVTracks);
 
-        TLorentzVector p, p1;
-        p.SetXYZM(0., 0., 0., 0.);
+        // TLorentzVector p, p1;
+        ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p, p1;
+        // p.SetXYZM(0., 0., 0., 0.);
+        p.SetXYZT(0., 0., 0., 0.);
         TVector3 v1(0, 0, 0);
         TVector3 v2(0, 0, 0);
         float scalarPtsum = 0;
         bool flagVcalPV[4] = {false, false, false, false};
         float deltaphi = 0;
         bool trkHasTof[4] = {false, false, false, false};
-
+        int nPiHasTPC[4] = {0, 0, 0, 0};
         //
         // second loop, only over PV tracks
         //
         for (int i = 0; i < 4; i++) {
           auto const tmptrack = groupedTracks.begin() + trackId[i];
-          if (tmptrack.hasTOF())
-            trkHasTof[i] = true;
+          // if (tmptrack.hasTOF())
+          // trkHasTof[i] = true;
+          trkHasTof[i] = isGoodTOFTrackCheck(tmptrack);
           v1.SetXYZ(tmptrack.px(), tmptrack.py(), tmptrack.pz());
           // second loop to calculate virtual calorimeter
           for (int j = 0; j < 4; j++) {
             if (i == j)
               continue;
             auto const tmptrack2 = groupedTracks.begin() + trackId[j];
+            if (tmptrack2.hasTPC())
+              nPiHasTPC[i]++;
             v2.SetXYZ(tmptrack2.px(), tmptrack2.py(), tmptrack2.pz());
             deltaphi = v1.Angle(v2);
             if (deltaphi < minAnglecut) { // default 0.05
               flagVcalPV[i] = true;
             }
           } // end of second loop
-          float tmpEtaData = eta(tmptrack.px(), tmptrack.py(), tmptrack.pz());
-          float tmpPhiData = phi(tmptrack.px(), tmptrack.py());
+          float tmpEtaData = RecoDecay::eta(std::array<double, 3>{tmptrack.px(), tmptrack.py(), tmptrack.pz()});
+          float tmpPhiData = RecoDecay::phi(tmptrack.px(), tmptrack.py());
           registryMC.get<TH2>(HIST("global1MCrec/hTrackEtaPhiPV"))->Fill(tmpEtaData, tmpPhiData);
           registryMC.get<TH1>(HIST("global1MCrec/hTrackPtPV"))->Fill(tmptrack.pt());
-          p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), MassPiPlus); // in case of ghost
+          // p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), MassPiPlus); // in case of ghost
+          p1.SetXYZT(v1.X(), v1.Y(), v1.Z(), RecoDecay::e(v1.X(), v1.Y(), v1.Z(), MassPiPlus)); // in case of ghost
 
           if (trackMCId[i] >= 0) {
-            p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), (std::abs(tmptrack.udMcParticle().pdgCode()) == 211 ? MassPiPlus : MassElectron));
-            float tmpPt = pt(tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py());
-            float tmpEta = eta(tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py(), tmptrack.udMcParticle().pz());
-            float tmpPhi = phi(tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py());
+            // p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), (std::abs(tmptrack.udMcParticle().pdgCode()) == 211 ? MassPiPlus : MassElectron));
+            // p1.SetXYZT(v1.X(), v1.Y(), v1.Z(), energy(v1.X(), v1.Y(), v1.Z(), (std::abs(tmptrack.udMcParticle().pdgCode()) == 211 ? MassPiPlus : MassElectron)));
+            p1.SetXYZT(v1.X(), v1.Y(), v1.Z(), RecoDecay::e(v1.X(), v1.Y(), v1.Z(), (std::abs(tmptrack.udMcParticle().pdgCode()) == kPiPlus ? MassPiPlus : MassElectron))); // 211
+            float tmpPt = RecoDecay::pt(tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py());
+            float tmpEta = RecoDecay::eta(std::array<double, 3>{tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py(), tmptrack.udMcParticle().pz()});
+            float tmpPhi = RecoDecay::phi(tmptrack.udMcParticle().px(), tmptrack.udMcParticle().py());
             registryMC.get<TH2>(HIST("global1MCrec/hpTGenRecTracksPV"))->Fill(tmptrack.pt(), tmpPt);
             registryMC.get<TH2>(HIST("global1MCrec/hDeltapTGenRecVsRecpTTracksPV"))->Fill(tmptrack.pt() - tmpPt, tmptrack.pt());
             registryMC.get<TH2>(HIST("global1MCrec/hEtaGenRecTracksPV"))->Fill(tmpEtaData, tmpEta);
@@ -3600,19 +4279,20 @@ struct TauTau13topo {
         //
         // temporary control variables per event with combinatorics
         float pttot = p.Pt();
-        float mass4pi = p.Mag();
+        float mass4pi = p.mag();
         int counterTmp = 0;
 
         float nSigmaEl[4];
         float nSigmaPi[4];
         float nSigma3Pi[4] = {0., 0., 0., 0.};
+        float nSigma3PiNew[4] = {0., 0., 0., 0.};
         float nSigmaPr[4];
         float nSigmaKa[4];
         // float dcaZ[4];
         // float dcaXY[4];
         // float chi2TPC[4];
         // float chi2ITS[4];
-        float chi2TOF[4];
+        float chi2TOF[4] = {-1., -1., -1., -1.};
         // float nclTPCfind[4];
         float nclTPCcrossedRows[4];
         // bool tmpHasTOF[4];
@@ -3633,6 +4313,7 @@ struct TauTau13topo {
         float pi3scalar[4];
 
         // bool trkHasTof[4] = {false, false, false, false};
+        bool trkHasTpc[4] = {false, false, false, false};
 
         //    float mass3pi1e[4];
         //    double trkTimeTot = 0.;
@@ -3641,30 +4322,43 @@ struct TauTau13topo {
           auto const tmptrack = groupedTracks.begin() + trackId[i];
           // if (tmptrack.hasTOF()) trkHasTof[i] = true;
           v1.SetXYZ(tmptrack.px(), tmptrack.py(), tmptrack.pz());
-          p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), MassPiPlus); // in case of ghost
+          // p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), MassPiPlus); // in case of ghost
+          p1.SetXYZT(v1.X(), v1.Y(), v1.Z(), RecoDecay::e(v1.X(), v1.Y(), v1.Z(), MassPiPlus)); // in case of ghost
           if (trackMCId[i] >= 0) {
-            p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), (i == matchedElIndexToData ? MassElectron : MassPiPlus));
+            // p1.SetXYZM(v1.X(), v1.Y(), v1.Z(), (i == matchedElIndexToData ? MassElectron : MassPiPlus));
+            p1.SetXYZT(v1.X(), v1.Y(), v1.Z(), RecoDecay::e(v1.X(), v1.Y(), v1.Z(), (i == matchedElIndexToData ? MassElectron : MassPiPlus)));
           }
 
           nSigmaEl[counterTmp] = tmptrack.tpcNSigmaEl();
           nSigmaPi[counterTmp] = tmptrack.tpcNSigmaPi();
           nSigma3Pi[3] += (nSigmaPi[counterTmp] * nSigmaPi[counterTmp]);
-          // nSigmaPr[counterTmp] = tmptrack.tpcNSigmaPr();
-          // nSigmaPr[counterTmp] = (tmptrack.pt() < 1.5 ? tmptrack.tofNSigmaPr() : tmptrack.tpcNSigmaPr() );
-          nSigmaPr[counterTmp] = std::sqrt(tmptrack.tofNSigmaPr() * tmptrack.tofNSigmaPr() + tmptrack.tpcNSigmaPr() * tmptrack.tpcNSigmaPr());
-          // nSigmaKa[counterTmp] = tmptrack.tpcNSigmaKa();
-          // nSigmaKa[counterTmp] = (tmptrack.pt() < 1.3 ? tmptrack.tofNSigmaKa() : tmptrack.tpcNSigmaKa() );
-          nSigmaKa[counterTmp] = std::sqrt(tmptrack.tofNSigmaKa() * tmptrack.tofNSigmaKa() + tmptrack.tpcNSigmaKa() * tmptrack.tpcNSigmaKa());
+          if (tmptrack.hasTPC())
+            nSigma3PiNew[3] += (nSigmaPi[counterTmp] * nSigmaPi[counterTmp]);
+          if (whichPIDCut == 1) { // TPC only
+            nSigmaPr[counterTmp] = tmptrack.tpcNSigmaPr();
+            nSigmaKa[counterTmp] = tmptrack.tpcNSigmaKa();
+          } else if (whichPIDCut == 2) { // TPC + TOF sigma
+            nSigmaPr[counterTmp] = std::sqrt(tmptrack.tofNSigmaPr() * tmptrack.tofNSigmaPr() + tmptrack.tpcNSigmaPr() * tmptrack.tpcNSigmaPr());
+            nSigmaKa[counterTmp] = std::sqrt(tmptrack.tofNSigmaKa() * tmptrack.tofNSigmaKa() + tmptrack.tpcNSigmaKa() * tmptrack.tpcNSigmaKa());
+          } else if (whichPIDCut == 3) { // TPC + TOF hardcoded pt
+            nSigmaPr[counterTmp] = (tmptrack.pt() < 1.5 ? tmptrack.tofNSigmaPr() : tmptrack.tpcNSigmaPr());
+            nSigmaKa[counterTmp] = (tmptrack.pt() < 1.3 ? tmptrack.tofNSigmaKa() : tmptrack.tpcNSigmaKa());
+          } else {
+            nSigmaPr[counterTmp] = tmptrack.tpcNSigmaPr();
+            nSigmaKa[counterTmp] = tmptrack.tpcNSigmaKa();
+          }
 
           // dcaZ[counterTmp] =    tmptrack.dcaZ();
           // dcaXY[counterTmp] =   tmptrack.dcaXY();
           // chi2TPC[counterTmp] = tmptrack.tpcChi2NCl();
           // chi2ITS[counterTmp] = tmptrack.itsChi2NCl();
-          chi2TOF[counterTmp] = tmptrack.tofChi2();
+          if (tmptrack.hasTOF())
+            chi2TOF[counterTmp] = tmptrack.tofChi2();
           // nclTPCfind[counterTmp] =        tmptrack.tpcNClsFindable();
           nclTPCcrossedRows[counterTmp] = tmptrack.tpcNClsCrossedRows();
 
           // tmpHasTOF[counterTmp] =  tmptrack.hasTOF();
+          trkHasTpc[counterTmp] = tmptrack.hasTPC();
           // trkTime[counterTmp] =    tmptrack.trackTime();
           // trkTimeRes[counterTmp] = tmptrack.trackTimeRes();
 
@@ -3674,7 +4368,7 @@ struct TauTau13topo {
           tmpTofNsigmaEl[counterTmp] = tmptrack.tofNSigmaEl();
 
           deltaPhiTmp = calculateDeltaPhi(p - p1, p1);
-          pi3invMass[counterTmp] = (p - p1).Mag();
+          pi3invMass[counterTmp] = (p - p1).mag();
           pi3pt[counterTmp] = (p - p1).Pt();
           pi3deltaPhi[counterTmp] = deltaPhiTmp;
           pi3assymav[counterTmp] = (p1.Pt() - (scalarPtsum - p1.Pt()) / 3.) / (p1.Pt() + (scalarPtsum - p1.Pt()) / 3.);
@@ -3686,13 +4380,27 @@ struct TauTau13topo {
 
         // fill the histograms with true information
         for (int i = 0; i < 4; i++) {
+          // nsigma3Pi calculation
           nSigma3Pi[i] = nSigma3Pi[3] - (nSigmaPi[i] * nSigmaPi[i]);
           nSigma3Pi[i] = std::sqrt(nSigma3Pi[i]);
+          // nsigma3PiNew calculation
+          if (trkHasTpc[i]) {
+            nSigma3PiNew[i] = nSigma3PiNew[3] - (nSigmaPi[i] * nSigmaPi[i]);
+          }
+          nSigma3PiNew[i] = std::sqrt(nSigma3PiNew[i]);
+
           if (i == matchedElIndexToData) {
             fillControlHistosMCtrue<0>(pi3invMass[i], pi3pt[i], pi3deltaPhi[i], pi3assymav[i], pi3vector[i], pi3scalar[i], nclTPCcrossedRows[i], tmpPt[i], chi2TOF[i]);
             registryMC.get<TH2>(HIST("controlMCtrue/cut0/h3piMassVsPt"))->Fill(pi3invMass[i], pi3pt[i]);
             registryMC.get<TH2>(HIST("pidTPCMCEltrue/hpvsdedxElHipCut0"))->Fill(tmpMomentum[i], tmpDedx[i]);
             registryMC.get<TH1>(HIST("controlMCtrue/cut0/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+            if (nPiHasTPC[i] == 3)
+              registry1MC.get<TH1>(HIST("controlMCtrue/cut0/hsigma3PiNew"))->Fill(nSigma3PiNew[i]);
+            if (nPiHasTPC[i] == 2)
+              registry1MC.get<TH1>(HIST("controlMCtrue/cut0/hsigma2PiNew"))->Fill(nSigma3PiNew[i]);
+            if (nPiHasTPC[i] == 1)
+              registry1MC.get<TH1>(HIST("controlMCtrue/cut0/hsigma1PiNew"))->Fill(nSigma3PiNew[i]);
+
             registry1MC.get<TH2>(HIST("pidTOFMCEltrue/hpvsNsigmaElHipCut0"))->Fill(tmpMomentum[i], tmpTofNsigmaEl[i]);
             // registryMC.get<TH1>(HIST("control/cut0/h3pi1eMass"))->Fill(mass3pi1e[i]);
           } else { // only for 1prong = electron true
@@ -4232,6 +4940,7 @@ struct TauTau13topo {
             registryMC.get<TH2>(HIST("controlMCtrue/cut30/h4trkMassVsPt"))->Fill(mass4pi, pttot);
             registryMC.get<TH2>(HIST("controlMCtrue/cut30/hZNACenergy"))->Fill(energyZNA, energyZNC);
             // registryMC.get<TH1>(HIST("controlMCtrue/cut30/hNtofTrk"))->Fill(nTofTrk);
+            registry1MC.get<TH1>(HIST("globalMCrec/hRecFlag"))->Fill(5 + 2 + collision.flags()); // reconstruction with upc settings flag
           }
           for (int i = 0; i < 4; i++) {
             if (tracksMatchedToMC && flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && (i == matchedElIndexToData)) {
@@ -4275,6 +4984,7 @@ struct TauTau13topo {
             registryMC.get<TH2>(HIST("controlMCtrue/cut27/h4trkMassVsPt"))->Fill(mass4pi, pttot);
             registryMC.get<TH2>(HIST("controlMCtrue/cut27/hZNACenergy"))->Fill(energyZNA, energyZNC);
             // registryMC.get<TH1>(HIST("controlMCtrue/cut27/hNtofTrk"))->Fill(nTofTrk);
+            registry1MC.get<TH1>(HIST("globalMCrec/hRecFlag"))->Fill(5 + 2 + 2 + collision.flags()); // reconstruction with upc settings flag
           }
           for (int i = 0; i < 4; i++) {
             if (tracksMatchedToMC && flagEl[i] && trkHasTof[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && flagDP[i] && (i == matchedElIndexToData)) {
@@ -4291,7 +5001,7 @@ struct TauTau13topo {
           } // end of loop over 4 PV tracks
         } else {
           if (verbose) {
-            LOGF(debug, "<tautau13topo> Candidate rejected: all electrons vetoed by piPID+Vcal+pT+prPID+KaPID+IM");
+            LOGF(debug, "<tautau13topo_MC> Candidate rejected: all electrons vetoed by Dphi");
           }
           return;
         } // end of dphi 3pi-e cut, cut27
@@ -4330,23 +5040,246 @@ struct TauTau13topo {
           } // end of loop over 4 PV tracks
         } else {
           if (verbose) {
-            LOGF(debug, "<tautau13topo> Candidate rejected: zdc cut ");
+            LOGF(debug, "<tautau13topo_MC> Candidate rejected: zdc cut ");
           }
           return;
         } // end of zdc, cut35
 
+        //
+        // occupancy cut 23
+        //
+        if (collision.occupancyInTime() < 1000) {
+          registryMC.get<TH1>(HIST("efficiencyMCEl/effiEl"))->Fill(65., 1.); // electron identified
+          if (tracksMatchedToMC)
+            registryMC.get<TH1>(HIST("efficiencyMCEl/effiEl"))->Fill(66., 1.); // electron identified, tracks match to MC Particles
+          if (tracksMatchedToMC && flagEl[matchedElIndexToData] && flagPi[matchedElIndexToData] &&
+              flagPr[matchedElIndexToData] && flagKa[matchedElIndexToData] && flagCR[matchedElIndexToData] &&
+              !flagVcalPV[matchedElIndexToData] && flagS3pi[matchedElIndexToData] &&
+              flagIM[matchedElIndexToData] && flagDP[matchedElIndexToData] && trkHasTof[matchedElIndexToData]) {
+            registryMC.get<TH1>(HIST("efficiencyMCEl/effiEl"))->Fill(67., 1.); // zdc cut, tracks match to MC Particles, El is MC El true
+
+            registryMC.get<TH1>(HIST("controlMCtrue/cut23/h4piMass"))->Fill(mass4pi);
+            registryMC.get<TH1>(HIST("controlMCtrue/cut23/h4trkPtTot"))->Fill(pttot);
+            registryMC.get<TH2>(HIST("controlMCtrue/cut23/h4trkMassVsPt"))->Fill(mass4pi, pttot);
+            registryMC.get<TH2>(HIST("controlMCtrue/cut23/hZNACenergy"))->Fill(energyZNA, energyZNC);
+            // registryMC.get<TH1>(HIST("controlMCtrue/cut23/hNtofTrk"))->Fill(nTofTrk);
+          }
+          for (int i = 0; i < 4; i++) {
+            if (tracksMatchedToMC && flagEl[i] && flagPi[i] && flagPr[i] && flagKa[i] && flagCR[i] && !flagVcalPV[i] && flagS3pi[i] && flagIM[i] && flagDP[i] && trkHasTof[i] && (i == matchedElIndexToData)) {
+              registryMC.get<TH2>(HIST("pidTPCMCEltrue/hpvsdedxElHipCut23"))->Fill(tmpMomentum[i], tmpDedx[i]);
+              fillControlHistosMCtrue<23>(pi3invMass[i], pi3pt[i], pi3deltaPhi[i], pi3assymav[i], pi3vector[i], pi3scalar[i], nclTPCcrossedRows[i], tmpPt[i], chi2TOF[i]);
+              registryMC.get<TH2>(HIST("controlMCtrue/cut23/h3piMassVsPt"))->Fill(pi3invMass[i], pi3pt[i]);
+              registryMC.get<TH1>(HIST("controlMCtrue/cut23/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+              registry1MC.get<TH2>(HIST("pidTOFMCEltrue/hpvsNsigmaElHipCut23"))->Fill(tmpMomentum[i], tmpTofNsigmaEl[i]);
+            } else if (tracksMatchedToMC && (i != matchedElIndexToData)) {
+              fillControlHistosMCcomb<23>(pi3invMass[i], pi3pt[i], pi3deltaPhi[i], pi3assymav[i], pi3vector[i], pi3scalar[i], nclTPCcrossedRows[i], tmpPt[i], chi2TOF[i]);
+              registryMC.get<TH2>(HIST("pidTPCMCPitrue/hpvsdedxElHipCut23"))->Fill(tmpMomentum[i], tmpDedx[i]);
+              registryMC.get<TH1>(HIST("controlMCcomb/cut23/hsigma3Pi"))->Fill(nSigma3Pi[i]);
+            }
+          } // end of loop over 4 PV tracks
+        } else {
+          if (verbose) {
+            LOGF(debug, "<tautau13topo_MC> Candidate rejected: occupancy cut ");
+          }
+          return;
+        } // end of occupancy cut23
+
       } // end of loop over collisions
     } // end of electron + 3pi
 
+    // } // end of loop over mcCollisions
+
   } // end of processEfficiencyMCSG
+
+  // skimming: only 4 tracks selection
+  void processDoSkim(UDCollisionFull2 const& dgcand, UDTracksFull const& dgtracks, PVTracks const& PVContributors)
+  {
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(0., 1.);
+    int gapSide = dgcand.gapSide();
+    int truegapSide = sgSelector.trueGap(dgcand, cutFV0, cutFT0A, cutFT0C, cutZDC);
+    if (gapSide < 0 || gapSide > 2)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(1., 1.);
+
+    gapSide = truegapSide;
+    if (gapSide != mGapSide)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(2., 1.);
+
+    // zdc information
+    float energyZNA = dgcand.energyCommonZNA();
+    float energyZNC = dgcand.energyCommonZNC();
+    if (energyZNA < 0)
+      energyZNA = -1.;
+    if (energyZNC < 0)
+      energyZNC = -1.;
+
+    int nTofTrk = 0;
+    int nEtaIn15 = 0;
+    int npT100 = 0;
+    //    int qtot = 0;
+    int8_t qtot = 0;
+    // TLorentzVector p;
+    ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> p;
+    for (const auto& trk : PVContributors) {
+      qtot += trk.sign();
+      // p.SetXYZM(trk.px(), trk.py(), trk.pz(), MassPiPlus);
+      p.SetXYZT(trk.px(), trk.py(), trk.pz(), RecoDecay::e(trk.px(), trk.py(), trk.pz(), MassPiPlus));
+      if (std::abs(p.Eta()) < trkEtacut)
+        nEtaIn15++; // 0.9 is a default
+      if (trk.pt() > 0.1)
+        npT100++;
+      if (trk.hasTOF())
+        nTofTrk++;
+    } // end of loop over PV tracks
+
+    if (PVContributors.size() != 4)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(3., 1.);
+
+    if (nEtaIn15 != 4)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(4., 1.);
+
+    if (npT100 != 4)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(5., 1.);
+
+    if (nTofTrk < nTofTrkMinCut)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(6., 1.);
+
+    //
+    // FIT informaton
+    //
+    auto bitMin = 16 - mFITvetoWindow; // default is +- 1 bc (1 bit)
+    auto bitMax = 16 + mFITvetoWindow;
+    bool flagFITveto = false;
+    // check FIT information
+    for (auto bit = bitMin; bit <= bitMax; bit++) {
+      if (TESTBIT(dgcand.bbFT0Apf(), bit))
+        flagFITveto = true;
+      if (TESTBIT(dgcand.bbFT0Cpf(), bit))
+        flagFITveto = true;
+      if (useFV0ForVeto && TESTBIT(dgcand.bbFV0Apf(), bit))
+        flagFITveto = true;
+      if (useFDDAForVeto && TESTBIT(dgcand.bbFDDApf(), bit))
+        flagFITveto = true;
+      if (useFDDCForVeto && TESTBIT(dgcand.bbFDDCpf(), bit))
+        flagFITveto = true;
+    } // end of loop over FIT bits
+
+    if (mFITvetoFlag && flagFITveto)
+      return;
+    registrySkim.get<TH1>(HIST("skim/efficiency"))->Fill(7., 1.);
+
+    // RCT variable
+    int rct = 0;
+    rct = isGoodRCTflag(dgcand);
+
+    //
+    // variables per track
+    //
+    int counterTmp = 0;
+    float px[4], py[4], pz[4];
+    int8_t sign[4];
+    float dcaZ[4];
+    float dcaXY[4];
+
+    float tmpDedx[4];
+    float tmpTofNsigmaEl[4];
+    float tmpTofNsigmaPi[4];
+    float tmpTofNsigmaKa[4];
+    float tmpTofNsigmaPr[4];
+    float tmpTofNsigmaMu[4];
+
+    float nSigmaEl[4];
+    float nSigmaPi[4];
+    float nSigmaPr[4];
+    float nSigmaKa[4];
+    float nSigmaMu[4];
+    float chi2TOF[4] = {-1., -1., -1., -1.};
+    int nclTPCcrossedRows[4];
+    int nclTPCfind[4];
+    float nclTPCchi2[4];
+    float trkITSchi2[4];
+    int trkITScl[4];
+
+    // double trkTime[4];
+    // float trkTimeRes[4];
+    float trkTofSignal[4];
+
+    for (const auto& trk : PVContributors) {
+
+      px[counterTmp] = trk.px();
+      py[counterTmp] = trk.py();
+      pz[counterTmp] = trk.pz();
+      sign[counterTmp] = trk.sign();
+      dcaZ[counterTmp] = trk.dcaZ();
+      dcaXY[counterTmp] = trk.dcaXY();
+
+      tmpDedx[counterTmp] = trk.tpcSignal();
+      nSigmaEl[counterTmp] = trk.tpcNSigmaEl();
+      nSigmaPi[counterTmp] = trk.tpcNSigmaPi();
+      nSigmaPr[counterTmp] = trk.tpcNSigmaPr();
+      nSigmaKa[counterTmp] = trk.tpcNSigmaKa();
+      nSigmaMu[counterTmp] = trk.tpcNSigmaMu();
+
+      trkTofSignal[counterTmp] = trk.beta();
+      tmpTofNsigmaEl[counterTmp] = trk.tofNSigmaEl();
+      tmpTofNsigmaPi[counterTmp] = trk.tofNSigmaPi();
+      tmpTofNsigmaKa[counterTmp] = trk.tofNSigmaKa();
+      tmpTofNsigmaPr[counterTmp] = trk.tofNSigmaPr();
+      tmpTofNsigmaMu[counterTmp] = trk.tofNSigmaMu();
+
+      if (trk.hasTOF())
+        chi2TOF[counterTmp] = trk.tofChi2();
+      // nclTPCfind[counterTmp] = trk.tpcNClsFindable();
+      nclTPCcrossedRows[counterTmp] = trk.tpcNClsCrossedRows();
+
+      nclTPCfind[counterTmp] = trk.tpcNClsFindable();
+      nclTPCchi2[counterTmp] = trk.tpcChi2NCl();
+      trkITSchi2[counterTmp] = trk.itsChi2NCl();
+      trkITScl[counterTmp] = numberOfItsClustersCheck(trk);
+
+      // trkTime[counterTmp] = trk.trackTime();
+      // trkTimeRes[counterTmp] = trk.trackTimeRes();
+      counterTmp++;
+    }
+
+    tauFourTracks(dgcand.runNumber(),
+                  dgcand.globalBC(), // is it necessary
+                  dgtracks.size(),
+                  dgcand.numContrib(),
+                  rct,
+                  // dgcand.posX(), dgcand.posY(),
+                  dgcand.posZ(),
+                  dgcand.flags(),
+                  dgcand.occupancyInTime(),
+                  dgcand.hadronicRate(), // is it necessary
+                  energyZNA, energyZNC,
+                  qtot,
+                  dgcand.trs(), dgcand.trofs(), dgcand.hmpr(), // to test it
+                  dgcand.tfb(), dgcand.itsROFb(), dgcand.sbp(), dgcand.zVtxFT0vPV(), dgcand.vtxITSTPC(),
+                  dgcand.totalFT0AmplitudeA(), dgcand.totalFT0AmplitudeC(), dgcand.totalFV0AmplitudeA(),
+                  // dgcand.timeFT0A(), dgcand.timeFT0C(), dgcand.timeFV0A(),
+                  px, py, pz, sign,
+                  dcaXY, dcaZ,
+                  nclTPCcrossedRows, nclTPCfind, nclTPCchi2, trkITSchi2, trkITScl,
+                  tmpDedx, nSigmaEl, nSigmaPi, nSigmaKa, nSigmaPr, nSigmaMu,
+                  trkTofSignal, tmpTofNsigmaEl, tmpTofNsigmaPi, tmpTofNsigmaKa, tmpTofNsigmaPr, tmpTofNsigmaMu,
+                  chi2TOF);
+  } // end of skim process
 
   PROCESS_SWITCH(TauTau13topo, processDataSG, "Run over SG Producer tables in reco level (reconstructed data or MC)", true);
   PROCESS_SWITCH(TauTau13topo, processSimpleMCSG, "Run over SG Producer tables in true level (MC true only)", false);
   PROCESS_SWITCH(TauTau13topo, processEfficiencyMCSG, "Run over SG Producer tables in true and reco level (MC true and reconstructed)", false);
+  PROCESS_SWITCH(TauTau13topo, processDoSkim, "Run over SG Producer tables to produce skimmed data", false);
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{
     adaptAnalysisTask<TauTau13topo>(cfgc, TaskName{"TauTau13topo"})};
+  // adaptAnalysisTask<TauTau13topo>(cfgc)};
 }

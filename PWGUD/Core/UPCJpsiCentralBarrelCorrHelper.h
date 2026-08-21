@@ -16,15 +16,19 @@
 #ifndef PWGUD_CORE_UPCJPSICENTRALBARRELCORRHELPER_H_
 #define PWGUD_CORE_UPCJPSICENTRALBARRELCORRHELPER_H_
 
-#include <vector>
-#include <algorithm>
-#include "CommonConstants/MathConstants.h"
-#include "random"
+#include <CommonConstants/MathConstants.h>
 
-using namespace o2;
-using namespace o2::framework;
-using namespace o2::framework::expressions;
-using namespace std;
+#include <TLorentzVector.h>
+
+#include <RtypesCore.h>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <random>
+#include <vector>
 
 /*enum ParticleType {
   P_ELECTRON = 0,

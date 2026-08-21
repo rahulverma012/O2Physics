@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -19,16 +19,31 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEDETADPHISTAR_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEDETADPHISTAR_H_
 
+#include "PWGCF/FemtoUniverse/Core/FemtoUniverseContainer.h"
+#include "PWGCF/FemtoUniverse/Core/FemtoUniverseTrackSelection.h"
+#include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+
+#include <TH2.h>
+#include <TH3.h>
+#include <TLorentzVector.h>
+#include <TMath.h>
+#include <TMathBase.h>
+#include <TVector2.h>
+
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
-#include "TMath.h"
-#include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
-#include "PWGCF/FemtoUniverse/Core/FemtoUniverseFemtoContainer.h"
-#include "PWGCF/FemtoUniverse/Core/FemtoUniverseAngularContainer.h"
-#include "PWGCF/FemtoUniverse/Core/FemtoUniverseContainer.h"
-#include "Framework/HistogramRegistry.h"
-#include "PWGCF/FemtoUniverse/Core/FemtoUniverseTrackSelection.h"
 
 namespace o2::analysis
 {
@@ -47,7 +62,8 @@ class FemtoUniverseDetaDphiStar
   /// Destructor
   virtual ~FemtoUniverseDetaDphiStar() = default;
   /// Initialization of the histograms and setting required values
-  void init(HistogramRegistry* registry, HistogramRegistry* registryQA, float ldeltaphistarcutmin, float ldeltaphistarcutmax, float ldeltaetacutmin, float ldeltaetacutmax, float lchosenradii, bool lplotForEveryRadii, float lPhiMassMin = 1.014, float lPhiMassMax = 1.026)
+  template <typename t1>
+  void init(o2::framework::HistogramRegistry* registry, o2::framework::HistogramRegistry* registryQA, t1& fDeltaEtaAxis, t1& fDeltaPhiStarAxis, float ldeltaphistarcutmin, float ldeltaphistarcutmax, float ldeltaetacutmin, float ldeltaetacutmax, float lchosenradii, bool lplotForEveryRadii, float lPhiMassMin = 1.014, float lPhiMassMax = 1.026, bool lisSameSignCPR = false)
   {
     chosenRadii = lchosenradii;
     cutDeltaPhiStarMax = ldeltaphistarcutmax;
@@ -59,31 +75,35 @@ class FemtoUniverseDetaDphiStar
     mHistogramRegistryQA = registryQA;
     cutPhiInvMassLow = lPhiMassMin;
     cutPhiInvMassHigh = lPhiMassMax;
+    isSameSignCPR = lisSameSignCPR;
 
     if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kTrack) {
       std::string dirName = static_cast<std::string>(DirNames[0]);
-      histdetadpisame[0][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][0])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-      histdetadpisame[0][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][0])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-      histdetadpimixed[0][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][0])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-      histdetadpimixed[0][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][0])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+      histdetadpisame[0][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][0])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+      histdetadpisame[0][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][0])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+      histdetadpimixed[0][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][0])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+      histdetadpimixed[0][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][0])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+
+      histdetadpiqlcmssame = mHistogramRegistry->add<TH3>((dirName + static_cast<std::string>(HistNamesSame[1][7])).c_str(), "; #it{q}_{LCMS}; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH3F, {{100, 0.0, 0.5}, {fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+      histdetadpiqlcmsmixed = mHistogramRegistry->add<TH3>((dirName + static_cast<std::string>(HistNamesMixed[1][7])).c_str(), "; #it{q}_{LCMS}; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH3F, {{100, 0.0, 0.5}, {fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
 
       if (plotForEveryRadii) {
         for (int i = 0; i < 9; i++) {
-          histdetadpiRadii[0][i] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[0][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+          histdetadpiRadii[0][i] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[0][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
         }
       }
     }
     if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kV0) {
       for (int i = 0; i < 2; i++) {
         std::string dirName = static_cast<std::string>(DirNames[1]);
-        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
 
         if (plotForEveryRadii) {
           for (int j = 0; j < 9; j++) {
-            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
           }
         }
       }
@@ -92,28 +112,58 @@ class FemtoUniverseDetaDphiStar
       /// V0-V0 combination
       for (int k = 0; k < 2; k++) {
         std::string dirName = static_cast<std::string>(DirNames[2]);
-        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
         if (plotForEveryRadii) {
           for (int l = 0; l < 9; l++) {
-            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
           }
         }
       }
     }
     if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kCascade && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
-      /// Xi-Xi and Omega-Omega combination
+      /// Cascade-Cascade combination
       for (int k = 0; k < 7; k++) {
         std::string dirName = static_cast<std::string>(DirNames[5]);
-        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
         if (plotForEveryRadii) {
           for (int l = 0; l < 9; l++) {
-            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+          }
+        }
+      }
+    }
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+      /// Track-Cascade combination
+      for (int k = 0; k < 3; k++) {
+        std::string dirName = static_cast<std::string>(DirNames[6]);
+        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        if (plotForEveryRadii) {
+          for (int l = 0; l < 9; l++) {
+            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+          }
+        }
+      }
+    }
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kV0 && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+      /// V0-Cascade combination
+      for (int k = 0; k < 3; k++) {
+        std::string dirName = static_cast<std::string>(DirNames[7]);
+        histdetadpisame[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[k][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][k])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        if (plotForEveryRadii) {
+          for (int l = 0; l < 9; l++) {
+            histdetadpiRadii[k][l] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[k][l])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
           }
         }
       }
@@ -121,14 +171,14 @@ class FemtoUniverseDetaDphiStar
     if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kPhi) {
       for (int i = 0; i < 2; i++) {
         std::string dirName = static_cast<std::string>(DirNames[3]);
-        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #varphi*", kTH2F, {{400, -0.30, 0.30}, {400, -0.30, 0.30}});
-        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #varphi*", kTH2F, {{400, -0.30, 0.30}, {400, -0.30, 0.30}});
-        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #varphi*", kTH2F, {{400, -0.30, 0.30}, {400, -0.30, 0.30}});
-        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #varphi*", kTH2F, {{400, -0.30, 0.30}, {400, -0.30, 0.30}});
+        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #varphi*", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #varphi*", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #varphi*", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #varphi*", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
 
         if (plotForEveryRadii) {
           for (int j = 0; j < 9; j++) {
-            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #varphi*", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #varphi*", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
           }
         }
       }
@@ -136,22 +186,58 @@ class FemtoUniverseDetaDphiStar
     if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kD0) {
       for (int i = 0; i < 2; i++) {
         std::string dirName = static_cast<std::string>(DirNames[4]);
-        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
-        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+        histdetadpisame[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[0][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpisame[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesSame[1][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][0] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[0][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadpimixed[i][1] = mHistogramRegistry->add<TH2>((dirName + static_cast<std::string>(HistNamesMixed[1][i])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
 
         if (plotForEveryRadii) {
           for (int j = 0; j < 9; j++) {
-            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #phi", kTH2F, {{100, -0.15, 0.15}, {100, -0.15, 0.15}});
+            histdetadpiRadii[i][j] = mHistogramRegistryQA->add<TH2>((dirName + static_cast<std::string>(HistNamesRadii[i][j])).c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
           }
         }
       }
     }
   }
 
+  template <typename t1, typename t2, typename t3>
+  void init_kT(o2::framework::HistogramRegistry* registry, t1& ktbins, t3& fDeltaEtaAxis, t3& fDeltaPhiStarAxis, t2& ldeltaphistarcutmin, t2& ldeltaphistarcutmax, t2& ldeltaetacutmin, t2& ldeltaetacutmax, t2& ldeltaphistarcutFractionmin, t2& ldeltaphistarcutFractionmax, t2& ldeltaetacutFractionmin, t2& ldeltaetacutFractionmax, bool filldEtadPhiTPCcls)
+  {
+    mHistogramRegistry = registry;
+    ktBins = ktbins;
+
+    cutDeltaPhiStarMaxVector = ldeltaphistarcutmax;
+    cutDeltaPhiStarMinVector = ldeltaphistarcutmin;
+    cutDeltaEtaMaxVector = ldeltaetacutmax;
+    cutDeltaEtaMinVector = ldeltaetacutmin;
+
+    cutDeltaPhiStarFractionMaxVector = ldeltaphistarcutFractionmax;
+    cutDeltaPhiStarFractionMinVector = ldeltaphistarcutFractionmin;
+    cutDeltaEtaFractionMaxVector = ldeltaetacutFractionmax;
+    cutDeltaEtaFractionMinVector = ldeltaetacutFractionmin;
+
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      std::string dirName = static_cast<std::string>(DirNames[0]);
+      for (int j = 1; j < static_cast<int>(ktBins.size() - 1); j++) {
+        std::string histSuffixkT1 = std::to_string(static_cast<int>(ktBins[j] * 100.0));
+        std::string histSuffixkT2 = std::to_string(static_cast<int>(ktBins[j + 1] * 100.0));
+        std::string histFolderkT = "kT_" + histSuffixkT1 + "_" + histSuffixkT2 + "/";
+        histdetadphisamebeforekT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiBeforeSame").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadphimixedbeforekT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiBeforeMixed").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadphisameafterkT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiAfterSame").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadphimixedafterkT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiAfterMixed").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadphisameafterFractionkT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiAfterFractionSame").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        histdetadphimixedafterFractionkT[j] = mHistogramRegistry->add<TH2>((dirName + histFolderkT + "detadphidetadphiAfterFractionMIxed").c_str(), "; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH2F, {{fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        if (filldEtadPhiTPCcls) {
+          histdetadphiVsPairTPCFracSharedsamebefore[j] = mHistogramRegistry->add<TH3>((dirName + histFolderkT + "detadphiVsPairTPCFracSharedsamebefore").c_str(), "; PairTPCFracSharedCls; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH3F, {{20, 0.0, 1.0}, {fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+          histdetadphiVsPairTPCFracSharedmixedbefore[j] = mHistogramRegistry->add<TH3>((dirName + histFolderkT + "detadphiVsPairTPCFracSharedmixedbefore").c_str(), "; PairTPCFracSharedCls; #Delta #eta; #Delta #phi", o2::framework::HistType::kTH3F, {{20, 0.0, 1.0}, {fDeltaEtaAxis}, {fDeltaPhiStarAxis}});
+        }
+      }
+    }
+  }
+
   ///  Check if pair is close or not
-  template <typename Part, typename Parts>
+  template <bool V0V0rect = true, typename Part, typename Parts>
   bool isClosePair(Part const& part1, Part const& part2, Parts const& particles, float lmagfield, uint8_t ChosenEventType)
   {
     magfield = lmagfield;
@@ -197,7 +283,6 @@ class FemtoUniverseDetaDphiStar
       bool pass = false;
       for (int i = 0; i < 2; i++) {
         auto indexOfDaughter = (ChosenEventType == femto_universe_container::EventType::mixed ? part2.globalIndex() : part2.index()) - 2 + i;
-        // auto indexOfDaughter = part2.globalIndex() - 2 + i;
         auto daughter = particles.begin() + indexOfDaughter;
         auto deta = part1.eta() - daughter.eta();
         auto dphiAvg = averagePhiStar(part1, *daughter, i);
@@ -246,8 +331,9 @@ class FemtoUniverseDetaDphiStar
           LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
         }
 
-        // if (std::pow(dphiAvg, 2) / std::pow(cutDeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(cutDeltaEtaMax, 2) < 1.) {
-        if ((dphiAvg > cutDeltaPhiStarMin) && (dphiAvg < cutDeltaPhiStarMax) && (deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) {
+        if (V0V0rect && (dphiAvg > cutDeltaPhiStarMin) && (dphiAvg < cutDeltaPhiStarMax) && (deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) {
+          pass = true;
+        } else if (!V0V0rect && std::pow(dphiAvg, 2) / std::pow(cutDeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(cutDeltaEtaMax, 2) < 1.) {
           pass = true;
         } else {
           if (ChosenEventType == femto_universe_container::EventType::same) {
@@ -260,9 +346,8 @@ class FemtoUniverseDetaDphiStar
         }
       }
       return pass;
-
     } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kCascade && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
-      /// Xi-Xi and Omega-Omega combination
+      /// Cascade-Cascade combination
       if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kCascade || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kCascade) {
         LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kCascade,kCascade candidates.";
         return false;
@@ -270,11 +355,13 @@ class FemtoUniverseDetaDphiStar
 
       bool pass = false;
       static constexpr int CascChildTable[][2] = {{-1, -1}, {-1, -2}, {-1, -3}, {-2, -2}, {-3, -3}, {-2, -1}, {-3, -1}};
-      for (int i = 0; i < 5; i++) {
+      for (int i = 0; i < 7; i++) {
         auto indexOfDaughterpart1 = (ChosenEventType == femto_universe_container::EventType::mixed ? part1.globalIndex() : part1.index()) + CascChildTable[i][0];
         auto indexOfDaughterpart2 = (ChosenEventType == femto_universe_container::EventType::mixed ? part2.globalIndex() : part2.index()) + CascChildTable[i][1];
         auto daughterpart1 = particles.begin() + indexOfDaughterpart1;
         auto daughterpart2 = particles.begin() + indexOfDaughterpart2;
+        if (isSameSignCPR && (daughterpart1.mAntiLambda() != daughterpart2.mAntiLambda())) // mAntiLambda() is used here as sign getter
+          continue;
         auto deta = daughterpart1.eta() - daughterpart2.eta();
         auto dphiAvg = averagePhiStar(*daughterpart1, *daughterpart2, i);
         if (ChosenEventType == femto_universe_container::EventType::same) {
@@ -298,7 +385,81 @@ class FemtoUniverseDetaDphiStar
         }
       }
       return pass;
+    } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+      /// Track-Cascade combination
+      if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kTrack,kCascade candidates.";
+        return false;
+      }
 
+      bool pass = false;
+      for (int i = 0; i < 3; i++) {
+        auto indexOfDaughter = (ChosenEventType == femto_universe_container::EventType::mixed ? part2.globalIndex() : part2.index()) - 3 + i;
+        auto daughter = particles.begin() + indexOfDaughter;
+        if (isSameSignCPR && (part1.mAntiLambda() != daughter.mAntiLambda())) // mAntiLambda() is used here as sign getter
+          continue;
+        auto deta = part1.eta() - daughter.eta();
+        auto dphiAvg = averagePhiStar(*part1, *daughter, i);
+        if (ChosenEventType == femto_universe_container::EventType::same) {
+          histdetadpisame[i][0]->Fill(deta, dphiAvg);
+        } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+          histdetadpimixed[i][0]->Fill(deta, dphiAvg);
+        } else {
+          LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+        }
+
+        if ((dphiAvg > cutDeltaPhiStarMin) && (dphiAvg < cutDeltaPhiStarMax) && (deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) {
+          pass = true;
+        } else {
+          if (ChosenEventType == femto_universe_container::EventType::same) {
+            histdetadpisame[i][1]->Fill(deta, dphiAvg);
+          } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+            histdetadpimixed[i][1]->Fill(deta, dphiAvg);
+          } else {
+            LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+          }
+        }
+      }
+      return pass;
+    } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kV0 && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+      /// V0-Cascade combination
+      if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kV0 || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kV0,kCascade candidates.";
+        return false;
+      }
+
+      bool pass = false;
+      static constexpr int V0CascChildTable[][2] = {{-1, -1}, {-1, -2}, {-1, -3}, {-2, -1}, {-2, -2}, {-2, -3}};
+      for (int i = 0; i < 3; i++) {
+        auto indexOfDaughterV0 = (ChosenEventType == femto_universe_container::EventType::mixed ? part1.globalIndex() : part1.index()) + V0CascChildTable[i][0];
+        auto indexOfDaughterCasc = (ChosenEventType == femto_universe_container::EventType::mixed ? part2.globalIndex() : part2.index()) + V0CascChildTable[i][1];
+        auto daughterV0 = particles.begin() + indexOfDaughterV0;
+        auto daughterCasc = particles.begin() + indexOfDaughterCasc;
+        if (isSameSignCPR && (daughterV0.mAntiLambda() != daughterCasc.mAntiLambda())) // mAntiLambda() is used here as sign getter
+          continue;
+        auto deta = daughterV0.eta() - daughterCasc.eta();
+        auto dphiAvg = averagePhiStar(*daughterV0, *daughterCasc, i);
+        if (ChosenEventType == femto_universe_container::EventType::same) {
+          histdetadpisame[i][0]->Fill(deta, dphiAvg);
+        } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+          histdetadpimixed[i][0]->Fill(deta, dphiAvg);
+        } else {
+          LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+        }
+
+        if ((dphiAvg > cutDeltaPhiStarMin) && (dphiAvg < cutDeltaPhiStarMax) && (deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) {
+          pass = true;
+        } else {
+          if (ChosenEventType == femto_universe_container::EventType::same) {
+            histdetadpisame[i][1]->Fill(deta, dphiAvg);
+          } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+            histdetadpimixed[i][1]->Fill(deta, dphiAvg);
+          } else {
+            LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+          }
+        }
+      }
+      return pass;
     } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kD0) {
       /// Track-D0 combination
       // check if provided particles are in agreement with the class instantiation
@@ -404,23 +565,294 @@ class FemtoUniverseDetaDphiStar
     }
   }
 
- private:
-  HistogramRegistry* mHistogramRegistry = nullptr;   ///< For main output
-  HistogramRegistry* mHistogramRegistryQA = nullptr; ///< For QA output
-  static constexpr std::string_view DirNames[6] = {"kTrack_kTrack/", "kTrack_kV0/", "kV0_kV0/", "kTrack_kPhi/", "kTrack_kD0/", "kCascade_kCascade/"};
+  ///  Check if pair is close or not
+  template <typename Part>
+  bool isClosePairAtITS(Part const& part1, Part const& part2, float lmagfield, uint8_t ChosenEventType)
+  {
+    magfield = lmagfield;
 
-  static constexpr std::string_view HistNamesSame[2][7] = {{"detadphidetadphi0BeforeSame_0", "detadphidetadphi0BeforeSame_1", "detadphidetadphi0BeforeSame_2",
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      /// Track-Track combination
+      // check if provided particles are in agreement with the class instantiation
+      if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kTrack,kTrack candidates.";
+        return false;
+      }
+      auto deta = part1.eta() - part2.eta();
+      auto dphiAvg = part1.phi() - part2.phi();
+      if (ChosenEventType == femto_universe_container::EventType::same) {
+        histdetadpisame[0][0]->Fill(deta, dphiAvg);
+      } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+        histdetadpimixed[0][0]->Fill(deta, dphiAvg);
+      } else {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+      }
+
+      if (std::pow(dphiAvg, 2) / std::pow(cutDeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(cutDeltaEtaMax, 2) < 1.) {
+        return true;
+      } else {
+        if (ChosenEventType == femto_universe_container::EventType::same) {
+          histdetadpisame[0][1]->Fill(deta, dphiAvg);
+        } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+          histdetadpimixed[0][1]->Fill(deta, dphiAvg);
+        } else {
+          LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+        }
+        return false;
+      }
+    } else {
+      LOG(fatal) << "FemtoUniversePairCleaner: Combination of objects not defined - quitting!";
+      return false;
+    }
+  }
+
+  template <typename Part>
+  bool isClosePairFrac(Part const& part1, Part const& part2, float lmagfield, uint8_t ChosenEventType, bool IsDphiAvgOrDist, float DistMax, float FracMax, bool CircCut)
+  {
+    magfield = lmagfield;
+
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      /// Track-Track combination
+      // check if provided particles are in agreement with the class instantiation
+      if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kTrack,kTrack candidates.";
+        return false;
+      }
+      auto deta = part1.eta() - part2.eta();
+      auto dphiAvg = averagePhiStar(part1, part2, 0);
+      auto distfrac = averagePhiStarFrac(part1, part2, DistMax);
+      if (ChosenEventType == femto_universe_container::EventType::same) {
+        histdetadpisame[0][0]->Fill(deta, dphiAvg);
+      } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+        histdetadpimixed[0][0]->Fill(deta, dphiAvg);
+      } else {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+      }
+
+      if (IsDphiAvgOrDist) {
+        if (CircCut && (std::pow(dphiAvg, 2) / std::pow(cutDeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(cutDeltaEtaMax, 2) < 1.)) {
+          return true;
+        } else if (!CircCut && (dphiAvg > cutDeltaPhiStarMin) && (dphiAvg < cutDeltaPhiStarMax) && (deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) {
+          return true;
+        } else {
+          if (ChosenEventType == femto_universe_container::EventType::same) {
+            histdetadpisame[0][1]->Fill(deta, dphiAvg);
+          } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+            histdetadpimixed[0][1]->Fill(deta, dphiAvg);
+          } else {
+            LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+          }
+          return false;
+        }
+      } else {
+        if (((deta > cutDeltaEtaMin) && (deta < cutDeltaEtaMax)) && (distfrac > FracMax)) {
+          return true;
+        } else {
+          if (ChosenEventType == femto_universe_container::EventType::same) {
+            histdetadpisame[0][1]->Fill(deta, dphiAvg);
+          } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+            histdetadpimixed[0][1]->Fill(deta, dphiAvg);
+          } else {
+            LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+          }
+          return false;
+        }
+      }
+
+    } else {
+      LOG(fatal) << "FemtoUniversePairCleaner: Combination of objects not defined - quitting!";
+      return false;
+    }
+  }
+
+  ///  Check if pair is close or not
+  template <typename Part>
+  bool isClosePairkT(Part const& part1, Part const& part2, uint8_t ChosenEventType, float ktval, bool CircCut, bool IsDphiAvgOrDist, float lmagfield, float DistMax, float FracMax, bool filldEtadPhiTPCcls, float fPairTPCFracShared)
+  {
+    /// Track-Track combination
+    // check if provided particles are in agreement with the class instantiation
+    if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kTrack,kTrack candidates.";
+      return false;
+    }
+
+    int ktbinval = 1;
+    if (ktval >= ktBins[1] && ktval < ktBins[2]) {
+      ktbinval = 1;
+    } else if (ktval >= ktBins[2] && ktval < ktBins[3]) {
+      ktbinval = 2;
+    } else if (ktval >= ktBins[3] && ktval < ktBins[4]) {
+      ktbinval = 3;
+    } else if (ktval >= ktBins[4] && ktval < ktBins[5]) {
+      ktbinval = 4;
+    }
+
+    magfield = lmagfield;
+
+    auto deta = part1.eta() - part2.eta();
+    auto dphiAvg = averagePhiStar(part1, part2, 0);
+    auto distfrac = averagePhiStarFrac(part1, part2, DistMax);
+    auto DeltaPhiStarMax = static_cast<float>(cutDeltaPhiStarMaxVector[ktbinval]);
+    auto DeltaPhiStarMin = static_cast<float>(cutDeltaPhiStarMinVector[ktbinval]);
+    auto DeltaEtaMax = static_cast<float>(cutDeltaEtaMaxVector[ktbinval]);
+    auto DeltaEtaMin = static_cast<float>(cutDeltaEtaMinVector[ktbinval]);
+
+    if (ChosenEventType == femto_universe_container::EventType::same) {
+      histdetadphisamebeforekT[ktbinval]->Fill(deta, dphiAvg);
+      if (filldEtadPhiTPCcls) {
+        histdetadphiVsPairTPCFracSharedsamebefore[ktbinval]->Fill(fPairTPCFracShared, deta, dphiAvg);
+      }
+    } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+      histdetadphimixedbeforekT[ktbinval]->Fill(deta, dphiAvg);
+      if (filldEtadPhiTPCcls) {
+        histdetadphiVsPairTPCFracSharedmixedbefore[ktbinval]->Fill(fPairTPCFracShared, deta, dphiAvg);
+      }
+    } else {
+      LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+    }
+
+    if (IsDphiAvgOrDist) {
+      if (CircCut && (std::pow(dphiAvg, 2) / std::pow(DeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(DeltaEtaMax, 2) < 1.)) {
+        // std::cout<<"1 "<<part1.globalIndex()<<" 2 "<<part2.globalIndex()<<" From the header CLOSED"<<std::endl;
+        return true;
+      } else if (!CircCut && (dphiAvg > DeltaPhiStarMin) && (dphiAvg < DeltaPhiStarMax) && (deta > DeltaEtaMin) && (deta < DeltaEtaMax)) {
+        return true;
+      } else {
+        if (ChosenEventType == femto_universe_container::EventType::same) {
+          histdetadphisameafterkT[ktbinval]->Fill(deta, dphiAvg);
+        } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+          histdetadphimixedafterkT[ktbinval]->Fill(deta, dphiAvg);
+        } else {
+          LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+        }
+        return false;
+      }
+    } else {
+      if (((deta > DeltaEtaMin) && (deta < DeltaEtaMax)) && (distfrac > FracMax)) {
+        return true;
+      } else {
+        if (ChosenEventType == femto_universe_container::EventType::same) {
+          histdetadphisameafterkT[ktbinval]->Fill(deta, dphiAvg);
+        } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+          histdetadphimixedafterkT[ktbinval]->Fill(deta, dphiAvg);
+        } else {
+          LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+        }
+        return false;
+      }
+    }
+  }
+
+  ///  Check if pair is close or not
+  template <typename Part>
+  bool isClosePairFractionkT(Part const& part1, Part const& part2, uint8_t ChosenEventType, float ktval, float lmagfield, float DistMax, float FracMax)
+  {
+    /// Track-Track combination
+    // check if provided particles are in agreement with the class instantiation
+    if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar instantiation! Please provide kTrack,kTrack candidates.";
+      return false;
+    }
+
+    int ktbinval = 1;
+    if (ktval >= ktBins[1] && ktval < ktBins[2]) {
+      ktbinval = 1;
+    } else if (ktval >= ktBins[2] && ktval < ktBins[3]) {
+      ktbinval = 2;
+    } else if (ktval >= ktBins[3] && ktval < ktBins[4]) {
+      ktbinval = 3;
+    } else if (ktval >= ktBins[4] && ktval < ktBins[5]) {
+      ktbinval = 4;
+    }
+
+    magfield = lmagfield;
+
+    auto deta = part1.eta() - part2.eta();
+    auto dphiAvg = averagePhiStar(part1, part2, 0);
+    auto distfrac = averagePhiStarFrac(part1, part2, DistMax);
+    auto DeltaPhiStarMax = static_cast<float>(cutDeltaPhiStarFractionMaxVector[ktbinval]);
+    auto DeltaPhiStarMin = static_cast<float>(cutDeltaPhiStarFractionMinVector[ktbinval]);
+    auto DeltaEtaMax = static_cast<float>(cutDeltaEtaFractionMaxVector[ktbinval]);
+    auto DeltaEtaMin = static_cast<float>(cutDeltaEtaFractionMinVector[ktbinval]);
+
+    double outerVal = std::pow(dphiAvg, 2) / std::pow(DeltaPhiStarMax, 2) + std::pow(deta, 2) / std::pow(DeltaEtaMax, 2);
+    double innerVal = std::pow(dphiAvg, 2) / std::pow(DeltaPhiStarMin, 2) + std::pow(deta, 2) / std::pow(DeltaEtaMin, 2);
+
+    if ((innerVal >= 1.0) && (outerVal < 1.0) && (distfrac > FracMax)) {
+      return true;
+    } else {
+      if (ChosenEventType == femto_universe_container::EventType::same) {
+        histdetadphisameafterFractionkT[ktbinval]->Fill(deta, dphiAvg);
+      } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+        histdetadphimixedafterFractionkT[ktbinval]->Fill(deta, dphiAvg);
+      } else {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+      }
+      return false;
+    }
+  }
+
+  template <typename PartType>
+  bool isGammaPair(PartType track1, PartType track2, double maxEEMinv, double maxDTheta)
+  {
+    double me = o2::constants::physics::MassElectron;
+
+    double magTrack1 = track1.px() * track1.px() + track1.py() * track1.py() + track1.pz() * track1.pz();
+    double magTrack2 = track2.px() * track2.px() + track2.py() * track2.py() + track2.pz() * track2.pz();
+    double dotTr1Tr2 = track1.px() * track2.px() + track1.py() * track2.py() + track1.pz() * track2.pz();
+
+    if ((track1.sign() * track2.sign()) < 0.0) {
+      double theta1 = track1.theta();
+      double theta2 = track2.theta();
+      double dtheta = TMath::Abs(theta1 - theta2);
+
+      double e1 = TMath::Sqrt(me * me + magTrack1);
+      double e2 = TMath::Sqrt(me * me + magTrack2);
+
+      double minv = 2 * me * me + 2 * (e1 * e2 - dotTr1Tr2);
+      if ((TMath::Abs(minv) < maxEEMinv) && (dtheta < maxDTheta)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  ///  Check if pair is close or not
+  template <typename Part>
+  void ClosePairqLCMS(Part const& part1, Part const& part2, float lmagfield, uint8_t ChosenEventType, double qlcms) // add typename Parts and variable parts for adding MClabels
+  {
+    magfield = lmagfield;
+    if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kTrack) {
+      auto deta = part1.eta() - part2.eta();
+      auto dphiAvg = averagePhiStar(part1, part2, 0);
+
+      if (ChosenEventType == femto_universe_container::EventType::same) {
+        histdetadpiqlcmssame->Fill(qlcms, deta, dphiAvg);
+      } else if (ChosenEventType == femto_universe_container::EventType::mixed) {
+        histdetadpiqlcmsmixed->Fill(qlcms, deta, dphiAvg);
+      } else {
+        LOG(fatal) << "FemtoUniverseDetaDphiStar: passed arguments don't agree with FemtoUniverseDetaDphiStar's type of events! Please provide same or mixed.";
+      }
+    }
+  }
+
+ private:
+  o2::framework::HistogramRegistry* mHistogramRegistry = nullptr;   ///< For main output
+  o2::framework::HistogramRegistry* mHistogramRegistryQA = nullptr; ///< For QA output
+  static constexpr std::string_view DirNames[8] = {"kTrack_kTrack/", "kTrack_kV0/", "kV0_kV0/", "kTrack_kPhi/", "kTrack_kD0/", "kCascade_kCascade/", "kTrack_kCascade/", "kV0_kCascade/"};
+
+  static constexpr std::string_view HistNamesSame[2][8] = {{"detadphidetadphi0BeforeSame_0", "detadphidetadphi0BeforeSame_1", "detadphidetadphi0BeforeSame_2",
                                                             "detadphidetadphi0BeforeSame_3", "detadphidetadphi0BeforeSame_4", "detadphidetadphi0BeforeSame_5",
-                                                            "detadphidetadphi0BeforeSame_6"},
+                                                            "detadphidetadphi0BeforeSame_6", "detadphidetadphi0BeforeSameqLCMS"},
                                                            {"detadphidetadphi0AfterSame_0", "detadphidetadphi0AfterSame_1", "detadphidetadphi0AfterSame_2",
                                                             "detadphidetadphi0AfterSame_3", "detadphidetadphi0AfterSame_4", "detadphidetadphi0AfterSame_5",
-                                                            "detadphidetadphi0AfterSame_6"}};
-  static constexpr std::string_view HistNamesMixed[2][7] = {{"detadphidetadphi0BeforeMixed_0", "detadphidetadphi0BeforeMixed_1", "detadphidetadphi0BeforeMixed_2",
+                                                            "detadphidetadphi0AfterSame_6", "detadphidetadphi0AfterSameqLCMS"}};
+  static constexpr std::string_view HistNamesMixed[2][8] = {{"detadphidetadphi0BeforeMixed_0", "detadphidetadphi0BeforeMixed_1", "detadphidetadphi0BeforeMixed_2",
                                                              "detadphidetadphi0BeforeMixed_3", "detadphidetadphi0BeforeMixed_4", "detadphidetadphi0BeforeMixed_5",
-                                                             "detadphidetadphi0BeforeMixed_6"},
+                                                             "detadphidetadphi0BeforeMixed_6", "detadphidetadphi0BeforeMixedqLCMS"},
                                                             {"detadphidetadphi0AfterMixed_0", "detadphidetadphi0AfterMixed_1", "detadphidetadphi0AfterMixed_2",
                                                              "detadphidetadphi0AfterMixed_3", "detadphidetadphi0AfterMixed_4", "detadphidetadphi0AfterMixed_5",
-                                                             "detadphidetadphi0AfterMixed_6"}};
+                                                             "detadphidetadphi0AfterMixed_6", "detadphidetadphi0AfterMixedqLCMS"}};
 
   static constexpr std::string_view HistNamesRadii[7][9] = {{"detadphidetadphi0Before_0_0", "detadphidetadphi0Before_0_1", "detadphidetadphi0Before_0_2",
                                                              "detadphidetadphi0Before_0_3", "detadphidetadphi0Before_0_4", "detadphidetadphi0Before_0_5",
@@ -458,14 +890,40 @@ class FemtoUniverseDetaDphiStar
   float cutDeltaPhiStarMin;
   float cutDeltaEtaMax;
   float cutDeltaEtaMin;
+
+  std::vector<float> cutDeltaPhiStarMaxVector;
+  std::vector<float> cutDeltaPhiStarMinVector;
+  std::vector<float> cutDeltaEtaMaxVector;
+  std::vector<float> cutDeltaEtaMinVector;
+
+  std::vector<float> cutDeltaPhiStarFractionMaxVector;
+  std::vector<float> cutDeltaPhiStarFractionMinVector;
+  std::vector<float> cutDeltaEtaFractionMaxVector;
+  std::vector<float> cutDeltaEtaFractionMinVector;
+
   float magfield;
   bool plotForEveryRadii = false;
   float cutPhiInvMassLow;
   float cutPhiInvMassHigh;
+  bool isSameSignCPR = false;
+  std::vector<double> ktBins;
 
   std::array<std::array<std::shared_ptr<TH2>, 2>, 7> histdetadpisame{};
   std::array<std::array<std::shared_ptr<TH2>, 2>, 7> histdetadpimixed{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphisamebeforekT{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphimixedbeforekT{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphisameafterkT{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphimixedafterkT{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphisameafterFractionkT{};
+  std::array<std::shared_ptr<TH2>, 4> histdetadphimixedafterFractionkT{};
+
   std::array<std::array<std::shared_ptr<TH2>, 9>, 7> histdetadpiRadii{};
+
+  std::array<std::shared_ptr<TH3>, 4> histdetadphiVsPairTPCFracSharedsamebefore{};
+  std::array<std::shared_ptr<TH3>, 4> histdetadphiVsPairTPCFracSharedmixedbefore{};
+
+  std::shared_ptr<TH3> histdetadpiqlcmssame{};
+  std::shared_ptr<TH3> histdetadpiqlcmsmixed{};
 
   ///  Calculate phi at all required radii stored in TmpRadiiTPC
   /// Magnetic field to be provided in Tesla
@@ -525,6 +983,36 @@ class FemtoUniverseDetaDphiStar
     return dPhiAvg / static_cast<float>(entries);
   }
 
+  ///  Calculate average phi
+  template <typename T1, typename T2>
+  float averagePhiStarFrac(const T1& part1, const T2& part2, float maxdist)
+  {
+    std::vector<float> tmpVec1;
+    std::vector<float> tmpVec2;
+    phiAtRadiiTPC(part1, tmpVec1);
+    phiAtRadiiTPC(part2, tmpVec2);
+    int num = tmpVec1.size();
+    float dphi = 0;
+    int entries = 0;
+    double distance = 0;
+    int badpoints = 0;
+
+    for (int i = 0; i < num; i++) {
+      if (tmpVec1.at(i) != 999 && tmpVec2.at(i) != 999) {
+        dphi = tmpVec1.at(i) - tmpVec2.at(i);
+        entries++;
+      } else {
+        dphi = 0;
+      }
+      dphi = TVector2::Phi_mpi_pi(dphi);
+      distance = 2 * TMath::Sin(TMath::Abs(dphi) * 0.5) * TmpRadiiTPC[i];
+      if (distance < maxdist) {
+        badpoints++;
+      }
+    }
+    return (static_cast<float>(badpoints) / static_cast<float>(entries));
+  }
+
   // Get particle charge from mask
   template <typename T1>
   float getCharge(const T1& part)
@@ -555,7 +1043,7 @@ class FemtoUniverseDetaDphiStar
     double afsi1b = deltaphiconstFD * magfield * charge2 * chosenRadii / part2.pt();
     double dphis = 0.0;
 
-    if (std::abs(afsi0b) < 1.0 && std::abs(afsi0b) < 1.0) {
+    if (std::abs(afsi0b) < 1.0 && std::abs(afsi1b) < 1.0) {
       dphis = part2.phi() - part1.phi() + std::asin(afsi1b) - std::asin(afsi0b);
     }
     return dphis;

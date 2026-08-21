@@ -13,36 +13,45 @@
 /// \author Francesca Ercolessi
 /// \since 21 April 2024
 
-#include <TParameter.h>
-#include <TFile.h>
+#include "PWGCF/Femto3D/Core/femto3dPairTask.h"
+#include "PWGCF/Femto3D/DataModel/singletrackselector.h"
+
+#include "Common/Core/RecoDecay.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CCDB/CcdbApi.h>
+#include <CommonConstants/MathConstants.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/ASoAHelpers.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/BinningPolicy.h>
+#include <Framework/Configurable.h>
+#include <Framework/Expressions.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/O2DatabasePDGPlugin.h>
+#include <Framework/runDataProcessing.h>
+
 #include <TH1.h>
 #include <TH2.h>
+#include <TH3.h>
 #include <TList.h>
-#include <vector>
-#include <string>
-#include <map>
+#include <TMath.h>
+#include <TPDGCode.h>
+#include <TParticlePDG.h>
+#include <TString.h>
+
+#include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
-#include <TVector2.h>
-#include <TVector3.h>
-#include "TGrid.h"
-
-#include "CCDB/BasicCCDBManager.h"
-#include "CCDB/CcdbApi.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/HistogramRegistry.h"
-
-#include "Framework/ASoA.h"
-#include "MathUtils/Utils.h"
-#include "Framework/DataTypes.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/Expressions.h"
-
-#include "Framework/StaticFor.h"
-#include "PWGCF/Femto3D/DataModel/singletrackselector.h"
-#include "PWGCF/Femto3D/Core/femto3dPairTask.h"
+#include <vector>
 
 using namespace o2;
 using namespace o2::soa;
@@ -50,117 +59,114 @@ using namespace o2::aod;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
-struct hadronnucleicorrelation {
+enum Modes {
+  kDbarPbar = 0,
+  kDP,
+  kDbarP,
+  kDPbar,
+  kPbarP,
+  kPbarPbar,
+  kPP,
+  kPPbar
+};
 
-  // PDG codes and masses used in this analysis
-  static constexpr int pdgProton = 2212;
-  static constexpr int pdgDeuteron = 1000010020;
+enum Origin {
+  kPrimary = 0,
+  kWeakDecay,
+  kMaterial
+};
 
+struct HadronNucleiCorrelation {
+
+  static constexpr int betahasTOFthr = -100;
+
+  SliceCache cache;
+
+  Configurable<int> mode{"mode", 0, "0: antid-antip, 1: d-p, 2: antid-p, 3: d-antip, 4: antip-p, 5: antip-antip, 6: p-p, 7: p-antip"};
+
+  Configurable<bool> doRapidity{"doRapidity", false, "do rapidity dependent analysis"};
   Configurable<bool> doQA{"doQA", true, "save QA histograms"};
   Configurable<bool> doMCQA{"doMCQA", false, "save MC QA histograms"};
   Configurable<bool> isMC{"isMC", false, "is MC"};
   Configurable<bool> isMCGen{"isMCGen", false, "is isMCGen"};
   Configurable<bool> isPrim{"isPrim", true, "is isPrim"};
-  Configurable<bool> domatterGen{"domatterGen", true, "domatterGen"};
-  Configurable<bool> mcCorrelation{"mcCorrelation", false, "true: build the correlation function only for SE"};
-  Configurable<bool> docorrection{"docorrection", false, "do efficiency correction"};
+  Configurable<bool> doCorrection{"doCorrection", false, "do efficiency correction"};
+  Configurable<bool> doQuadraticPID{"doQuadraticPID", false, "do PID with sum in quadrature of TOF and TPC"};
 
   Configurable<std::string> fCorrectionPath{"fCorrectionPath", "", "Correction path to file"};
   Configurable<std::string> fCorrectionHisto{"fCorrectionHisto", "", "Correction histogram"};
-  Configurable<std::string> url{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
+  Configurable<std::string> cfgUrl{"cfgUrl", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
 
   // Event selection
-  Configurable<float> cutzvertex{"cutzvertex", 10.0, "|vertexZ| value limit"};
+  Configurable<float> cutzVertex{"cutzVertex", 10.0, "|vertexZ| value limit"};
+  Configurable<bool> removeSameBunchPileup{"removeSameBunchPileup", false, "remove Same Bunch Pileup"};
 
   // Track selection
-  Configurable<double> par0{"par0", 0.004, "par 0"};
-  Configurable<double> par1{"par1", 0.013, "par 1"};
-  Configurable<int16_t> min_TPC_nClusters{"min_TPC_nClusters", 80, "minimum number of found TPC clusters"};
-  Configurable<float> min_TPC_nCrossedRowsOverFindableCls{"min_TPC_nCrossedRowsOverFindableCls", 0.8, "n TPC Crossed Rows Over Findable Cls"};
-  Configurable<float> max_chi2_TPC{"max_chi2_TPC", 4.0f, "maximum TPC chi^2/Ncls"};
-  Configurable<float> max_chi2_ITS{"max_chi2_ITS", 36.0f, "maximum ITS chi^2/Ncls"};
-  Configurable<float> etacut{"etacut", 0.8f, "eta cut"};
-  Configurable<float> max_dcaxy{"max_dcaxy", 0.14f, "Maximum DCAxy"};
-  Configurable<float> max_dcaz{"max_dcaz", 0.1f, "Maximum DCAz"};
+  Configurable<bool> doClosePairRejection{"doClosePairRejection", false, "doClosePairRejection"};
+  Configurable<double> dcaPar0{"dcaPar0", 0.004, "par 0"};
+  Configurable<double> dcaPar1{"dcaPar1", 0.013, "par 1"};
+  Configurable<bool> doDCAZ{"doDCAZ", true, "do DCA z cut"};
+  Configurable<int16_t> minTPCnClusters{"minTPCnClusters", 80, "minimum number of found TPC clusters"};
+  Configurable<float> minTPCnCrossedRowsOverFindableCls{"minTPCnCrossedRowsOverFindableCls", 0.8, "n TPC Crossed Rows Over Findable Cls"};
+  Configurable<float> maxchi2TPC{"maxchi2TPC", 4.0f, "maximum TPC chi^2/Ncls"};
+  Configurable<float> maxchi2ITS{"maxchi2ITS", 36.0f, "maximum ITS chi^2/Ncls"};
+  Configurable<float> etaCut{"etaCut", 0.8f, "eta cut"};
+  Configurable<float> maxDCAxy{"maxDCAxy", 0.14f, "Maximum DCAxy"};
+  Configurable<float> maxDCAz{"maxDCAz", 0.1f, "Maximum DCAz"};
   Configurable<float> nsigmaTPC{"nsigmaTPC", 3.0f, "cut nsigma TPC"};
   Configurable<float> nsigmaElPr{"nsigmaElPr", 1.0f, "cut nsigma TPC El for protons"};
   Configurable<float> nsigmaElDe{"nsigmaElDe", 3.0f, "cut nsigma TPC El for protons"};
   Configurable<float> nsigmaTOF{"nsigmaTOF", 3.5f, "cut nsigma TOF"};
-  Configurable<float> pTthrpr_TOF{"pTthrpr_TOF", 0.8f, "threshold pT proton to use TOF"};
-  Configurable<float> pTthrpr_TPCEl{"pTthrpr_TPCEl", 1.0f, "threshold pT proton to use TPC El rejection"};
-  Configurable<float> pTthrde_TOF{"pTthrde_TOF", 1.0f, "threshold pT deuteron to use TOF"};
-  Configurable<float> pTthrde_TPCEl{"pTthrde_TPCEl", 1.0f, "threshold pT deuteron to use TPC El rejection"};
+  Configurable<float> nsigmaITSPr{"nsigmaITSPr", -2.0f, "cut nsigma ITS Pr"};
+  Configurable<float> nsigmaITSDe{"nsigmaITSDe", -2.0f, "cut nsigma ITS De"};
+  Configurable<bool> doITSPID{"doITSPID", true, "do ITS PID"};
+  Configurable<float> pTthrprTOF{"pTthrprTOF", 0.8f, "threshold pT proton to use TOF"};
+  Configurable<float> pTthrprTPCEl{"pTthrprTPCEl", 1.0f, "threshold pT proton to use TPC El rejection"};
+  Configurable<float> pTthrdeTOF{"pTthrdeTOF", 1.0f, "threshold pT deuteron to use TOF"};
+  Configurable<float> pTthrdeTPCEl{"pTthrdeTPCEl", 1.0f, "threshold pT deuteron to use TPC El rejection"};
   Configurable<bool> rejectionEl{"rejectionEl", true, "use TPC El rejection"};
-  Configurable<float> max_tpcSharedCls{"max_tpcSharedCls", 0.4, "maximum fraction of TPC shared clasters"};
-  Configurable<int> min_itsNCls{"min_itsNCls", 0, "minimum allowed number of ITS clasters"};
+  Configurable<float> maxtpcSharedCls{"maxtpcSharedCls", 0.4, "maximum fraction of TPC shared clasters"};
+  Configurable<int> minitsNCls{"minitsNCls", 0, "minimum allowed number of ITS clasters"};
   Configurable<int> maxmixcollsGen{"maxmixcollsGen", 100, "maxmixcollsGen"};
+  Configurable<float> radiusTPC{"radiusTPC", 1.2, "TPC radius to calculate phi_star for"};
+  Configurable<float> dEta{"dEta", 0.01, "minimum allowed difference in eta between two tracks in a pair"};
+  Configurable<float> dPhi{"dPhi", 0.01, "minimum allowed difference in phi_star between two tracks in a pair"};
+  Configurable<float> yRap{"yRap", 0.5, "rapidity"};
 
   // Mixing parameters
-  Configurable<int> _vertexNbinsToMix{"vertexNbinsToMix", 10, "Number of vertexZ bins for the mixing"};
-  Configurable<int> _multNsubBins{"multSubBins", 10, "number of sub-bins to perform the mixing within"};
+  ConfigurableAxis confMultBins{"confMultBins", {VARIABLE_WIDTH, 0.0f, 4.0f, 8.0f, 12.0f, 16.0f, 20.0f, 24.0f, 28.0f, 50.0f, 100.0f, 99999.f}, "Mixing bins - multiplicity"};
+  ConfigurableAxis confVtxBins{"confVtxBins", {VARIABLE_WIDTH, -10.0f, -8.f, -6.f, -4.f, -2.f, 0.f, 2.f, 4.f, 6.f, 8.f, 10.f}, "Mixing bins - z-vertex"};
+  ColumnBinningPolicy<aod::singletrackselector::PosZ, aod::singletrackselector::Mult> colBinning{{confVtxBins, confMultBins}, true};
 
   // pT/A bins
   Configurable<std::vector<double>> pTBins{"pTBins", {0.6f, 1.0f, 1.2f, 2.f}, "p_{T} bins"};
 
-  ConfigurableAxis AxisNSigma{"AxisNSigma", {35, -7.f, 7.f}, "n#sigma"};
+  ConfigurableAxis axisNSigma{"axisNSigma", {35, -7.f, 7.f}, "n#sigma"};
+  ConfigurableAxis deltaPhiAxis = {"deltaPhiAxis", {46, -1 * o2::constants::math::PIHalf, 3 * o2::constants::math::PIHalf}, "#Delta#phi (rad)"};
 
   using FilteredCollisions = soa::Filtered<aod::SingleCollSels>;
-  using SimCollisions = aod::McCollisions;
+  using FilteredCollisionsExtra = soa::Filtered<soa::Join<aod::SingleCollSels, aod::SingleCollExtras>>;
+  using SimCollisions = soa::Filtered<aod::McCollisions>;
   using SimParticles = aod::McParticles;
-  using FilteredTracks = soa::Filtered<soa::Join<aod::SingleTrackSels, aod::SingleTrkExtras, aod::SinglePIDEls, aod::SinglePIDPrs, aod::SinglePIDDes, aod::SinglePIDHes>>;                      // new tables (v3)
-  using FilteredTracksMC = soa::Filtered<soa::Join<aod::SingleTrackSels, aod::SingleTrkMCs, aod::SingleTrkExtras, aod::SinglePIDEls, aod::SinglePIDPrs, aod::SinglePIDDes, aod::SinglePIDHes>>; // new tables (v3)
+  using FilteredTracks = soa::Filtered<soa::Join<aod::SingleTrackSels, aod::SingleTrkExtras, aod::SinglePIDEls, aod::SinglePIDPrs, aod::SinglePIDDes>>;                      // new tables (v3)
+  using FilteredTracksMC = soa::Filtered<soa::Join<aod::SingleTrackSels, aod::SingleTrkMCs, aod::SingleTrkExtras, aod::SinglePIDEls, aod::SinglePIDPrs, aod::SinglePIDDes>>; // new tables (v3)
 
   HistogramRegistry registry{"registry"};
   HistogramRegistry QA{"QA"};
 
-  typedef std::shared_ptr<FilteredTracks::iterator> trkType;
-  typedef std::shared_ptr<FilteredTracksMC::iterator> trkTypeMC;
-  typedef std::shared_ptr<SimParticles::iterator> partTypeMC;
-  typedef std::shared_ptr<FilteredCollisions::iterator> colType;
-  typedef std::shared_ptr<SimCollisions::iterator> MCcolType;
+  using trkType = const FilteredTracks::iterator*;
+  // using trkTypeMC = const FilteredTracksMC::iterator*;
+  // typedef std::shared_ptr<FilteredCollisions::iterator> colType;
+  // typedef std::shared_ptr<SimCollisions::iterator> MCcolType;
 
-  // key: int64_t - value: vector of trkType objects
-  std::map<int64_t, std::vector<trkType>> selectedtracks_p;
-  std::map<int64_t, std::vector<trkType>> selectedtracks_d;
-  std::map<int64_t, std::vector<trkType>> selectedtracks_antid;
-  std::map<int64_t, std::vector<trkType>> selectedtracks_antip;
+  std::unique_ptr<o2::aod::singletrackselector::FemtoPair<trkType>> Pair = std::make_unique<o2::aod::singletrackselector::FemtoPair<trkType>>();
+  // std::unique_ptr<o2::aod::singletrackselector::FemtoPair<trkTypeMC>> PairMC = std::make_unique<o2::aod::singletrackselector::FemtoPair<trkTypeMC>>();
 
-  // key: int64_t - value: vector of trkType objects
-  std::map<int64_t, std::vector<partTypeMC>> selectedparticlesMC_d;
-  std::map<int64_t, std::vector<partTypeMC>> selectedparticlesMC_p;
-  std::map<int64_t, std::vector<partTypeMC>> selectedparticlesMC_antid;
-  std::map<int64_t, std::vector<partTypeMC>> selectedparticlesMC_antip;
-
-  // key: int64_t - value: vector of trkType objects
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksMC_d;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksMC_p;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksMC_antid;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksMC_antip;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksPIDMC_d;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksPIDMC_p;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksPIDMC_antid;
-  std::map<int64_t, std::vector<trkTypeMC>> selectedtracksPIDMC_antip;
-
-  // key: pair of an integer and a float - value: vector of colType objects
-  // for each key I have a vector of collisions
-  std::map<std::pair<int, float>, std::vector<colType>> mixbins_antidantip;
-  std::map<std::pair<int, float>, std::vector<colType>> mixbinsPID_antidantip;
-  std::map<float, std::vector<MCcolType>> mixbinsMC_antidantip;
-  std::map<float, std::vector<MCcolType>> mixbinsMC_dp;
-
-  std::vector<std::shared_ptr<TH3>> hEtaPhi_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hEtaPhi_AntiDeAntiPr_ME;
-  std::vector<std::shared_ptr<TH3>> hCorrEtaPhi_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hCorrEtaPhi_AntiDeAntiPr_ME;
-
-  std::vector<std::shared_ptr<TH3>> hEtaPhiRec_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hEtaPhiGen_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hEtaPhiRec_AntiDeAntiPr_ME;
-  std::vector<std::shared_ptr<TH3>> hEtaPhiGen_AntiDeAntiPr_ME;
-  std::vector<std::shared_ptr<TH3>> hPIDEtaPhiRec_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hPIDEtaPhiGen_AntiDeAntiPr_SE;
-  std::vector<std::shared_ptr<TH3>> hPIDEtaPhiRec_AntiDeAntiPr_ME;
-  std::vector<std::shared_ptr<TH3>> hPIDEtaPhiGen_AntiDeAntiPr_ME;
+  // Data histograms
+  std::vector<std::shared_ptr<TH3>> hEtaPhi_SE;
+  std::vector<std::shared_ptr<TH3>> hEtaPhi_ME;
+  std::vector<std::shared_ptr<TH3>> hCorrEtaPhi_SE;
+  std::vector<std::shared_ptr<TH3>> hCorrEtaPhi_ME;
 
   int nBinspT;
   TH2F* hEffpTEta_proton;
@@ -171,15 +177,17 @@ struct hadronnucleicorrelation {
   Service<o2::ccdb::BasicCCDBManager> ccdb;
   o2::ccdb::CcdbApi ccdbApi;
 
+  Service<o2::framework::O2DatabasePDG> pdgDB;
+
   void init(o2::framework::InitContext&)
   {
-    ccdb->setURL(url.value);
+    ccdb->setURL(cfgUrl.value);
     ccdb->setCaching(true);
     ccdb->setLocalObjectValidityChecking();
     ccdb->setCreatedNotAfter(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
     ccdb->setFatalWhenNull(false);
 
-    if (docorrection) {
+    if (doCorrection) {
       GetCorrection(ccdb, TString(fCorrectionPath), TString(fCorrectionHisto));
     } else {
       hEffpTEta_proton = nullptr;
@@ -190,86 +198,102 @@ struct hadronnucleicorrelation {
 
     AxisSpec ptBinnedAxis = {pTBins, "#it{p}_{T} of #bar{p} (GeV/c)"};
     AxisSpec etaAxis = {100, -1., 1., "#eta"};
-    AxisSpec phiAxis = {157, 0., 2 * TMath::Pi(), "#phi (rad)"};
+    AxisSpec phiAxis = {157, 0., o2::constants::math::TwoPI, "#phi (rad)"};
     AxisSpec pTAxis = {200, -10.f, 10.f, "p_{T} GeV/c"};
     AxisSpec pTAxis_small = {100, -5.f, 5.f, "p_{T} GeV/c"};
 
-    AxisSpec DeltaEtaAxis = {100, -1.5, 1.5, "#Delta#eta"};
-    AxisSpec DeltaPhiAxis = {60, -TMath::Pi() / 2, 1.5 * TMath::Pi(), "#Delta#phi (rad)"};
+    AxisSpec DeltaEtaAxis = {300, -1.5, 1.5, "#Delta#eta"};
+    AxisSpec DeltaRapAxis = {300, -1.5, 1.5, "#Delta y"};
 
-    registry.add("hNEvents", "hNEvents", {HistType::kTH1D, {{5, 0.f, 5.f}}});
+    registry.add("hNEvents", "hNEvents", {HistType::kTH1D, {{7, 0.f, 7.f}}});
     registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(1, "Selected");
-    registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(2, "events with #bar{d}-#bar{p}");
-    registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(3, "events with d-p");
-    registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(4, "events with #bar{d}");
-    registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(5, "events with d");
+    registry.get<TH1>(HIST("hNEvents"))->GetXaxis()->SetBinLabel(2, "Mixing");
+
+    registry.add("hNtrig_total", "hNtrig_total", {HistType::kTH1D, {ptBinnedAxis}});
 
     nBinspT = pTBins.value.size() - 1;
 
-    if (mcCorrelation) {
-      for (int i = 0; i < nBinspT; i++) {
-        auto htempSERec_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhiRec_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                         Form("Rec #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hEtaPhiRec_AntiDeAntiPr_SE.push_back(std::move(htempSERec_AntiDeAntiPr));
-        auto htempMERec_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhiRec_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                         Form("Rec #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hEtaPhiRec_AntiDeAntiPr_ME.push_back(std::move(htempMERec_AntiDeAntiPr));
-
-        auto htempPIDSERec_AntiDeAntiPr = registry.add<TH3>(Form("hPIDEtaPhiRec_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                            Form("Rec #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        auto htempPIDSEGen_AntiDeAntiPr = registry.add<TH3>(Form("hPIDEtaPhiGen_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                            Form("Gen #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hPIDEtaPhiRec_AntiDeAntiPr_SE.push_back(std::move(htempPIDSERec_AntiDeAntiPr));
-        hPIDEtaPhiGen_AntiDeAntiPr_SE.push_back(std::move(htempPIDSEGen_AntiDeAntiPr));
-        auto htempPIDMERec_AntiDeAntiPr = registry.add<TH3>(Form("hPIDEtaPhiRec_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                            Form("Rec #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        auto htempPIDMEGen_AntiDeAntiPr = registry.add<TH3>(Form("hPIDEtaPhiGen_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                            Form("Gen #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hPIDEtaPhiRec_AntiDeAntiPr_ME.push_back(std::move(htempPIDMERec_AntiDeAntiPr));
-        hPIDEtaPhiGen_AntiDeAntiPr_ME.push_back(std::move(htempPIDMEGen_AntiDeAntiPr));
-      }
-    }
-
-    if (isMCGen || mcCorrelation) {
-      for (int i = 0; i < nBinspT; i++) {
-        auto htempSEGen_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhiGen_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                         Form("Gen #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hEtaPhiGen_AntiDeAntiPr_SE.push_back(std::move(htempSEGen_AntiDeAntiPr));
-        auto htempMEGen_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhiGen_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10),
-                                                         Form("Gen #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hEtaPhiGen_AntiDeAntiPr_ME.push_back(std::move(htempMEGen_AntiDeAntiPr));
-      }
+    TString name = "AntiDeAntiPr";
+    switch (mode) {
+      case kDP:
+        name = "DePr";
+        break;
+      case kDbarP:
+        name = "AntiDePr";
+        break;
+      case kDPbar:
+        name = "DeAntiPr";
+        break;
+      case kPbarP:
+        name = "AntiPrPr";
+        break;
+      case kPbarPbar:
+        name = "AntiPrAntiPr";
+        break;
+      case kPP:
+        name = "PrPr";
+        break;
+      case kPPbar:
+        name = "PrAntiPr";
+        break;
     }
 
     if (!isMC) {
       for (int i = 0; i < nBinspT; i++) {
-        auto htempSE_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        auto htempME_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hEtaPhi_AntiDeAntiPr_SE.push_back(std::move(htempSE_AntiDeAntiPr));
-        hEtaPhi_AntiDeAntiPr_ME.push_back(std::move(htempME_AntiDeAntiPr));
 
-        auto hCorrtempSE_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_AntiDeAntiPr_SE_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        auto hCorrtempME_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_AntiDeAntiPr_ME_pt%02.0f%02.0f", pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta#eta#Delta#phi (%.1f<p_{T} #bar{d} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, DeltaPhiAxis, ptBinnedAxis}});
-        hCorrEtaPhi_AntiDeAntiPr_SE.push_back(std::move(hCorrtempSE_AntiDeAntiPr));
-        hCorrEtaPhi_AntiDeAntiPr_ME.push_back(std::move(hCorrtempME_AntiDeAntiPr));
+        if (doRapidity) {
+
+          auto htempSE_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_%s_SE_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta y #Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaRapAxis, deltaPhiAxis, ptBinnedAxis}});
+          auto htempME_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_%s_ME_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta y #Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaRapAxis, deltaPhiAxis, ptBinnedAxis}});
+          hEtaPhi_SE.push_back(std::move(htempSE_AntiDeAntiPr));
+          hEtaPhi_ME.push_back(std::move(htempME_AntiDeAntiPr));
+
+          auto hCorrtempSE_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_%s_SE_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta y #Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaRapAxis, deltaPhiAxis, ptBinnedAxis}});
+          auto hCorrtempME_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_%s_ME_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta y #Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaRapAxis, deltaPhiAxis, ptBinnedAxis}});
+          hCorrEtaPhi_SE.push_back(std::move(hCorrtempSE_AntiDeAntiPr));
+          hCorrEtaPhi_ME.push_back(std::move(hCorrtempME_AntiDeAntiPr));
+        } else {
+
+          auto htempSE_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_%s_SE_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta#eta#Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, deltaPhiAxis, ptBinnedAxis}});
+          auto htempME_AntiDeAntiPr = registry.add<TH3>(Form("hEtaPhi_%s_ME_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("Raw #Delta#eta#Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, deltaPhiAxis, ptBinnedAxis}});
+          hEtaPhi_SE.push_back(std::move(htempSE_AntiDeAntiPr));
+          hEtaPhi_ME.push_back(std::move(htempME_AntiDeAntiPr));
+
+          auto hCorrtempSE_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_%s_SE_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta#eta#Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, deltaPhiAxis, ptBinnedAxis}});
+          auto hCorrtempME_AntiDeAntiPr = registry.add<TH3>(Form("hCorrEtaPhi_%s_ME_pt%02.0f%02.0f", name.Data(), pTBins.value.at(i) * 10, pTBins.value.at(i + 1) * 10), Form("#Delta#eta#Delta#phi (%.1f<p_{T}^{assoc} <%.1f GeV/c)", pTBins.value.at(i), pTBins.value.at(i + 1)), {HistType::kTH3F, {DeltaEtaAxis, deltaPhiAxis, ptBinnedAxis}});
+          hCorrEtaPhi_SE.push_back(std::move(hCorrtempSE_AntiDeAntiPr));
+          hCorrEtaPhi_ME.push_back(std::move(hCorrtempME_AntiDeAntiPr));
+        }
       }
     }
+
+    registry.add("hPrDCAxy", "DCAxy p", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+    registry.add("hAntiPrDCAxy", "DCAxy #bar{p}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+    registry.add("hDeDCAxy", "DCAxy d", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+    registry.add("hAntiDeDCAxy", "DCAxy #bar{d}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+    registry.add("hMult", "multiplicity", {HistType::kTH1D, {{200, 0.f, 200.f, "N_{ch}"}}});
 
     if (doQA) {
       // Track QA
       QA.add("QA/hVtxZ_trk", "#it{z}_{vtx}", {HistType::kTH1D, {{150, -15.f, 15.f, "#it{z}_{vtx} (cm)"}}});
       QA.add("QA/hTPCnClusters", "N TPC Clusters; N TPC Clusters", {HistType::kTH1D, {{200, 0.f, 200.f}}});
+      QA.add("QA/hTPCSharedClusters", "N TPC Shared Clusters; N TPC SharedClusters", {HistType::kTH1D, {{100, 0.f, 1.f}}});
       QA.add("QA/hTPCchi2", "TPC chi2/Ncls; TPC chi2/Ncls", {HistType::kTH1D, {{100, 0.f, 10.f}}});
       QA.add("QA/hTPCcrossedRowsOverFindableCls", "TPC crossed Rows Over Findable Cls; TPC Crossed Rows Over Findable Cls", {HistType::kTH1D, {{100, 0.f, 2.f}}});
       QA.add("QA/hITSchi2", "ITS chi2/Ncls; ITS chi2/Ncls", {HistType::kTH1D, {{100, 0.f, 20.f}}});
       QA.add("QA/hDCAxy", "DCAxy", {HistType::kTH2D, {{200, -0.2f, 0.2f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
       QA.add("QA/hDCAz", "DCAz", {HistType::kTH2D, {{200, -0.2f, 0.2f, "DCA z (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
       QA.add("QA/TPCChi2VsPZ", "TPCChi2VsPZ", {HistType::kTH2D, {{100, 0.f, 10.f, "p_{TPC}/Z (GeV/c)"}, {120, 0.f, 6.f, "TPC Chi2"}}});
-      QA.add("QA/hnSigmaTPCVsPt_El", "n#sigma TPC vs p_{T} for e hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-      QA.add("QA/hnSigmaTPCVsPt_Pr", "n#sigma TPC vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-      QA.add("QA/hnSigmaTPCVsPt_De", "n#sigma TPC vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-      QA.add("QA/hnSigmaTOFVsPt_Pr", "n#sigma TOF vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-      QA.add("QA/hnSigmaTOFVsPt_De", "n#sigma TOF vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, AxisNSigma}});
+      QA.add("QA/h2dTPCTOF_Pr", "n#sigma TPC vs n#sigma TOF; n#sigma TPC; n#sigma TOF", {HistType::kTH2D, {axisNSigma, axisNSigma}});
+      QA.add("QA/h2dTPCTOF_AntiPr", "n#sigma TPC vs n#sigma TOF; n#sigma TPC; n#sigma TOF", {HistType::kTH2D, {axisNSigma, axisNSigma}});
+      QA.add("QA/hnSigmaTPCVsPt_El", "n#sigma TPC vs p_{T} for e hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaTPCVsPt_Pr", "n#sigma TPC vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaTPCVsPt_De", "n#sigma TPC vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaTOFVsPt_Pr", "n#sigma TOF vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaTOFVsPt_De", "n#sigma TOF vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaITSVsPt_Pr", "n#sigma ITS vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma ITS", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hnSigmaITSVsPt_De", "n#sigma ITS vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma ITS", {HistType::kTH2D, {pTAxis, axisNSigma}});
+      QA.add("QA/hdEtadPhistar", ";dPhi*;dEta ", {HistType::kTH2D, {{101, -0.2, 0.2, "dPhi*"}, {101, -0.2, 0.2, "dEta"}}});
 
       if (!isMC) {
         QA.add("QA/hEtaPr", Form("#eta ditribution for p"), {HistType::kTH1F, {etaAxis}});
@@ -281,14 +305,31 @@ struct hadronnucleicorrelation {
         QA.add("QA/hEtaAntiDe", Form("#eta ditribution for #bar{d}"), {HistType::kTH1F, {etaAxis}});
         QA.add("QA/hPhiAntiDe", Form("#phi ditribution for #bar{d}"), {HistType::kTH1F, {phiAxis}});
 
-        QA.add("QA/hnSigmaTPCVsPt_Pr_AfterSel", "n#sigma TPC vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-        QA.add("QA/hnSigmaTPCVsPt_De_AfterSel", "n#sigma TPC vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-        QA.add("QA/hnSigmaTOFVsPt_Pr_AfterSel", "n#sigma TOF vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, AxisNSigma}});
-        QA.add("QA/hnSigmaTOFVsPt_De_AfterSel", "n#sigma TOF vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, AxisNSigma}});
+        QA.add("QA/hnSigmaTPCVsPt_Pr_AfterSel", "n#sigma TPC vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/hnSigmaTPCVsPt_De_AfterSel", "n#sigma TPC vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/hnSigmaTOFVsPt_Pr_AfterSel", "n#sigma TOF vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/hnSigmaTOFVsPt_De_AfterSel", "n#sigma TOF vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/hnSigmaITSVsPt_Pr_AfterSel", "n#sigma ITS vs p_{T} for p hypothesis (all tracks); p_{T} (GeV/c); n#sigma ITS", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/hnSigmaITSVsPt_De_AfterSel", "n#sigma ITS vs p_{T} for d hypothesis (all tracks); p_{T} (GeV/c); n#sigma ITS", {HistType::kTH2D, {pTAxis, axisNSigma}});
+        QA.add("QA/h2dTPCTOF_Pr_AfterSel", "n#sigma TPC vs n#sigma TOF; n#sigma TPC; n#sigma TOF", {HistType::kTH2D, {axisNSigma, axisNSigma}});
+        QA.add("QA/h2dTPCTOF_AntiPr_AfterSel", "n#sigma TPC vs n#sigma TOF; n#sigma TPC; n#sigma TOF", {HistType::kTH2D, {axisNSigma, axisNSigma}});
       }
     }
 
-    if (isMC) {
+    if (isMC && doprocessMC) {
+      registry.add("hPrimPrDCAxy", "DCAxy p", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hPrimAntiPrDCAxy", "DCAxy #bar{p}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hPrimDeDCAxy", "DCAxy d", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hPrimAntiDeDCAxy", "DCAxy #bar{d}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecMatPrDCAxy", "DCAxy p", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecMatAntiPrDCAxy", "DCAxy #bar{p}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecMatDeDCAxy", "DCAxy d", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecMatAntiDeDCAxy", "DCAxy #bar{d}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecWeakPrDCAxy", "DCAxy p", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecWeakAntiPrDCAxy", "DCAxy #bar{p}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecWeakDeDCAxy", "DCAxy d", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+      registry.add("hSecWeakAntiDeDCAxy", "DCAxy #bar{d}", {HistType::kTH2D, {{600, -3.f, 3.f, "DCA xy (cm)"}, {100, 0.f, 10.f, "p_{T} GeV/c"}}});
+
       registry.add("hReco_EtaPhiPt_Proton", "Gen (anti)protons in reco collisions", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
       registry.add("hReco_EtaPhiPt_Deuteron", "Gen (anti)deuteron in reco collisions", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
       registry.add("hReco_PID_EtaPhiPt_Proton", "Gen (anti)protons + PID in reco collisions", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
@@ -301,10 +342,10 @@ struct hadronnucleicorrelation {
       registry.add("hSec_EtaPhiPt_Proton", "Secondary (anti)protons", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
       registry.add("hPrimSec_EtaPhiPt_Proton", "Primary + Secondary (anti)protons", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
 
-      registry.add("hnSigmaTPCVsPt_Pr_MC", "n#sigma TPC vs p_{T} for p hypothesis true MC; p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2F, {pTAxis, AxisNSigma}});
-      registry.add("hnSigmaTPCVsPt_De_MC", "n#sigma TPC vs p_{T} for d hypothesis true MC; p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2F, {pTAxis, AxisNSigma}});
-      registry.add("hnSigmaTOFVsPt_Pr_MC", "n#sigma TOF vs p_{T} for p hypothesis true MC; p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2F, {pTAxis, AxisNSigma}});
-      registry.add("hnSigmaTOFVsPt_De_MC", "n#sigma TOF vs p_{T} for d hypothesis true MC; p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2F, {pTAxis, AxisNSigma}});
+      registry.add("hnSigmaTPCVsPt_Pr_MC", "n#sigma TPC vs p_{T} for p hypothesis true MC; p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2F, {pTAxis, axisNSigma}});
+      registry.add("hnSigmaTPCVsPt_De_MC", "n#sigma TPC vs p_{T} for d hypothesis true MC; p_{T} (GeV/c); n#sigma TPC", {HistType::kTH2F, {pTAxis, axisNSigma}});
+      registry.add("hnSigmaTOFVsPt_Pr_MC", "n#sigma TOF vs p_{T} for p hypothesis true MC; p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2F, {pTAxis, axisNSigma}});
+      registry.add("hnSigmaTOFVsPt_De_MC", "n#sigma TOF vs p_{T} for d hypothesis true MC; p_{T} (GeV/c); n#sigma TOF", {HistType::kTH2F, {pTAxis, axisNSigma}});
 
       registry.add("hResPt_Proton", "; p_{T}(gen) [GeV/c]; p_{T}(reco) - p_{T}(gen) ", {HistType::kTH2F, {{100, 0.f, 10.f, "p_{T}(gen) GeV/c"}, {200, -1.f, 1.f, "p_{T}(reco) - p_{T}(gen) "}}});
       registry.add("hResPt_Deuteron", "; p_{T}(gen) [GeV/c]; p_{T}(reco) - p_{T}(gen) ", {HistType::kTH2F, {{100, 0.f, 10.f, "p_{T}(gen) GeV/c"}, {200, -1.f, 1.f, "p_{T}(reco) - p_{T}(gen) "}}});
@@ -317,14 +358,15 @@ struct hadronnucleicorrelation {
       registry.add("hDenominatorPurity_Deuteron", " d(#bar{d}); p_{T} (GeV/c); (S + B)", {HistType::kTH1F, {pTAxis_small}});
 
       if (doMCQA) {
+
         registry.add("hResEta_Proton", "; #eta(gen); #eta(reco) - #eta(gen)  ", {HistType::kTH2F, {{100, -1.f, 1.f, "#eta(gen)"}, {200, -0.5f, 0.5f, "#eta(reco) - #eta(gen) "}}});
         registry.add("hResEta_Deuteron", "; #eta(gen); #eta(reco) - #eta(gen) ", {HistType::kTH2F, {{100, -1.f, 1.f, "#eta(gen)"}, {200, -0.5f, 0.5f, "#eta(reco) - #eta(gen) "}}});
-        registry.add("hResPhi_Proton", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, 2 * TMath::Pi(), "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
-        registry.add("hResPhi_Deuteron", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, 2 * TMath::Pi(), "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
+        registry.add("hResPhi_Proton", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, o2::constants::math::TwoPI, "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
+        registry.add("hResPhi_Deuteron", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, o2::constants::math::TwoPI, "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
         registry.add("hResEta_AntiProton", "; #eta(gen); #eta(reco) - #eta(gen)  ", {HistType::kTH2F, {{100, -1.f, 1.f, "#eta(gen)"}, {200, -0.5f, 0.5f, "#eta(reco) - #eta(gen) "}}});
         registry.add("hResEta_AntiDeuteron", "; #eta(gen); #eta(reco) - #eta(gen) ", {HistType::kTH2F, {{100, -1.f, 1.f, "#eta(gen)"}, {200, -0.5f, 0.5f, "#eta(reco) - #eta(gen) "}}});
-        registry.add("hResPhi_AntiProton", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, 2 * TMath::Pi(), "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
-        registry.add("hResPhi_AntiDeuteron", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, 2 * TMath::Pi(), "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
+        registry.add("hResPhi_AntiProton", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, o2::constants::math::TwoPI, "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
+        registry.add("hResPhi_AntiDeuteron", "; #phi(gen); #phi(reco) - #phi(gen)", {HistType::kTH2F, {{100, 0.f, o2::constants::math::TwoPI, "#phi(gen)"}, {200, -0.5f, 0.5f, "#phi(reco) - #phi(gen)"}}});
 
         registry.add("hNumeratorPurity_Proton_TPC", " p(#bar{p}); p_{T} (GeV/c);S", {HistType::kTH1F, {pTAxis_small}});
         registry.add("hNumeratorPurity_Deuteron_TPC", " d(#bar{d}); p_{T} (GeV/c);S", {HistType::kTH1F, {pTAxis_small}});
@@ -363,54 +405,119 @@ struct hadronnucleicorrelation {
     if (isMCGen) {
       registry.add("Generated/hNEventsMC", "hNEventsMC", {HistType::kTH1D, {{1, 0.f, 1.f}}});
       registry.get<TH1>(HIST("Generated/hNEventsMC"))->GetXaxis()->SetBinLabel(1, "All");
+
+      registry.add("hGen_EtaPhiPt_Proton", "Gen (anti)protons in gen collisions", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
+      registry.add("hGen_EtaPhiPt_Deuteron", "Gen (anti)deuteron in gen collisions", {HistType::kTH3F, {etaAxis, phiAxis, pTAxis_small}});
+
+      auto hp = registry.add<TH1>("Generated/hQAProtons", "hQAProtons", {HistType::kTH1D, {{5, 0.f, 5.f}}});
+      hp->GetXaxis()->SetBinLabel(1, "All");
+      hp->GetXaxis()->SetBinLabel(2, "PhysicalPrimary");
+      hp->GetXaxis()->SetBinLabel(3, "|#eta|<0.8");
+      hp->GetXaxis()->SetBinLabel(4, "no daughters");
+      hp->GetXaxis()->SetBinLabel(5, "d daughter");
+
+      auto hd = registry.add<TH1>("Generated/hQADeuterons", "hQADeuterons", {HistType::kTH1D, {{3, 0.f, 3.f}}});
+      hd->GetXaxis()->SetBinLabel(1, "All");
+      hd->GetXaxis()->SetBinLabel(2, "PhysicalPrimary");
+      hd->GetXaxis()->SetBinLabel(3, "|#eta|<0.8");
+
+      registry.add("Generated/hDeuteronsVsPt", "hDeuteronsVsPt;  p_{T} (GeV/c);", {HistType::kTH1D, {{100, 0.f, 10.f}}});
+      registry.add("Generated/hAntiDeuteronsVsPt", "hAntiDeuteronsVsPt;  p_{T} (GeV/c);", {HistType::kTH1D, {{100, 0.f, 10.f}}});
     }
   }
 
   // Filters
-  Filter vertexFilter = nabs(o2::aod::singletrackselector::posZ) <= cutzvertex;
-  Filter trackFilter = o2::aod::singletrackselector::tpcNClsFound >= min_TPC_nClusters &&
-                       o2::aod::singletrackselector::unPack<singletrackselector::binning::chi2>(o2::aod::singletrackselector::storedTpcChi2NCl) <= max_chi2_TPC &&
-                       o2::aod::singletrackselector::unPack<singletrackselector::binning::rowsOverFindable>(o2::aod::singletrackselector::storedTpcCrossedRowsOverFindableCls) >= min_TPC_nCrossedRowsOverFindableCls &&
-                       o2::aod::singletrackselector::unPack<singletrackselector::binning::chi2>(o2::aod::singletrackselector::storedItsChi2NCl) <= max_chi2_ITS &&
-                       nabs(o2::aod::singletrackselector::unPack<singletrackselector::binning::dca>(o2::aod::singletrackselector::storedDcaXY)) <= max_dcaxy &&
-                       nabs(o2::aod::singletrackselector::unPack<singletrackselector::binning::dca>(o2::aod::singletrackselector::storedDcaXY)) <= max_dcaz &&
-                       nabs(o2::aod::singletrackselector::eta) <= etacut;
+  Filter vertexFilter = nabs(o2::aod::singletrackselector::posZ) <= cutzVertex;
+  Filter trackFilter = o2::aod::singletrackselector::tpcNClsFound >= minTPCnClusters &&
+                       o2::aod::singletrackselector::unPack<singletrackselector::binning::chi2>(o2::aod::singletrackselector::storedTpcChi2NCl) <= maxchi2TPC &&
+                       o2::aod::singletrackselector::unPack<singletrackselector::binning::rowsOverFindable>(o2::aod::singletrackselector::storedTpcCrossedRowsOverFindableCls) >= minTPCnCrossedRowsOverFindableCls &&
+                       o2::aod::singletrackselector::unPack<singletrackselector::binning::chi2>(o2::aod::singletrackselector::storedItsChi2NCl) <= maxchi2ITS &&
+                       nabs(o2::aod::singletrackselector::unPack<singletrackselector::binning::dca>(o2::aod::singletrackselector::storedDcaXY)) <= maxDCAxy &&
+                       nabs(o2::aod::singletrackselector::unPack<singletrackselector::binning::dca>(o2::aod::singletrackselector::storedDcaXY)) <= maxDCAz &&
+                       nabs(o2::aod::singletrackselector::eta) <= etaCut;
+
+  Filter simvertexFilter = nabs(o2::aod::mccollision::posZ) <= cutzVertex;
 
   template <typename Type>
   bool IsProton(Type const& track, int sign)
   {
     bool isProton = false;
 
-    if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC) {
-      if (track.pt() < pTthrpr_TOF) {
-        if (sign > 0) {
-          if (track.sign() > 0) {
-            isProton = true;
-          } else if (track.sign() < 0) {
-            isProton = false;
+    bool isTPCPID = std::abs(track.tpcNSigmaPr()) < nsigmaTPC;
+    bool isTOFPID = std::abs(track.tofNSigmaPr()) < nsigmaTOF;
+    bool isTPCElRejection = rejectionEl && track.beta() < betahasTOFthr && track.pt() < pTthrprTPCEl && track.tpcNSigmaEl() >= nsigmaElPr;
+    bool isITSPID = track.itsNSigmaPr() > nsigmaITSPr;
+
+    bool isQuadraticPID = TMath::Sqrt(track.tpcNSigmaPr() * track.tpcNSigmaPr() + track.tofNSigmaPr() * track.tofNSigmaPr()) < nsigmaTPC;
+
+    if (!doQuadraticPID) {
+      if (isTPCPID) {
+        if (track.pt() < pTthrprTOF) {
+          if (!doITSPID || isITSPID) {
+            if (sign > 0) {
+              if (track.sign() > 0) {
+                isProton = true;
+              } else if (track.sign() < 0) {
+                isProton = false;
+              }
+            } else if (sign < 0) {
+              if (track.sign() > 0) {
+                isProton = false;
+              } else if (track.sign() < 0) {
+                isProton = true;
+              }
+            }
           }
-        } else if (sign < 0) {
-          if (track.sign() > 0) {
-            isProton = false;
-          } else if (track.sign() < 0) {
-            isProton = true;
+        } else if (isTPCElRejection) {
+          if (sign > 0) {
+            if (track.sign() > 0) {
+              isProton = true;
+            } else if (track.sign() < 0) {
+              isProton = false;
+            }
+          } else if (sign < 0) {
+            if (track.sign() > 0) {
+              isProton = false;
+            } else if (track.sign() < 0) {
+              isProton = true;
+            }
+          }
+        } else if (isTOFPID) {
+          if (sign > 0) {
+            if (track.sign() > 0) {
+              isProton = true;
+            } else if (track.sign() < 0) {
+              isProton = false;
+            }
+          } else if (sign < 0) {
+            if (track.sign() > 0) {
+              isProton = false;
+            } else if (track.sign() < 0) {
+              isProton = true;
+            }
           }
         }
-      } else if (rejectionEl && track.beta() < -100 && track.pt() < pTthrpr_TPCEl && track.tpcNSigmaEl() >= nsigmaElPr) {
-        if (sign > 0) {
-          if (track.sign() > 0) {
-            isProton = true;
-          } else if (track.sign() < 0) {
-            isProton = false;
-          }
-        } else if (sign < 0) {
-          if (track.sign() > 0) {
-            isProton = false;
-          } else if (track.sign() < 0) {
-            isProton = true;
+      }
+    } else {
+      if (track.pt() < pTthrprTOF) {
+        if (isTPCPID) {
+          if (!doITSPID || isITSPID) {
+            if (sign > 0) {
+              if (track.sign() > 0) {
+                isProton = true;
+              } else if (track.sign() < 0) {
+                isProton = false;
+              }
+            } else if (sign < 0) {
+              if (track.sign() > 0) {
+                isProton = false;
+              } else if (track.sign() < 0) {
+                isProton = true;
+              }
+            }
           }
         }
-      } else if (std::abs(track.tofNSigmaPr()) < nsigmaTOF) {
+      } else if (isQuadraticPID) {
         if (sign > 0) {
           if (track.sign() > 0) {
             isProton = true;
@@ -433,37 +540,81 @@ struct hadronnucleicorrelation {
   bool IsDeuteron(Type const& track, int sign)
   {
     bool isDeuteron = false;
+    bool isTPCPID = std::abs(track.tpcNSigmaDe()) < nsigmaTPC;
+    bool isTOFPID = std::abs(track.tofNSigmaDe()) < nsigmaTOF;
+    bool isTPCElRejection = rejectionEl && track.beta() < betahasTOFthr && track.pt() < pTthrdeTPCEl && track.tpcNSigmaEl() >= nsigmaElDe;
+    bool isITSPID = track.itsNSigmaDe() > nsigmaITSDe;
 
-    if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC) {
-      if (track.pt() < pTthrde_TOF) {
-        if (sign > 0) {
-          if (track.sign() > 0) {
-            isDeuteron = true;
-          } else if (track.sign() < 0) {
-            isDeuteron = false;
+    bool isQuadraticPID = TMath::Sqrt(track.tpcNSigmaDe() * track.tpcNSigmaDe() + track.tofNSigmaDe() * track.tofNSigmaDe()) < nsigmaTPC;
+
+    if (!doQuadraticPID) {
+      if (isTPCPID) {
+        if (track.pt() < pTthrdeTOF) {
+          if (!doITSPID || isITSPID) {
+            if (sign > 0) {
+              if (track.sign() > 0) {
+                isDeuteron = true;
+              } else if (track.sign() < 0) {
+                isDeuteron = false;
+              }
+            } else if (sign < 0) {
+              if (track.sign() > 0) {
+                isDeuteron = false;
+              } else if (track.sign() < 0) {
+                isDeuteron = true;
+              }
+            }
           }
-        } else if (sign < 0) {
-          if (track.sign() > 0) {
-            isDeuteron = false;
-          } else if (track.sign() < 0) {
-            isDeuteron = true;
+        } else if (isTPCElRejection) {
+          if (sign > 0) {
+            if (track.sign() > 0) {
+              isDeuteron = true;
+            } else if (track.sign() < 0) {
+              isDeuteron = false;
+            }
+          } else if (sign < 0) {
+            if (track.sign() > 0) {
+              isDeuteron = false;
+            } else if (track.sign() < 0) {
+              isDeuteron = true;
+            }
+          }
+        } else if (isTOFPID) {
+          if (sign > 0) {
+            if (track.sign() > 0) {
+              isDeuteron = true;
+            } else if (track.sign() < 0) {
+              isDeuteron = false;
+            }
+          } else if (sign < 0) {
+            if (track.sign() > 0) {
+              isDeuteron = false;
+            } else if (track.sign() < 0) {
+              isDeuteron = true;
+            }
           }
         }
-      } else if (rejectionEl && track.beta() < -100 && track.pt() < pTthrde_TPCEl && track.tpcNSigmaEl() >= nsigmaElDe) {
-        if (sign > 0) {
-          if (track.sign() > 0) {
-            isDeuteron = true;
-          } else if (track.sign() < 0) {
-            isDeuteron = false;
-          }
-        } else if (sign < 0) {
-          if (track.sign() > 0) {
-            isDeuteron = false;
-          } else if (track.sign() < 0) {
-            isDeuteron = true;
+      }
+    } else {
+      if (track.pt() < pTthrprTOF) {
+        if (isTPCPID) {
+          if (!doITSPID || isITSPID) {
+            if (sign > 0) {
+              if (track.sign() > 0) {
+                isDeuteron = true;
+              } else if (track.sign() < 0) {
+                isDeuteron = false;
+              }
+            } else if (sign < 0) {
+              if (track.sign() > 0) {
+                isDeuteron = false;
+              } else if (track.sign() < 0) {
+                isDeuteron = true;
+              }
+            }
           }
         }
-      } else if (std::abs(track.tofNSigmaDe()) < nsigmaTOF) {
+      } else if (isQuadraticPID) {
         if (sign > 0) {
           if (track.sign() > 0) {
             isDeuteron = true;
@@ -487,110 +638,115 @@ struct hadronnucleicorrelation {
   {
     bool passcut = true;
     // pt-dependent selection
-    if (TMath::Abs(track.dcaXY()) > (par0 + par1 / track.pt()))
+    if (std::abs(track.dcaXY()) > (dcaPar0 + dcaPar1 / track.pt()))
       passcut = false;
-    if (TMath::Abs(track.dcaZ()) > (par0 + par1 / track.pt()))
+
+    if (doDCAZ && std::abs(track.dcaZ()) > (dcaPar0 + dcaPar1 / track.pt()))
       passcut = false;
 
     return passcut;
   }
 
-  template <int ME, bool doMC, typename Type>
-  void mixTracks(Type const& tracks1, Type const& tracks2, bool isMCPID)
-  { // last value: 0 -- SE; 1 -- ME
-    for (auto it1 : tracks1) {
-      for (auto it2 : tracks2) {
-
-        // Calculate Delta-eta Delta-phi (reco)
-        float deltaEta = it2->eta() - it1->eta();
-        float deltaPhi = it2->phi() - it1->phi();
-        deltaPhi = getDeltaPhi(deltaPhi);
-
-        // Calculate Delta-eta Delta-phi (gen)
-        float deltaEtaGen = -999.;
-        float deltaPhiGen = -999.;
-        if constexpr (doMC) {
-          deltaEtaGen = it2->eta_MC() - it1->eta_MC();
-          deltaPhiGen = it2->phi_MC() - it1->phi_MC();
-          deltaPhiGen = getDeltaPhi(deltaPhiGen);
-        }
-
-        float antipcorr = 1, antidcorr = 1;
-
-        for (int k = 0; k < nBinspT; k++) {
-
-          if (it1->pt() >= pTBins.value.at(k) && it1->pt() < pTBins.value.at(k + 1)) {
-
-            if (docorrection) { // Apply corrections
-              antipcorr = hEffpTEta_antiproton->Interpolate(it2->pt(), it2->eta());
-              antidcorr = hEffpTEta_antideuteron->Interpolate(it1->pt(), it1->eta());
-            }
-
-            if (ME) {
-              if constexpr (!doMC) { // Data
-                hEtaPhi_AntiDeAntiPr_ME[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                hCorrEtaPhi_AntiDeAntiPr_ME[k]->Fill(deltaEta, deltaPhi, it2->pt(), 1. / (antipcorr * antidcorr));
-              } else { // MC
-                if (isMCPID) {
-                  hPIDEtaPhiRec_AntiDeAntiPr_ME[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                  hPIDEtaPhiGen_AntiDeAntiPr_ME[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-                } else {
-                  hEtaPhiRec_AntiDeAntiPr_ME[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                  hEtaPhiGen_AntiDeAntiPr_ME[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-                }
-              }
-            } else {
-              if constexpr (!doMC) { // Data
-                hEtaPhi_AntiDeAntiPr_SE[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                hCorrEtaPhi_AntiDeAntiPr_SE[k]->Fill(deltaEta, deltaPhi, it2->pt(), 1. / (antipcorr * antidcorr));
-              } else { // MC
-                if (isMCPID) {
-                  hPIDEtaPhiRec_AntiDeAntiPr_SE[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                  hPIDEtaPhiGen_AntiDeAntiPr_SE[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-                } else {
-                  hEtaPhiRec_AntiDeAntiPr_SE[k]->Fill(deltaEta, deltaPhi, it2->pt());
-                  hEtaPhiGen_AntiDeAntiPr_SE[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-                }
-              }
-            } // SE
-          } // pT condition
-        } // nBinspT loop
-      } // tracks 2
-    } // tracks 1
-  }
-
-  template <int ME, typename Type>
-  void mixMCParticles(Type const& particles1, Type const& particles2)
+  template <typename T1>
+  void fillHistograms(T1 const& part0, T1 const& part1, bool ME, bool isIdentical)
   {
-    for (auto it1 : particles1) {
-      for (auto it2 : particles2) {
-        // Calculate Delta-eta Delta-phi (gen)
-        float deltaEtaGen = it2->eta() - it1->eta();
-        float deltaPhiGen = getDeltaPhi(it2->phi() - it1->phi());
+    Pair->SetPair(&part0, &part1);
+    Pair->SetIdentical(isIdentical);
+    if (isIdentical && Pair->IsClosePair(dEta, dPhi, radiusTPC)) {
+      QA.fill(HIST("QA/hdEtadPhistar"), Pair->GetPhiStarDiff(radiusTPC), Pair->GetEtaDiff());
+      return;
+    }
 
-        // Loop over pT bins
-        for (int k = 0; k < nBinspT; k++) {
-          if (it1->pt() >= pTBins.value.at(k) && it1->pt() < pTBins.value.at(k + 1)) {
-            // Use correct histogram based on ME flag
-            if constexpr (ME) {
-              hEtaPhiGen_AntiDeAntiPr_ME[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-            } else {
-              hEtaPhiGen_AntiDeAntiPr_SE[k]->Fill(deltaEtaGen, deltaPhiGen, it2->pt());
-            }
+    if (doClosePairRejection && Pair->IsClosePair(dEta, dPhi, radiusTPC)) {
+      QA.fill(HIST("QA/hdEtadPhistar"), Pair->GetPhiStarDiff(radiusTPC), Pair->GetEtaDiff());
+      return;
+    }
+
+    float deltaEta = part0.eta() - part1.eta();
+    float deltaPhi = part0.phi() - part1.phi();
+    deltaPhi = RecoDecay::constrainAngle(deltaPhi, -1 * o2::constants::math::PIHalf);
+
+    for (int k = 0; k < nBinspT; k++) {
+
+      if (part0.pt() >= pTBins.value.at(k) && part0.pt() < pTBins.value.at(k + 1)) {
+
+        float corr0 = 1, corr1 = 1;
+
+        if (doCorrection) { // Apply corrections
+          switch (mode) {
+            case kDbarPbar:
+              corr0 = hEffpTEta_antideuteron->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_antiproton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kDP:
+              corr0 = hEffpTEta_deuteron->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_proton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kDbarP:
+              corr0 = hEffpTEta_antideuteron->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_proton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kDPbar:
+              corr0 = hEffpTEta_deuteron->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_antiproton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kPbarP:
+              corr0 = hEffpTEta_antiproton->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_proton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kPbarPbar:
+              corr0 = hEffpTEta_antiproton->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_antiproton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kPP:
+              corr0 = hEffpTEta_proton->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_proton->Interpolate(part1.pt(), part1.eta());
+              break;
+            case kPPbar:
+              corr0 = hEffpTEta_proton->Interpolate(part0.pt(), part0.eta());
+              corr1 = hEffpTEta_antiproton->Interpolate(part1.pt(), part1.eta());
+              break;
           }
         }
-      }
-    }
+
+        if (ME) {
+          hEtaPhi_ME[k]->Fill(deltaEta, deltaPhi, part1.pt());
+          if (corr0 != 0 && corr1 != 0) {
+            hCorrEtaPhi_ME[k]->Fill(deltaEta, deltaPhi, part1.pt(), 1. / (corr0 * corr1));
+          }
+        } else {
+          hEtaPhi_SE[k]->Fill(deltaEta, deltaPhi, part1.pt());
+          if (corr0 != 0 && corr1 != 0) {
+            hCorrEtaPhi_SE[k]->Fill(deltaEta, deltaPhi, part1.pt(), 1. / (corr0 * corr1));
+          }
+        } // SE
+      } // pT condition
+    } // nBinspT loop
+
+    Pair->ResetPair();
   }
 
-  float getDeltaPhi(float deltaPhi)
+  template <typename T1>
+  void fillHistogramsGen(T1 const& part0, T1 const& part1, bool ME)
   {
-    if (deltaPhi < -TMath::Pi() / 2) {
-      return deltaPhi += 2 * TMath::Pi();
-    } else if (deltaPhi >= 3 * TMath::Pi() / 2) {
-      return deltaPhi -= 2 * TMath::Pi();
-    }
-    return deltaPhi;
+
+    float deltaEta = part0.eta() - part1.eta();
+    float deltaPhi = part0.phi() - part1.phi();
+    deltaPhi = RecoDecay::constrainAngle(deltaPhi, -1 * o2::constants::math::PIHalf);
+
+    for (int k = 0; k < nBinspT; k++) {
+
+      if (part0.pt() >= pTBins.value.at(k) && part0.pt() < pTBins.value.at(k + 1)) {
+
+        if (ME) {
+          hEtaPhi_ME[k]->Fill(deltaEta, deltaPhi, part1.pt());
+          hCorrEtaPhi_ME[k]->Fill(deltaEta, deltaPhi, part1.pt());
+        } else {
+          hEtaPhi_SE[k]->Fill(deltaEta, deltaPhi, part1.pt());
+          hCorrEtaPhi_SE[k]->Fill(deltaEta, deltaPhi, part1.pt());
+        } // SE
+      } // pT condition
+    } // nBinspT loop
   }
 
   void GetCorrection(o2::framework::Service<o2::ccdb::BasicCCDBManager> const& ccdbObj, TString filepath, TString histname)
@@ -626,199 +782,692 @@ struct hadronnucleicorrelation {
     LOGP(info, "Opened histogram {}", Form("%s_antideuteron", histname.Data()));
   }
 
-  void processData(FilteredCollisions const& collisions, FilteredTracks const& tracks)
+  template <typename TParticles>
+  float getMCMultiplicity(TParticles const& particles)
   {
-    for (auto track : tracks) {
-      if (std::abs(track.template singleCollSel_as<FilteredCollisions>().posZ()) > cutzvertex)
+    float Ncharged = 0.;
+    for (const auto& mcParticle : particles) {
+
+      if (!mcParticle.isPhysicalPrimary()) {
+        continue;
+      }
+
+      if (std::abs(mcParticle.eta()) > 1.0f) {
+        continue;
+      }
+
+      TParticlePDG* p = pdgDB->GetParticle(mcParticle.pdgCode());
+      if (std::abs(p->Charge()) > 1E-3) {
+        Ncharged++;
+      }
+    }
+
+    registry.fill(HIST("hMult"), Ncharged);
+    return Ncharged;
+  }
+
+  void processSameEvent(FilteredCollisions::iterator const& collision, FilteredTracks const& tracks)
+  {
+
+    registry.fill(HIST("hNEvents"), 0.5);
+    registry.fill(HIST("hMult"), collision.mult());
+
+    for (const auto& track : tracks) {
+
+      if (track.tpcFractionSharedCls() > maxtpcSharedCls)
+        continue;
+      if (track.itsNCls() < minitsNCls)
         continue;
 
-      if (track.tpcFractionSharedCls() > max_tpcSharedCls)
-        continue;
-      if (track.itsNCls() < min_itsNCls)
-        continue;
+      if (IsProton(track, +1))
+        registry.fill(HIST("hPrDCAxy"), track.dcaXY(), track.pt());
+      if (IsProton(track, -1))
+        registry.fill(HIST("hAntiPrDCAxy"), track.dcaXY(), track.pt());
+      if (IsDeuteron(track, +1))
+        registry.fill(HIST("hDeDCAxy"), track.dcaXY(), track.pt());
+      if (IsDeuteron(track, -1))
+        registry.fill(HIST("hAntiDeDCAxy"), track.dcaXY(), track.pt());
+
       if (!applyDCAcut(track))
         continue;
 
       if (doQA) {
         QA.fill(HIST("QA/hTPCnClusters"), track.tpcNClsFound());
+        QA.fill(HIST("QA/hTPCSharedClusters"), track.tpcFractionSharedCls());
         QA.fill(HIST("QA/hTPCchi2"), track.tpcChi2NCl());
         QA.fill(HIST("QA/hTPCcrossedRowsOverFindableCls"), track.tpcCrossedRowsOverFindableCls());
         QA.fill(HIST("QA/hITSchi2"), track.itsChi2NCl());
         QA.fill(HIST("QA/hDCAxy"), track.dcaXY(), track.pt());
         QA.fill(HIST("QA/hDCAz"), track.dcaZ(), track.pt());
         QA.fill(HIST("QA/TPCChi2VsPZ"), track.tpcInnerParam() / track.sign(), track.tpcChi2NCl());
-        QA.fill(HIST("QA/hVtxZ_trk"), track.template singleCollSel_as<FilteredCollisions>().posZ());
+        QA.fill(HIST("QA/hVtxZ_trk"), collision.posZ());
         QA.fill(HIST("QA/hnSigmaTPCVsPt_El"), track.pt() * track.sign(), track.tpcNSigmaEl());
         QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr"), track.pt() * track.sign(), track.tpcNSigmaPr());
         QA.fill(HIST("QA/hnSigmaTPCVsPt_De"), track.pt() * track.sign(), track.tpcNSigmaDe());
         QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr"), track.pt() * track.sign(), track.tofNSigmaPr());
         QA.fill(HIST("QA/hnSigmaTOFVsPt_De"), track.pt() * track.sign(), track.tofNSigmaDe());
-      }
+        QA.fill(HIST("QA/hnSigmaITSVsPt_Pr"), track.pt() * track.sign(), track.itsNSigmaPr());
+        QA.fill(HIST("QA/hnSigmaITSVsPt_De"), track.pt() * track.sign(), track.itsNSigmaDe());
+        QA.fill(HIST("QA/h2dTPCTOF_AntiPr"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        QA.fill(HIST("QA/h2dTPCTOF_Pr"), track.tpcNSigmaPr(), track.tofNSigmaPr());
 
-      // Discard candidates outside pT of interest
-      if (track.pt() > pTBins.value.at(nBinspT) || track.pt() < pTBins.value.at(0))
-        continue;
-
-      bool isPr = IsProton(track, +1);
-      bool isAntiPr = IsProton(track, -1);
-      bool isDe = IsDeuteron(track, +1);
-      bool isAntiDe = IsDeuteron(track, -1);
-
-      if (!isPr && !isAntiPr && !isDe && !isAntiDe)
-        continue;
-
-      if (isPr && isDe) {
-        isDe = 0;
-      }
-      if (isAntiPr && isAntiDe) {
-        isAntiDe = 0;
-      }
-
-      // Deuterons Fill & QA
-      if (isAntiDe) {
-        selectedtracks_antid[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-
-        if (doQA) {
+        if (IsProton(track, -1)) {
+          QA.fill(HIST("QA/hEtaAntiPr"), track.eta());
+          QA.fill(HIST("QA/hPhiAntiPr"), track.phi());
+          QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tofNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.itsNSigmaPr());
+          QA.fill(HIST("QA/h2dTPCTOF_AntiPr_AfterSel"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        }
+        if (IsProton(track, +1)) {
+          QA.fill(HIST("QA/hEtaPr"), track.eta());
+          QA.fill(HIST("QA/hPhiPr"), track.phi());
+          QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tofNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.itsNSigmaPr());
+          QA.fill(HIST("QA/h2dTPCTOF_Pr_AfterSel"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        }
+        if (IsDeuteron(track, -1)) {
           QA.fill(HIST("QA/hEtaAntiDe"), track.eta());
           QA.fill(HIST("QA/hPhiAntiDe"), track.phi());
           QA.fill(HIST("QA/hnSigmaTOFVsPt_De_AfterSel"), track.pt() * track.sign(), track.tofNSigmaDe());
           QA.fill(HIST("QA/hnSigmaTPCVsPt_De_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_De_AfterSel"), track.pt() * track.sign(), track.itsNSigmaDe());
         }
-      }
-      if (isDe) {
-        selectedtracks_d[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-
-        if (doQA) {
+        if (IsDeuteron(track, +1)) {
           QA.fill(HIST("QA/hEtaDe"), track.eta());
           QA.fill(HIST("QA/hPhiDe"), track.phi());
           QA.fill(HIST("QA/hnSigmaTOFVsPt_De_AfterSel"), track.pt() * track.sign(), track.tofNSigmaDe());
           QA.fill(HIST("QA/hnSigmaTPCVsPt_De_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_De_AfterSel"), track.pt() * track.sign(), track.itsNSigmaDe());
         }
       }
+    }
 
-      // Protons Fill & QA
-      if (isPr) {
-        selectedtracks_p[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
+    Pair->SetMagField1(collision.magField());
+    Pair->SetMagField2(collision.magField());
 
-        if (doQA) {
-          QA.fill(HIST("QA/hEtaPr"), track.eta());
-          QA.fill(HIST("QA/hPhiPr"), track.phi());
-          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
-          QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tofNSigmaPr());
+    if (mode == kPbarPbar || mode == kPP) { // Identical particle combinations
+
+      for (const auto& [part0, part1] : combinations(CombinationsStrictlyUpperIndexPolicy(tracks, tracks))) {
+
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
+
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
+
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
+
+        // mode 6
+        if (mode == kPP) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
         }
-      } else if (isAntiPr) {
-        selectedtracks_antip[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
+        // mode 5
+        if (mode == kPbarPbar) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
 
-        if (doQA) {
+        fillHistograms(part0, part1, false, true);
+      }
+
+    } else {
+
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(tracks, tracks))) {
+
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
+
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
+
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
+
+        // modes 0,1,2,3,4,7
+        if (mode == kDbarPbar) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kDP) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+
+        fillHistograms(part0, part1, false, false);
+      }
+    }
+  }
+  PROCESS_SWITCH(HadronNucleiCorrelation, processSameEvent, "processSameEvent", true);
+
+  void processSameEventEvSel(FilteredCollisionsExtra::iterator const& collision, FilteredTracks const& tracks)
+  {
+
+    registry.fill(HIST("hNEvents"), 0.5);
+    registry.fill(HIST("hMult"), collision.mult());
+
+    for (const auto& track : tracks) {
+
+      if (removeSameBunchPileup && !track.template singleCollSel_as<FilteredCollisionsExtra>().isNoSameBunchPileup())
+        continue;
+
+      if (track.tpcFractionSharedCls() > maxtpcSharedCls)
+        continue;
+      if (track.itsNCls() < minitsNCls)
+        continue;
+
+      if (IsProton(track, +1))
+        registry.fill(HIST("hPrDCAxy"), track.dcaXY(), track.pt());
+      if (IsProton(track, -1))
+        registry.fill(HIST("hAntiPrDCAxy"), track.dcaXY(), track.pt());
+      if (IsDeuteron(track, +1))
+        registry.fill(HIST("hDeDCAxy"), track.dcaXY(), track.pt());
+      if (IsDeuteron(track, -1))
+        registry.fill(HIST("hAntiDeDCAxy"), track.dcaXY(), track.pt());
+
+      if (!applyDCAcut(track))
+        continue;
+
+      if (doQA) {
+        QA.fill(HIST("QA/hTPCnClusters"), track.tpcNClsFound());
+        QA.fill(HIST("QA/hTPCSharedClusters"), track.tpcFractionSharedCls());
+        QA.fill(HIST("QA/hTPCchi2"), track.tpcChi2NCl());
+        QA.fill(HIST("QA/hTPCcrossedRowsOverFindableCls"), track.tpcCrossedRowsOverFindableCls());
+        QA.fill(HIST("QA/hITSchi2"), track.itsChi2NCl());
+        QA.fill(HIST("QA/hDCAxy"), track.dcaXY(), track.pt());
+        QA.fill(HIST("QA/hDCAz"), track.dcaZ(), track.pt());
+        QA.fill(HIST("QA/TPCChi2VsPZ"), track.tpcInnerParam() / track.sign(), track.tpcChi2NCl());
+        QA.fill(HIST("QA/hVtxZ_trk"), collision.posZ());
+        QA.fill(HIST("QA/hnSigmaTPCVsPt_El"), track.pt() * track.sign(), track.tpcNSigmaEl());
+        QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr"), track.pt() * track.sign(), track.tpcNSigmaPr());
+        QA.fill(HIST("QA/hnSigmaTPCVsPt_De"), track.pt() * track.sign(), track.tpcNSigmaDe());
+        QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr"), track.pt() * track.sign(), track.tofNSigmaPr());
+        QA.fill(HIST("QA/hnSigmaTOFVsPt_De"), track.pt() * track.sign(), track.tofNSigmaDe());
+        QA.fill(HIST("QA/hnSigmaITSVsPt_Pr"), track.pt() * track.sign(), track.itsNSigmaPr());
+        QA.fill(HIST("QA/hnSigmaITSVsPt_De"), track.pt() * track.sign(), track.itsNSigmaDe());
+        QA.fill(HIST("QA/h2dTPCTOF_AntiPr"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        QA.fill(HIST("QA/h2dTPCTOF_Pr"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+
+        if (IsProton(track, -1)) {
           QA.fill(HIST("QA/hEtaAntiPr"), track.eta());
           QA.fill(HIST("QA/hPhiAntiPr"), track.phi());
-          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
           QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tofNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.itsNSigmaPr());
+          QA.fill(HIST("QA/h2dTPCTOF_AntiPr_AfterSel"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        }
+        if (IsProton(track, +1)) {
+          QA.fill(HIST("QA/hEtaPr"), track.eta());
+          QA.fill(HIST("QA/hPhiPr"), track.phi());
+          QA.fill(HIST("QA/hnSigmaTOFVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tofNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaPr());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_Pr_AfterSel"), track.pt() * track.sign(), track.itsNSigmaPr());
+          QA.fill(HIST("QA/h2dTPCTOF_Pr_AfterSel"), track.tpcNSigmaPr(), track.tofNSigmaPr());
+        }
+        if (IsDeuteron(track, -1)) {
+          QA.fill(HIST("QA/hEtaAntiDe"), track.eta());
+          QA.fill(HIST("QA/hPhiAntiDe"), track.phi());
+          QA.fill(HIST("QA/hnSigmaTOFVsPt_De_AfterSel"), track.pt() * track.sign(), track.tofNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_De_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_De_AfterSel"), track.pt() * track.sign(), track.itsNSigmaDe());
+        }
+        if (IsDeuteron(track, +1)) {
+          QA.fill(HIST("QA/hEtaDe"), track.eta());
+          QA.fill(HIST("QA/hPhiDe"), track.phi());
+          QA.fill(HIST("QA/hnSigmaTOFVsPt_De_AfterSel"), track.pt() * track.sign(), track.tofNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaTPCVsPt_De_AfterSel"), track.pt() * track.sign(), track.tpcNSigmaDe());
+          QA.fill(HIST("QA/hnSigmaITSVsPt_De_AfterSel"), track.pt() * track.sign(), track.itsNSigmaDe());
         }
       }
     }
 
-    for (auto collision : collisions) {
+    Pair->SetMagField1(collision.magField());
+    Pair->SetMagField2(collision.magField());
 
-      if (std::abs(collision.posZ()) > cutzvertex)
-        continue;
+    if (mode == kPbarPbar || mode == kPP) { // Identical particle combinations
 
-      registry.fill(HIST("hNEvents"), 0.5);
+      for (const auto& [part0, part1] : combinations(CombinationsStrictlyUpperIndexPolicy(tracks, tracks))) {
 
-      if (selectedtracks_antid.find(collision.globalIndex()) != selectedtracks_antid.end() &&
-          selectedtracks_antip.find(collision.globalIndex()) != selectedtracks_antip.end()) {
-        registry.fill(HIST("hNEvents"), 1.5);
-      }
+        if (removeSameBunchPileup && !part0.template singleCollSel_as<FilteredCollisionsExtra>().isNoSameBunchPileup())
+          continue;
 
-      if (selectedtracks_d.find(collision.globalIndex()) != selectedtracks_d.end() &&
-          selectedtracks_p.find(collision.globalIndex()) != selectedtracks_p.end()) {
-        registry.fill(HIST("hNEvents"), 2.5);
-      }
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
 
-      int vertexBinToMix = std::floor((collision.posZ() + cutzvertex) / (2 * cutzvertex / _vertexNbinsToMix));
-      int centBinToMix = std::floor(collision.multPerc() / (100.0 / _multNsubBins));
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
 
-      if (selectedtracks_antid.find(collision.globalIndex()) != selectedtracks_antid.end()) {
-        registry.fill(HIST("hNEvents"), 3.5);
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
 
-        mixbins_antidantip[std::pair<int, float>{vertexBinToMix, centBinToMix}].push_back(std::make_shared<decltype(collision)>(collision));
-      }
-    }
-
-    if (!mixbins_antidantip.empty()) {
-
-      for (auto i = mixbins_antidantip.begin(); i != mixbins_antidantip.end(); i++) { // iterating over all vertex&mult bins
-
-        std::vector<colType> value = i->second;
-        int EvPerBin = value.size(); // number of collisions in each vertex&mult bin
-
-        for (int indx1 = 0; indx1 < EvPerBin; indx1++) { // loop over all the events in each vertex&mult bin
-
-          auto col1 = value[indx1];
-
-          if (selectedtracks_antip.find(col1->index()) != selectedtracks_antip.end()) {
-            mixTracks<0, 0>(selectedtracks_antid[col1->index()], selectedtracks_antip[col1->index()], 0); // mixing SE
-          }
-
-          for (int indx2 = 0; indx2 < EvPerBin; indx2++) { // nested loop for all the combinations of collisions in a chosen mult/vertex bin
-
-            auto col2 = value[indx2];
-
-            if (col1 == col2) {
-              continue;
-            }
-
-            if (selectedtracks_antip.find(col2->index()) != selectedtracks_antip.end()) {
-              mixTracks<1, 0>(selectedtracks_antid[col1->index()], selectedtracks_antip[col2->index()], 0); // mixing ME
-            }
-          }
+        // mode 6
+        if (mode == kPP) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
         }
+        // mode 5
+        if (mode == kPbarPbar) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+
+        fillHistograms(part0, part1, false, true);
+      }
+
+    } else {
+
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(tracks, tracks))) {
+
+        if (removeSameBunchPileup && !part0.template singleCollSel_as<FilteredCollisionsExtra>().isNoSameBunchPileup())
+          continue;
+
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
+
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
+
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
+
+        // modes 0,1,2,3,4,7
+        if (mode == kDbarPbar) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kDP) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+
+        fillHistograms(part0, part1, false, false);
       }
     }
-
-    // clearing up
-    for (auto i = selectedtracks_antid.begin(); i != selectedtracks_antid.end(); i++)
-      (i->second).clear();
-    selectedtracks_antid.clear();
-
-    for (auto i = selectedtracks_antip.begin(); i != selectedtracks_antip.end(); i++)
-      (i->second).clear();
-    selectedtracks_antip.clear();
-
-    for (auto i = selectedtracks_p.begin(); i != selectedtracks_p.end(); i++)
-      (i->second).clear();
-    selectedtracks_p.clear();
-
-    for (auto i = selectedtracks_d.begin(); i != selectedtracks_d.end(); i++)
-      (i->second).clear();
-    selectedtracks_d.clear();
-
-    for (auto& pair : mixbins_antidantip) {
-      pair.second.clear(); // Clear the vector associated with the key
-    }
-    mixbins_antidantip.clear(); // Then clear the map itself
   }
-  PROCESS_SWITCH(hadronnucleicorrelation, processData, "processData", true);
+  PROCESS_SWITCH(HadronNucleiCorrelation, processSameEventEvSel, "processSameEventEvSel", false);
 
-  void processMC(FilteredCollisions const& collisions, FilteredTracksMC const& tracks)
+  void processMixedEvent(FilteredCollisions const& collisions, FilteredTracks const& tracks)
   {
-    for (auto track : tracks) {
-      if (std::abs(track.template singleCollSel_as<FilteredCollisions>().posZ()) > cutzvertex)
+
+    for (const auto& [collision1, collision2] : soa::selfCombinations(colBinning, 5, -1, collisions, collisions)) {
+
+      // LOGF(info, "Mixed event collisions: (%d, %d) zvtx (%.1f, %.1f) mult (%d, %d)", collision1.globalIndex(), collision2.globalIndex(), collision1.posZ(), collision2.posZ(), collision1.mult(), collision2.mult());
+
+      auto groupPartsOne = tracks.sliceByCached(o2::aod::singletrackselector::singleCollSelId, collision1.globalIndex(), cache);
+      auto groupPartsTwo = tracks.sliceByCached(o2::aod::singletrackselector::singleCollSelId, collision2.globalIndex(), cache);
+
+      const auto& magFieldTesla1 = collision1.magField();
+      const auto& magFieldTesla2 = collision2.magField();
+
+      const float limit = 1e-4;
+
+      if (std::abs(magFieldTesla1 - magFieldTesla2) > limit) {
+        continue;
+      }
+
+      Pair->SetMagField1(magFieldTesla1);
+      Pair->SetMagField2(magFieldTesla2);
+
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(groupPartsOne, groupPartsTwo))) {
+
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
+
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
+
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
+
+        //{"mode", 0, "0: antid-antip, 1: d-p, 2: antid-p, 3: d-antip, 4: antip-p, 5: antip-antip, 6: p-p, 7: p-antip"};
+        if (mode == kDbarPbar) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kDP) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPbarPbar) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPP) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+
+        bool isIdentical = false;
+        if (mode == kPbarPbar || mode == kPP)
+          isIdentical = true;
+
+        fillHistograms(part0, part1, true, isIdentical);
+      }
+    }
+  }
+  PROCESS_SWITCH(HadronNucleiCorrelation, processMixedEvent, "processMixedEvent", true);
+
+  void processMixedEventEvSel(FilteredCollisionsExtra const& collisions, FilteredTracks const& tracks)
+  {
+
+    for (const auto& [collision1, collision2] : soa::selfCombinations(colBinning, 5, -1, collisions, collisions)) {
+
+      // LOGF(info, "Mixed event collisions: (%d, %d) zvtx (%.1f, %.1f) mult (%d, %d)", collision1.globalIndex(), collision2.globalIndex(), collision1.posZ(), collision2.posZ(), collision1.mult(), collision2.mult());
+
+      auto groupPartsOne = tracks.sliceByCached(o2::aod::singletrackselector::singleCollSelId, collision1.globalIndex(), cache);
+      auto groupPartsTwo = tracks.sliceByCached(o2::aod::singletrackselector::singleCollSelId, collision2.globalIndex(), cache);
+
+      const auto& magFieldTesla1 = collision1.magField();
+      const auto& magFieldTesla2 = collision2.magField();
+
+      const float limit = 1e-4;
+
+      if (std::abs(magFieldTesla1 - magFieldTesla2) > limit) {
+        continue;
+      }
+
+      Pair->SetMagField1(magFieldTesla1);
+      Pair->SetMagField2(magFieldTesla2);
+
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(groupPartsOne, groupPartsTwo))) {
+
+        if (removeSameBunchPileup && !part0.template singleCollSel_as<FilteredCollisionsExtra>().isNoSameBunchPileup())
+          continue;
+        if (removeSameBunchPileup && !part1.template singleCollSel_as<FilteredCollisionsExtra>().isNoSameBunchPileup())
+          continue;
+
+        if (part0.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part0.itsNCls() < minitsNCls)
+          continue;
+        if (part1.tpcFractionSharedCls() > maxtpcSharedCls)
+          continue;
+        if (part1.itsNCls() < minitsNCls)
+          continue;
+
+        if (!applyDCAcut(part0))
+          continue;
+        if (!applyDCAcut(part1))
+          continue;
+
+        // remove tracks outside pt bins
+        if (part0.pt() < pTBins.value.at(0) || part0.pt() >= pTBins.value.at(nBinspT))
+          continue;
+        if (part1.pt() < pTBins.value.at(0) || part1.pt() >= pTBins.value.at(nBinspT))
+          continue;
+
+        //{"mode", 0, "0: antid-antip, 1: d-p, 2: antid-p, 3: d-antip, 4: antip-p, 5: antip-antip, 6: p-p, 7: p-antip"};
+        if (mode == kDbarPbar) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kDP) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (!IsDeuteron(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (!IsDeuteron(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPbarPbar) {
+          if (!IsProton(part0, -1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+        if (mode == kPP) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, +1))
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (!IsProton(part0, +1))
+            continue;
+          if (!IsProton(part1, -1))
+            continue;
+        }
+
+        bool isIdentical = false;
+        if (mode == kPbarPbar || mode == kPP)
+          isIdentical = true;
+
+        fillHistograms(part0, part1, true, isIdentical);
+      }
+    }
+  }
+  PROCESS_SWITCH(HadronNucleiCorrelation, processMixedEventEvSel, "processMixedEventEvSel", false);
+
+  void processMC(FilteredCollisions const&, FilteredTracksMC const& tracks)
+  {
+    for (const auto& track : tracks) {
+      if (std::abs(track.template singleCollSel_as<FilteredCollisions>().posZ()) > cutzVertex)
         continue;
 
-      if (track.tpcFractionSharedCls() > max_tpcSharedCls)
+      if (track.tpcFractionSharedCls() > maxtpcSharedCls)
         continue;
-      if (track.itsNCls() < min_itsNCls)
+      if (track.itsNCls() < minitsNCls)
         continue;
+
+      if (IsProton(track, +1) && track.pdgCode() == PDG_t::kProton) {
+        registry.fill(HIST("hPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kPrimary)
+          registry.fill(HIST("hPrimPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kWeakDecay)
+          registry.fill(HIST("hSecWeakPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kMaterial)
+          registry.fill(HIST("hSecMatPrDCAxy"), track.dcaXY(), track.pt());
+      }
+      if (IsProton(track, -1) && track.pdgCode() == -PDG_t::kProton) {
+        registry.fill(HIST("hAntiPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kPrimary)
+          registry.fill(HIST("hPrimAntiPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kWeakDecay)
+          registry.fill(HIST("hSecWeakAntiPrDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kMaterial)
+          registry.fill(HIST("hSecMatAntiPrDCAxy"), track.dcaXY(), track.pt());
+      }
+      if (IsDeuteron(track, +1) && track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("hDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kPrimary)
+          registry.fill(HIST("hPrimDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kWeakDecay)
+          registry.fill(HIST("hSecWeakDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kMaterial)
+          registry.fill(HIST("hSecMatDeDCAxy"), track.dcaXY(), track.pt());
+      }
+      if (IsDeuteron(track, -1) && track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("hAntiDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kPrimary)
+          registry.fill(HIST("hPrimAntiDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kWeakDecay)
+          registry.fill(HIST("hSecWeakAntiDeDCAxy"), track.dcaXY(), track.pt());
+        if (track.origin() == kMaterial)
+          registry.fill(HIST("hSecMatAntiDeDCAxy"), track.dcaXY(), track.pt());
+      }
+
       if (!applyDCAcut(track))
         continue;
 
       // Keep only protons and deuterons
-      // if (std::abs(track.pdgCode()) != pdgProton && std::abs(track.pdgCode()) != pdgDeuteron)
+      // if (std::abs(track.pdgCode()) != PDG_t::kProton && std::abs(track.pdgCode()) != o2::constants::physics::Pdg::kDeuteron)
       // continue;
 
       if (doQA) {
         QA.fill(HIST("QA/hTPCnClusters"), track.tpcNClsFound());
+        QA.fill(HIST("QA/hTPCSharedClusters"), track.tpcFractionSharedCls());
         QA.fill(HIST("QA/hTPCchi2"), track.tpcChi2NCl());
         QA.fill(HIST("QA/hTPCcrossedRowsOverFindableCls"), track.tpcCrossedRowsOverFindableCls());
         QA.fill(HIST("QA/hITSchi2"), track.itsChi2NCl());
@@ -832,30 +1481,28 @@ struct hadronnucleicorrelation {
         QA.fill(HIST("QA/hnSigmaTOFVsPt_De"), track.pt() * track.sign(), track.tofNSigmaDe());
       }
 
-      bool isPr = (IsProton(track, +1) && track.pdgCode() == pdgProton);
-      bool isAntiPr = (IsProton(track, -1) && track.pdgCode() == -pdgProton);
-      bool isDe = (IsDeuteron(track, +1) && track.pdgCode() == pdgDeuteron);
-      bool isAntiDe = (IsDeuteron(track, -1) && track.pdgCode() == -pdgDeuteron);
+      bool isPr = (IsProton(track, +1) && track.pdgCode() == PDG_t::kProton);
+      bool isAntiPr = (IsProton(track, -1) && track.pdgCode() == -PDG_t::kProton);
+      bool isDe = (IsDeuteron(track, +1) && track.pdgCode() == o2::constants::physics::Pdg::kDeuteron);
+      bool isAntiDe = (IsDeuteron(track, -1) && track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron);
 
-      if (track.origin() == 1 || track.origin() == 0) { // primaries and secondaries
-        if (isPr) {
-          registry.fill(HIST("hPrimSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * +1);
-          if (track.origin() == 1) { // secondaries
-            registry.fill(HIST("hSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * +1);
-          }
+      if (isPr) {
+        registry.fill(HIST("hPrimSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * +1);
+        if (track.origin() == kWeakDecay || track.origin() == kMaterial) { // secondaries
+          registry.fill(HIST("hSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * +1);
         }
-        if (isAntiPr) {
-          registry.fill(HIST("hPrimSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * -1);
-          if (track.origin() == 1) {
-            registry.fill(HIST("hSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * -1);
-          }
+      }
+      if (isAntiPr) {
+        registry.fill(HIST("hPrimSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * -1);
+        if (track.origin() == kWeakDecay || track.origin() == kMaterial) {
+          registry.fill(HIST("hSec_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * -1);
         }
       }
 
       if (track.origin() != 0)
         continue;
 
-      if (track.pdgCode() == pdgProton) {
+      if (track.pdgCode() == PDG_t::kProton) {
         registry.fill(HIST("hReco_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt());
         registry.fill(HIST("hReco_EtaPhiPtMC_Proton"), track.eta_MC(), track.phi_MC(), track.pt_MC());
         registry.fill(HIST("hResPt_Proton"), track.pt_MC(), track.pt() - track.pt_MC());
@@ -869,7 +1516,7 @@ struct hadronnucleicorrelation {
         registry.fill(HIST("hnSigmaTPCVsPt_Pr_MC"), track.pt(), track.tpcNSigmaPr());
         registry.fill(HIST("hnSigmaTOFVsPt_Pr_MC"), track.pt(), track.tofNSigmaPr());
       }
-      if (track.pdgCode() == -pdgProton) {
+      if (track.pdgCode() == -PDG_t::kProton) {
         registry.fill(HIST("hReco_EtaPhiPt_Proton"), track.eta(), track.phi(), track.pt() * -1);
         registry.fill(HIST("hReco_EtaPhiPtMC_Proton"), track.eta_MC(), track.phi_MC(), track.pt_MC() * -1);
         registry.fill(HIST("hResPt_AntiProton"), track.pt_MC(), track.pt() - track.pt_MC());
@@ -883,7 +1530,7 @@ struct hadronnucleicorrelation {
         registry.fill(HIST("hnSigmaTPCVsPt_Pr_MC"), track.pt() * -1, track.tpcNSigmaPr());
         registry.fill(HIST("hnSigmaTOFVsPt_Pr_MC"), track.pt() * -1, track.tofNSigmaPr());
       }
-      if (track.pdgCode() == pdgDeuteron) {
+      if (track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
         registry.fill(HIST("hReco_EtaPhiPt_Deuteron"), track.eta(), track.phi(), track.pt());
         registry.fill(HIST("hReco_EtaPhiPtMC_Deuteron"), track.eta_MC(), track.phi_MC(), track.pt_MC());
         registry.fill(HIST("hResPt_Deuteron"), track.pt_MC(), track.pt() - track.pt_MC());
@@ -897,7 +1544,7 @@ struct hadronnucleicorrelation {
         registry.fill(HIST("hnSigmaTPCVsPt_De_MC"), track.pt(), track.tpcNSigmaDe());
         registry.fill(HIST("hnSigmaTOFVsPt_De_MC"), track.pt(), track.tofNSigmaDe());
       }
-      if (track.pdgCode() == -pdgDeuteron) {
+      if (track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
         registry.fill(HIST("hReco_EtaPhiPt_Deuteron"), track.eta(), track.phi(), track.pt() * -1);
         registry.fill(HIST("hReco_EtaPhiPtMC_Deuteron"), track.eta_MC(), track.phi_MC(), track.pt_MC() * -1);
         registry.fill(HIST("hResPt_AntiDeuteron"), track.pt_MC(), track.pt() - track.pt_MC());
@@ -941,113 +1588,113 @@ struct hadronnucleicorrelation {
 
       if (doMCQA) {
         // Proton
-        if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.pdgCode() == pdgProton) {
+        if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.pdgCode() == PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPC"), track.pt());
           registry.fill(HIST("hReco_Pt_Proton_TPC"), track.pt());
         }
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF &&
-            track.pdgCode() == pdgProton) {
+            track.pdgCode() == PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCTOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Proton_TPCTOF"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
-            track.pdgCode() == pdgProton) {
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+            track.pdgCode() == PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPC_or_TOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Proton_TPC_or_TOF"), track.pt());
         }
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC &&
-            track.tpcNSigmaEl() >= nsigmaElPr && track.pdgCode() == pdgProton) {
+            track.tpcNSigmaEl() >= nsigmaElPr && track.pdgCode() == PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCEl"), track.pt());
           registry.fill(HIST("hReco_Pt_Proton_TPCEl"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
-            track.pdgCode() == pdgProton) {
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+            track.pdgCode() == PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCEl_or_TOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Proton_TPCEl_or_TOF"), track.pt());
         }
 
         // AntiProton
-        if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.pdgCode() == -pdgProton) {
+        if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.pdgCode() == -PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPC"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Proton_TPC"), track.pt() * -1);
         }
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF &&
-            track.pdgCode() == -pdgProton) {
+            track.pdgCode() == -PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCTOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Proton_TPCTOF"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
-            track.pdgCode() == -pdgProton) {
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+            track.pdgCode() == -PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPC_or_TOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Proton_TPC_or_TOF"), track.pt() * -1);
         }
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC &&
-            track.tpcNSigmaEl() >= nsigmaElPr && track.pdgCode() == -pdgProton) {
+            track.tpcNSigmaEl() >= nsigmaElPr && track.pdgCode() == -PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCEl"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Proton_TPCEl"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
-            track.pdgCode() == -pdgProton) {
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+            track.pdgCode() == -PDG_t::kProton) {
           registry.fill(HIST("hNumeratorPurity_Proton_TPCEl_or_TOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Proton_TPCEl_or_TOF"), track.pt() * -1);
         }
 
         // Deuteron
-        if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.pdgCode() == pdgDeuteron) {
+        if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPC"), track.pt());
           registry.fill(HIST("hReco_Pt_Deuteron_TPC"), track.pt());
         }
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF &&
-            track.pdgCode() == pdgDeuteron) {
+            track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCTOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Deuteron_TPCTOF"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
-            track.pdgCode() == pdgDeuteron) {
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+            track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPC_or_TOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Deuteron_TPC_or_TOF"), track.pt());
         }
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC &&
-            track.tpcNSigmaEl() >= nsigmaElDe && track.pdgCode() == pdgDeuteron) {
+            track.tpcNSigmaEl() >= nsigmaElDe && track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCEl"), track.pt());
           registry.fill(HIST("hReco_Pt_Deuteron_TPCEl"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
-            track.pdgCode() == pdgDeuteron) {
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+            track.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCEl_or_TOF"), track.pt());
           registry.fill(HIST("hReco_Pt_Deuteron_TPCEl_or_TOF"), track.pt());
         }
 
         // AntiDeuteron
-        if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.pdgCode() == -pdgDeuteron) {
+        if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPC"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Deuteron_TPC"), track.pt() * -1);
         }
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF &&
-            track.pdgCode() == -pdgDeuteron) {
+            track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCTOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Deuteron_TPCTOF"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
-            track.pdgCode() == -pdgDeuteron) {
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+            track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPC_or_TOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Deuteron_TPC_or_TOF"), track.pt() * -1);
         }
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC &&
-            track.tpcNSigmaEl() >= nsigmaElDe && track.pdgCode() == -pdgDeuteron) {
+            track.tpcNSigmaEl() >= nsigmaElDe && track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCEl"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Deuteron_TPCEl"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
-            track.pdgCode() == -pdgDeuteron) {
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+            track.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
           registry.fill(HIST("hNumeratorPurity_Deuteron_TPCEl_or_TOF"), track.pt() * -1);
           registry.fill(HIST("hReco_Pt_Deuteron_TPCEl_or_TOF"), track.pt() * -1);
         }
@@ -1057,16 +1704,16 @@ struct hadronnucleicorrelation {
           registry.fill(HIST("hDenominatorPurity_Proton_TPC"), track.pt());
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF && track.sign() > 0)
           registry.fill(HIST("hDenominatorPurity_Proton_TPCTOF"), track.pt());
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
             track.sign() > 0)
           registry.fill(HIST("hDenominatorPurity_Proton_TPC_or_TOF"), track.pt());
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC &&
             track.tpcNSigmaEl() >= nsigmaElPr && track.sign() > 0) {
           registry.fill(HIST("hDenominatorPurity_Proton_TPCEl"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
             track.sign() > 0) {
           registry.fill(HIST("hDenominatorPurity_Proton_TPCEl_or_TOF"), track.pt());
         }
@@ -1075,16 +1722,16 @@ struct hadronnucleicorrelation {
           registry.fill(HIST("hDenominatorPurity_Proton_TPC"), track.pt() * -1);
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF && track.sign() < 0)
           registry.fill(HIST("hDenominatorPurity_Proton_TPCTOF"), track.pt() * -1);
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
             track.sign() < 0)
           registry.fill(HIST("hDenominatorPurity_Proton_TPC_or_TOF"), track.pt() * -1);
         if (std::abs(track.tpcNSigmaPr()) < nsigmaTPC &&
             track.tpcNSigmaEl() >= nsigmaElPr && track.sign() < 0) {
           registry.fill(HIST("hDenominatorPurity_Proton_TPCEl"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaPr()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElPr && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaPr()) < nsigmaTPC && std::abs(track.tofNSigmaPr()) < nsigmaTOF)) &&
             track.sign() < 0) {
           registry.fill(HIST("hDenominatorPurity_Proton_TPCEl_or_TOF"), track.pt() * -1);
         }
@@ -1093,8 +1740,8 @@ struct hadronnucleicorrelation {
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPC"), track.pt());
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF && track.sign() > 0)
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCTOF"), track.pt());
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
             track.sign() > 0) {
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPC_or_TOF"), track.pt());
         }
@@ -1102,8 +1749,8 @@ struct hadronnucleicorrelation {
             track.tpcNSigmaEl() >= nsigmaElDe && track.sign() > 0) {
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCEl"), track.pt());
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
             track.sign() > 0)
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCEl_or_TOF"), track.pt());
 
@@ -1112,313 +1759,266 @@ struct hadronnucleicorrelation {
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF && track.sign() < 0)
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCTOF"), track.pt() * -1);
         if ((
-              (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < -100) ||
-              (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+              (std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.beta() < betahasTOFthr) ||
+              (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
             track.sign() < 0)
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPC_or_TOF"), track.pt() * -1);
         if (std::abs(track.tpcNSigmaDe()) < nsigmaTPC &&
             track.tpcNSigmaEl() >= nsigmaElDe && track.sign() < 0) {
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCEl"), track.pt() * -1);
         }
-        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < -100) ||
-             (track.beta() > -100 && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
+        if (((std::abs(track.tpcNSigmaDe()) < nsigmaTPC && track.tpcNSigmaEl() >= nsigmaElDe && track.beta() < betahasTOFthr) ||
+             (track.beta() > betahasTOFthr && std::abs(track.tpcNSigmaDe()) < nsigmaTPC && std::abs(track.tofNSigmaDe()) < nsigmaTOF)) &&
             track.sign() < 0)
           registry.fill(HIST("hDenominatorPurity_Deuteron_TPCEl_or_TOF"), track.pt() * -1);
       }
-
-      if (!mcCorrelation) {
-        continue;
-      }
-
-      if (isDe) {
-        selectedtracksPIDMC_d[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (track.pdgCode() == pdgDeuteron) {
-        selectedtracksMC_d[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (isAntiDe) {
-        selectedtracksPIDMC_antid[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (track.pdgCode() == -pdgDeuteron) {
-        selectedtracksMC_antid[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (isPr) {
-        selectedtracksPIDMC_p[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (track.pdgCode() == pdgProton) {
-        selectedtracksMC_p[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (isAntiPr) {
-        selectedtracksPIDMC_antip[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
-      if (track.pdgCode() == -pdgProton) {
-        selectedtracksMC_antip[track.singleCollSelId()].push_back(std::make_shared<decltype(track)>(track));
-      }
     } // track
-
-    if (!mcCorrelation) {
-      return;
-    }
-
-    for (auto collision : collisions) {
-      if (std::abs(collision.posZ()) > cutzvertex)
-        continue;
-      registry.fill(HIST("hNEvents"), 0.5);
-
-      int vertexBinToMix = std::floor((collision.posZ() + cutzvertex) / (2 * cutzvertex / _vertexNbinsToMix));
-      int centBinToMix = std::floor(collision.multPerc() / (100.0 / _multNsubBins));
-
-      if (selectedtracksMC_antid.find(collision.globalIndex()) != selectedtracksMC_antid.end()) {
-        mixbins_antidantip[std::pair<int, float>{vertexBinToMix, centBinToMix}].push_back(std::make_shared<decltype(collision)>(collision));
-      }
-
-      if (selectedtracksPIDMC_antid.find(collision.globalIndex()) != selectedtracksPIDMC_antid.end()) {
-        mixbinsPID_antidantip[std::pair<int, float>{vertexBinToMix, centBinToMix}].push_back(std::make_shared<decltype(collision)>(collision));
-      }
-    } // coll
-
-    if (!mixbins_antidantip.empty()) {
-
-      for (auto i = mixbins_antidantip.begin(); i != mixbins_antidantip.end(); i++) { // iterating over all vertex&mult bins
-
-        std::vector<colType> value = i->second;
-        int EvPerBin = value.size(); // number of collisions in each vertex&mult bin
-
-        for (int indx1 = 0; indx1 < EvPerBin; indx1++) { // loop over all the events in each vertex&mult bin
-
-          auto col1 = value[indx1];
-
-          if (selectedtracksMC_antip.find(col1->index()) != selectedtracksMC_antip.end()) {
-            mixTracks<0, 1>(selectedtracksMC_antid[col1->index()], selectedtracksMC_antip[col1->index()], 0); // mixing SE
-          }
-
-          for (int indx2 = indx1 + 1; indx2 < EvPerBin; indx2++) { // nested loop for all the combinations of collisions in a chosen mult/vertex bin
-
-            auto col2 = (i->second)[indx2];
-
-            if (col1 == col2) {
-              continue;
-            }
-
-            if (selectedtracksMC_antip.find(col2->index()) != selectedtracksMC_antip.end()) {
-              mixTracks<1, 1>(selectedtracksMC_antid[col1->index()], selectedtracksMC_antip[col2->index()], 0); // mixing ME
-            }
-          }
-        }
-      }
-    }
-
-    if (!mixbinsPID_antidantip.empty()) {
-
-      for (auto i = mixbinsPID_antidantip.begin(); i != mixbinsPID_antidantip.end(); i++) { // iterating over all vertex&mult bins
-
-        std::vector<colType> value = i->second;
-        int EvPerBin = value.size(); // number of collisions in each vertex&mult bin
-
-        for (int indx1 = 0; indx1 < EvPerBin; indx1++) { // loop over all the events in each vertex&mult bin
-
-          auto col1 = value[indx1];
-
-          if (selectedtracksPIDMC_antip.find(col1->index()) != selectedtracksPIDMC_antip.end()) {
-            mixTracks<0, 1>(selectedtracksPIDMC_antid[col1->index()], selectedtracksPIDMC_antip[col1->index()], 1); // mixing SE
-          }
-
-          for (int indx2 = indx1 + 1; indx2 < EvPerBin; indx2++) { // nested loop for all the combinations of collisions in a chosen mult/vertex bin
-
-            auto col2 = (i->second)[indx2];
-
-            if (col1 == col2) {
-              continue;
-            }
-
-            if (selectedtracksPIDMC_antip.find(col2->index()) != selectedtracksPIDMC_antip.end()) {
-              mixTracks<1, 1>(selectedtracksPIDMC_antid[col1->index()], selectedtracksPIDMC_antip[col2->index()], 1); // mixing ME
-            }
-          }
-        }
-      }
-    }
-
-    // clearing up
-    for (auto i = selectedtracksMC_antid.begin(); i != selectedtracksMC_antid.end(); i++)
-      (i->second).clear();
-    selectedtracksMC_antid.clear();
-
-    for (auto i = selectedtracksMC_d.begin(); i != selectedtracksMC_d.end(); i++)
-      (i->second).clear();
-    selectedtracksMC_d.clear();
-
-    for (auto i = selectedtracksMC_antip.begin(); i != selectedtracksMC_antip.end(); i++)
-      (i->second).clear();
-    selectedtracksMC_antip.clear();
-
-    for (auto i = selectedtracksMC_p.begin(); i != selectedtracksMC_p.end(); i++)
-      (i->second).clear();
-    selectedtracksMC_p.clear();
-
-    for (auto i = selectedtracksPIDMC_antid.begin(); i != selectedtracksPIDMC_antid.end(); i++)
-      (i->second).clear();
-    selectedtracksPIDMC_antid.clear();
-
-    for (auto i = selectedtracksPIDMC_d.begin(); i != selectedtracksPIDMC_d.end(); i++)
-      (i->second).clear();
-    selectedtracksPIDMC_d.clear();
-
-    for (auto i = selectedtracksPIDMC_antip.begin(); i != selectedtracksPIDMC_antip.end(); i++)
-      (i->second).clear();
-    selectedtracksPIDMC_antip.clear();
-
-    for (auto i = selectedtracksPIDMC_p.begin(); i != selectedtracksPIDMC_p.end(); i++)
-      (i->second).clear();
-    selectedtracksPIDMC_p.clear();
-
-    for (auto& pair : mixbinsPID_antidantip) {
-      pair.second.clear(); // clear the vector associated with the key
-    }
-    mixbinsPID_antidantip.clear(); // clear the map
-
-    for (auto& pair : mixbins_antidantip) {
-      pair.second.clear(); // clear the vector associated with the key
-    }
-    mixbins_antidantip.clear(); // clear the map
   }
-  PROCESS_SWITCH(hadronnucleicorrelation, processMC, "processMC", false);
+  PROCESS_SWITCH(HadronNucleiCorrelation, processMC, "processMC", false);
 
-  void processGen(SimCollisions const& mcCollisions,
-                  SimParticles const& mcParticles)
+  void processSameEventGen(SimCollisions::iterator const&, SimParticles const& mcParticles)
   {
-    for (auto particle : mcParticles) {
+
+    registry.fill(HIST("Generated/hNEventsMC"), 0.5);
+
+    for (const auto& particle : mcParticles) {
+
+      if (particle.pdgCode() == PDG_t::kProton) {
+        registry.fill(HIST("Generated/hQAProtons"), 0.5);
+      }
+      if (particle.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("Generated/hQADeuterons"), 0.5);
+      }
 
       if (isPrim && !particle.isPhysicalPrimary()) {
         continue;
       }
+      if (particle.pdgCode() == PDG_t::kProton) {
+        registry.fill(HIST("Generated/hQAProtons"), 1.5);
+      }
+      if (particle.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("Generated/hQADeuterons"), 1.5);
+      }
 
-      if (std::abs(particle.eta()) > etacut) {
+      if (particle.pdgCode() == o2::constants::physics::Pdg::kDeuteron && std::abs(particle.y()) < yRap) {
+        registry.fill(HIST("Generated/hDeuteronsVsPt"), particle.pt());
+      }
+      if (particle.pdgCode() == -o2::constants::physics::Pdg::kDeuteron && std::abs(particle.y()) < yRap) {
+        registry.fill(HIST("Generated/hAntiDeuteronsVsPt"), particle.pt());
+      }
+
+      if (std::abs(particle.eta()) > etaCut) {
         continue;
       }
-
-      if (particle.pdgCode() == pdgDeuteron) {
-        selectedparticlesMC_d[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
+      if (particle.pdgCode() == PDG_t::kProton) {
+        registry.fill(HIST("Generated/hQAProtons"), 2.5);
       }
-      if (particle.pdgCode() == -pdgDeuteron) {
-        selectedparticlesMC_antid[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
+      if (particle.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("Generated/hQADeuterons"), 2.5);
       }
-      if (particle.pdgCode() == pdgProton) {
-        if (!particle.has_daughters()) {
-          selectedparticlesMC_p[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
-        } else {
-          bool isp = false;
 
-          for (auto& dau : particle.daughters_as<aod::McParticles>()) {
-            if (dau.pdgCode() == pdgProton) {
-              isp = true;
-            }
-          }
-
-          if (isp) {
-            selectedparticlesMC_p[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
-          }
-        }
+      if (particle.pdgCode() == o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("hGen_EtaPhiPt_Deuteron"), particle.eta(), particle.phi(), particle.pt());
       }
-      if (particle.pdgCode() == -pdgProton) {
-        if (!particle.has_daughters()) {
-          selectedparticlesMC_antip[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
-        } else {
-          bool isantip = false;
-
-          for (auto& dau : particle.daughters_as<aod::McParticles>()) {
-            if (dau.pdgCode() == -pdgProton) {
-              isantip = true;
-            }
-          }
-
-          if (isantip) {
-            selectedparticlesMC_antip[particle.mcCollisionId()].push_back(std::make_shared<decltype(particle)>(particle));
-          }
-        }
+      if (particle.pdgCode() == -o2::constants::physics::Pdg::kDeuteron) {
+        registry.fill(HIST("hGen_EtaPhiPt_Deuteron"), particle.eta(), particle.phi(), -1. * particle.pt());
+      }
+      if (particle.pdgCode() == PDG_t::kProton) {
+        registry.fill(HIST("hGen_EtaPhiPt_Proton"), particle.eta(), particle.phi(), particle.pt());
+      }
+      if (particle.pdgCode() == -PDG_t::kProton) {
+        registry.fill(HIST("hGen_EtaPhiPt_Proton"), particle.eta(), particle.phi(), -1. * particle.pt());
       }
     }
 
-    for (auto collision1 : mcCollisions) { // loop on collisions
+    if (mode == kPbarPbar || mode == kPP) { // Identical particle combinations
 
-      registry.fill(HIST("Generated/hNEventsMC"), 0.5);
+      for (const auto& [part0, part1] : combinations(CombinationsStrictlyUpperIndexPolicy(mcParticles, mcParticles))) {
 
-      // anti-d - anti-p correlation
-      if (selectedparticlesMC_antid.find(collision1.globalIndex()) != selectedparticlesMC_antid.end()) {
-        if (selectedparticlesMC_antip.find(collision1.globalIndex()) != selectedparticlesMC_antip.end()) {
-          mixMCParticles<0>(selectedparticlesMC_antid[collision1.globalIndex()], selectedparticlesMC_antip[collision1.globalIndex()]); // mixing SE
+        if (isPrim && !part0.isPhysicalPrimary()) {
+          continue;
+        }
+        if (isPrim && !part1.isPhysicalPrimary()) {
+          continue;
+        }
+        if (std::abs(part0.eta()) > etaCut) {
+          continue;
+        }
+        if (std::abs(part1.eta()) > etaCut) {
+          continue;
         }
 
-        int stop1 = 0;
-
-        for (auto collision2 : mcCollisions) { // nested loop on collisions
-
-          if (collision1.globalIndex() == collision2.globalIndex()) {
+        // mode 6
+        if (mode == kPP) {
+          if (part0.pdgCode() != PDG_t::kProton)
             continue;
-          }
-
-          if (stop1 > maxmixcollsGen) {
-            break;
-          }
-
-          if (selectedparticlesMC_antip.find(collision2.globalIndex()) != selectedparticlesMC_antip.end()) {
-            mixMCParticles<1>(selectedparticlesMC_antid[collision1.globalIndex()], selectedparticlesMC_antip[collision2.globalIndex()]); // mixing ME
-          }
-
-          stop1++;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
         }
+        // mode 5
+        if (mode == kPbarPbar) {
+          if (part0.pdgCode() != -PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+
+        fillHistogramsGen(part0, part1, false);
       }
 
-      // d - p correlation
-      if (domatterGen) {
-        if (selectedparticlesMC_d.find(collision1.globalIndex()) != selectedparticlesMC_d.end()) {
-          if (selectedparticlesMC_p.find(collision1.globalIndex()) != selectedparticlesMC_p.end()) {
-            mixMCParticles<0>(selectedparticlesMC_d[collision1.globalIndex()], selectedparticlesMC_p[collision1.globalIndex()]); // mixing SE
-          }
+    } else {
 
-          int stop2 = 0;
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(mcParticles, mcParticles))) {
 
-          for (auto collision2 : mcCollisions) { // nested loop on collisions
-
-            if (collision1.globalIndex() == collision2.globalIndex()) {
-              continue;
-            }
-
-            if (stop2 > maxmixcollsGen) {
-              break;
-            }
-
-            if (selectedparticlesMC_p.find(collision2.globalIndex()) != selectedparticlesMC_p.end()) {
-              mixMCParticles<1>(selectedparticlesMC_d[collision1.globalIndex()], selectedparticlesMC_p[collision2.globalIndex()]); // mixing ME
-            }
-
-            stop2++;
-          }
+        if (isPrim && !part0.isPhysicalPrimary()) {
+          continue;
         }
+        if (isPrim && !part1.isPhysicalPrimary()) {
+          continue;
+        }
+        if (std::abs(part0.eta()) > etaCut) {
+          continue;
+        }
+        if (std::abs(part1.eta()) > etaCut) {
+          continue;
+        }
+
+        if (mode == kDbarPbar) {
+          if (part0.pdgCode() != -o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDP) {
+          if (part0.pdgCode() != o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (part0.pdgCode() != -o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (part0.pdgCode() != o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (part0.pdgCode() != -PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (part0.pdgCode() != PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+
+        fillHistogramsGen(part0, part1, false);
       }
     }
-
-    // clearing up
-    for (auto i = selectedparticlesMC_antid.begin(); i != selectedparticlesMC_antid.end(); i++)
-      (i->second).clear();
-    selectedparticlesMC_antid.clear();
-
-    for (auto i = selectedparticlesMC_d.begin(); i != selectedparticlesMC_d.end(); i++)
-      (i->second).clear();
-    selectedparticlesMC_d.clear();
-
-    for (auto i = selectedparticlesMC_antip.begin(); i != selectedparticlesMC_antip.end(); i++)
-      (i->second).clear();
-    selectedparticlesMC_antip.clear();
-
-    for (auto i = selectedparticlesMC_p.begin(); i != selectedparticlesMC_p.end(); i++)
-      (i->second).clear();
-    selectedparticlesMC_p.clear();
   }
-  PROCESS_SWITCH(hadronnucleicorrelation, processGen, "processGen", false);
+  PROCESS_SWITCH(HadronNucleiCorrelation, processSameEventGen, "processSameEventGen", false);
+
+  Preslice<SimParticles> perMcCollision = o2::aod::mcparticle::mcCollisionId;
+
+  void processMixedEventGen(SimCollisions const& mcCollisions, SimParticles const& mcParticles)
+  {
+
+    auto getMultiplicity = [this, &mcParticles](SimCollisions::iterator const& collision) {
+      auto particlesPerCol = mcParticles.sliceBy(perMcCollision, collision.globalIndex());
+      auto multiplicity = getMCMultiplicity(particlesPerCol);
+      return multiplicity;
+    };
+
+    using BinningTypeMC = FlexibleBinningPolicy<std::tuple<decltype(getMultiplicity)>, aod::mccollision::PosZ, decltype(getMultiplicity)>;
+    BinningTypeMC colBinningGen{{getMultiplicity}, {confVtxBins, confMultBins}, true};
+
+    for (const auto& [collision1, collision2] : soa::selfCombinations(colBinningGen, 5, -1, mcCollisions, mcCollisions)) {
+
+      auto groupPartsOne = mcParticles.sliceBy(perMcCollision, collision1.globalIndex());
+      auto groupPartsTwo = mcParticles.sliceBy(perMcCollision, collision2.globalIndex());
+
+      // LOGF(info, "Mixed event collisions: (%d, %d) zvtx (%.1f, %.1f) mult (%.1f, %.1f)", collision1.globalIndex(), collision2.globalIndex(), collision1.posZ(), collision2.posZ(), getMCMultiplicity(groupPartsOne), getMCMultiplicity(groupPartsTwo));
+
+      for (const auto& [part0, part1] : combinations(CombinationsFullIndexPolicy(groupPartsOne, groupPartsTwo))) {
+
+        if (isPrim && !part0.isPhysicalPrimary()) {
+          continue;
+        }
+        if (isPrim && !part1.isPhysicalPrimary()) {
+          continue;
+        }
+        if (std::abs(part0.eta()) > etaCut) {
+          continue;
+        }
+        if (std::abs(part1.eta()) > etaCut) {
+          continue;
+        }
+
+        if (mode == kDbarPbar) {
+          if (part0.pdgCode() != -o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDP) {
+          if (part0.pdgCode() != o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDbarP) {
+          if (part0.pdgCode() != -o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kDPbar) {
+          if (part0.pdgCode() != o2::constants::physics::Pdg::kDeuteron)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPbarP) {
+          if (part0.pdgCode() != -PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPbarPbar) {
+          if (part0.pdgCode() != -PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPP) {
+          if (part0.pdgCode() != PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != PDG_t::kProton)
+            continue;
+        }
+        if (mode == kPPbar) {
+          if (part0.pdgCode() != PDG_t::kProton)
+            continue;
+          if (part1.pdgCode() != -PDG_t::kProton)
+            continue;
+        }
+
+        fillHistogramsGen(part0, part1, true);
+      }
+    }
+  }
+  PROCESS_SWITCH(HadronNucleiCorrelation, processMixedEventGen, "processMixedEventGen", false);
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
-  return WorkflowSpec{adaptAnalysisTask<hadronnucleicorrelation>(cfgc)};
+  return WorkflowSpec{adaptAnalysisTask<HadronNucleiCorrelation>(cfgc)};
 }

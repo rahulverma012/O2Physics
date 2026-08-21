@@ -13,8 +13,14 @@
 // Class for dimuon Cut
 //
 
-#include "Framework/Logger.h"
 #include "PWGEM/Dilepton/Core/DimuonCut.h"
+
+#include <Framework/Logger.h>
+
+#include <Rtypes.h>
+
+#include <functional>
+#include <vector>
 
 ClassImp(DimuonCut);
 
@@ -34,7 +40,7 @@ void DimuonCut::SetPairYRange(float minY, float maxY)
 {
   mMinPairY = minY;
   mMaxPairY = maxY;
-  LOG(info) << "Dimuon Cut, set pair eta range: " << mMinPairY << " - " << mMaxPairY;
+  LOG(info) << "Dimuon Cut, set pair rapidity range: " << mMinPairY << " - " << mMaxPairY;
 }
 void DimuonCut::SetPairDCAxyRange(float min, float max)
 {
@@ -78,11 +84,27 @@ void DimuonCut::SetChi2(float min, float max)
   mMaxChi2 = max;
   LOG(info) << "Dimuon Cut, set chi2 range: " << mMinChi2 << " - " << mMaxChi2;
 }
+void DimuonCut::SetChi2MFT(float min, float max)
+{
+  mMinChi2MFT = min;
+  mMaxChi2MFT = max;
+  LOG(info) << "Dimuon Cut, set chi2mft range: " << mMinChi2MFT << " - " << mMaxChi2MFT;
+}
 void DimuonCut::SetMatchingChi2MCHMFT(float min, float max)
 {
   mMinMatchingChi2MCHMFT = min;
   mMaxMatchingChi2MCHMFT = max;
   LOG(info) << "Dimuon Cut, set matching chi2 MFT-MCH range: " << mMinMatchingChi2MCHMFT << " - " << mMaxMatchingChi2MCHMFT;
+}
+void DimuonCut::SetMaxMatchingChi2MCHMFTPtDep(std::function<float(float)> PtDepCut)
+{
+  mMaxMatchingChi2MCHMFTPtDep = PtDepCut;
+  LOG(info) << "Dimuon Cut, set matching chi2 MFT-MCH range: " << mMaxMatchingChi2MCHMFTPtDep(0.5);
+}
+void DimuonCut::SetMaxDiffMatchingChi2MCHMFT(float diff)
+{
+  mMaxDiffMatchingChi2MCHMFT = diff;
+  LOG(info) << "Dimuon Cut, set max diff. matching chi2 MFT-MCH: " << mMaxDiffMatchingChi2MCHMFT;
 }
 void DimuonCut::SetMatchingChi2MCHMID(float min, float max)
 {
@@ -114,8 +136,32 @@ void DimuonCut::SetDCAxy(float min, float max)
   mMaxDcaXY = max;
   LOG(info) << "Dimuon Cut, set DCAxy range: " << mMinDcaXY << " - " << mMaxDcaXY;
 }
+void DimuonCut::EnableTTCA(const bool flag)
+{
+  mEnableTTCA = flag;
+  LOG(info) << "Dimuon Cut, enable TTCA: " << mEnableTTCA;
+}
 void DimuonCut::SetMaxPDCARabsDep(std::function<float(float)> RabsDepCut)
 {
   mMaxPDCARabsDep = RabsDepCut;
   LOG(info) << "Dimuon Cut, set max pDCA as a function of Rabs: " << mMaxPDCARabsDep(10.0);
+}
+void DimuonCut::SetMFTHitMap(bool flag, std::vector<int> hitMap)
+{
+  mApplyMFTHitMap = flag;
+  mRequiredMFTDisks = hitMap;
+  if (mApplyMFTHitMap) {
+    for (const auto& iDisk : mRequiredMFTDisks) {
+      LOG(info) << "Dimuon Cut, require MFT hit on Disk: " << iDisk;
+    }
+  }
+}
+void DimuonCut::SetMaxdPtdEtadPhiwrtMCHMID(float reldPtMax, float dEtaMax, float dPhiMax)
+{
+  mMaxReldPtwrtMCHMID = reldPtMax;
+  mMaxdEtawrtMCHMID = dEtaMax;
+  mMaxdPhiwrtMCHMID = dPhiMax;
+  LOG(info) << "Dimuon Cut, set max rel. dpt between MFT-MCH-MID and associated MCH-MID: " << mMaxReldPtwrtMCHMID;
+  LOG(info) << "Dimuon Cut, set max deta between MFT-MCH-MID and associated MCH-MID: " << mMaxdEtawrtMCHMID;
+  LOG(info) << "Dimuon Cut, set max dphi between MFT-MCH-MID and associated MCH-MID: " << mMaxdPhiwrtMCHMID;
 }

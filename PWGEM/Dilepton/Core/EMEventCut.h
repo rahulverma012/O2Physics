@@ -16,11 +16,11 @@
 #ifndef PWGEM_DILEPTON_CORE_EMEVENTCUT_H_
 #define PWGEM_DILEPTON_CORE_EMEVENTCUT_H_
 
-#include "TNamed.h"
-#include "Common/CCDB/EventSelectionParams.h"
-#include "Common/CCDB/TriggerAliases.h"
+#include "PWGEM/Dilepton/DataModel/EvSelFlags.h"
 
-using namespace std;
+#include <TNamed.h>
+
+#include <Rtypes.h>
 
 class EMEventCut : public TNamed
 {
@@ -37,6 +37,7 @@ class EMEventCut : public TNamed
     kNoITSROFB, // no ITS read out frame border
     kNoSameBunchPileup,
     kIsVertexITSTPC,
+    kIsVertexTOFmatched,
     kIsGoodZvtxFT0vsPV,
     kNoCollInTimeRangeStandard,
     kNoCollInTimeRangeStrict,
@@ -71,6 +72,9 @@ class EMEventCut : public TNamed
       return false;
     }
     if (mRequireVertexITSTPC && !IsSelected(collision, EMEventCuts::kIsVertexITSTPC)) {
+      return false;
+    }
+    if (mRequireVertexTOFmatched && !IsSelected(collision, EMEventCuts::kIsVertexTOFmatched)) {
       return false;
     }
     if (mRequireGoodZvtxFT0vsPV && !IsSelected(collision, EMEventCuts::kIsGoodZvtxFT0vsPV)) {
@@ -111,49 +115,52 @@ class EMEventCut : public TNamed
         return collision.sel8();
 
       case EMEventCuts::kFT0AND:
-        return collision.selection_bit(o2::aod::evsel::kIsTriggerTVX);
+        return collision.selection_bit(o2::aod::emevsel::kIsTriggerTVX);
 
       case EMEventCuts::kZvtx:
         return mMinZvtx < collision.posZ() && collision.posZ() < mMaxZvtx;
 
       case EMEventCuts::kNoTFB:
-        return collision.selection_bit(o2::aod::evsel::kNoTimeFrameBorder);
+        return collision.selection_bit(o2::aod::emevsel::kNoTimeFrameBorder);
 
       case EMEventCuts::kNoITSROFB:
-        return collision.selection_bit(o2::aod::evsel::kNoITSROFrameBorder);
+        return collision.selection_bit(o2::aod::emevsel::kNoITSROFrameBorder);
 
       case EMEventCuts::kNoSameBunchPileup:
-        return collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup);
+        return collision.selection_bit(o2::aod::emevsel::kNoSameBunchPileup);
 
       case EMEventCuts::kIsVertexITSTPC:
-        return collision.selection_bit(o2::aod::evsel::kIsVertexITSTPC);
+        return collision.selection_bit(o2::aod::emevsel::kIsVertexITSTPC);
+
+      case EMEventCuts::kIsVertexTOFmatched:
+        return collision.selection_bit(o2::aod::emevsel::kIsVertexTOFmatched);
 
       case EMEventCuts::kIsGoodZvtxFT0vsPV:
-        return collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV);
+        return collision.selection_bit(o2::aod::emevsel::kIsGoodZvtxFT0vsPV);
 
       case EMEventCuts::kNoCollInTimeRangeStandard:
-        return collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard);
+        return collision.selection_bit(o2::aod::emevsel::kNoCollInTimeRangeStandard);
 
       case EMEventCuts::kNoCollInTimeRangeStrict:
-        return collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStrict);
+        return collision.selection_bit(o2::aod::emevsel::kNoCollInTimeRangeStrict);
 
       case EMEventCuts::kNoCollInITSROFStandard:
-        return collision.selection_bit(o2::aod::evsel::kNoCollInRofStandard);
+        return collision.selection_bit(o2::aod::emevsel::kNoCollInRofStandard);
 
       case EMEventCuts::kNoCollInITSROFStrict:
-        return collision.selection_bit(o2::aod::evsel::kNoCollInRofStrict);
+        return collision.selection_bit(o2::aod::emevsel::kNoCollInRofStrict);
 
       case EMEventCuts::kNoHighMultCollInPrevRof:
-        return collision.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof);
+        return collision.selection_bit(o2::aod::emevsel::kNoHighMultCollInPrevRof);
 
       case EMEventCuts::kIsGoodITSLayer3:
-        return collision.selection_bit(o2::aod::evsel::kIsGoodITSLayer3);
+        return collision.selection_bit(o2::aod::emevsel::kIsGoodITSLayer3);
 
       case EMEventCuts::kIsGoodITSLayer0123:
-        return collision.selection_bit(o2::aod::evsel::kIsGoodITSLayer0123);
+        return collision.selection_bit(o2::aod::emevsel::kIsGoodITSLayer0123);
 
       case EMEventCuts::kIsGoodITSLayersAll:
-        return collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll);
+        return collision.selection_bit(o2::aod::emevsel::kIsGoodITSLayersAll);
 
       default:
         return true;
@@ -168,6 +175,7 @@ class EMEventCut : public TNamed
   void SetRequireNoITSROFB(bool flag);
   void SetRequireNoSameBunchPileup(bool flag);
   void SetRequireVertexITSTPC(bool flag);
+  void SetRequireVertexTOFmatched(bool flag);
   void SetRequireGoodZvtxFT0vsPV(bool flag);
   void SetRequireNoCollInTimeRangeStandard(bool flag);
   void SetRequireNoCollInTimeRangeStrict(bool flag);
@@ -186,6 +194,7 @@ class EMEventCut : public TNamed
   bool mRequireNoITSROFB{false};
   bool mRequireNoSameBunchPileup{false};
   bool mRequireVertexITSTPC{false};
+  bool mRequireVertexTOFmatched{false};
   bool mRequireGoodZvtxFT0vsPV{false};
   bool mRequireNoCollInTimeRangeStandard{false};
   bool mRequireNoCollInTimeRangeStrict{false};

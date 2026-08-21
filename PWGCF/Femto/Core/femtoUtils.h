@@ -1,0 +1,348 @@
+// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
+// All rights not expressly granted are reserved.
+//
+// This software is distributed under the terms of the GNU General Public
+// License v3 (GPL Version 3), copied verbatim in the file "COPYING".
+//
+// In applying this license CERN does not waive the privileges and immunities
+// granted to it by virtue of its status as an Intergovernmental Organization
+// or submit itself to any jurisdiction.
+
+/// \file femtoUtils.h
+/// \brief Collision selection
+/// \author Anton Riedel, TU München, anton.riedel@cern.ch
+
+#ifndef PWGCF_FEMTO_CORE_FEMTOUTILS_H_
+#define PWGCF_FEMTO_CORE_FEMTOUTILS_H_
+
+#include "Common/Core/TableHelper.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+
+#include <TPDGCode.h>
+
+#include <algorithm>
+#include <cmath>
+#include <concepts>
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <unordered_map>
+
+namespace o2::analysis::femto
+{
+namespace utils
+{
+
+template <typename T1, typename T2>
+inline std::optional<T2> getIndex(const T1& index, const std::unordered_map<T1, T2>& map)
+{
+  auto it = map.find(index);
+  if (it != map.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+/// Translate a global daughter index into a row of the current track table frame.
+/// Aborts if the index does not fall inside the frame, which would otherwise
+/// silently produce an out-of-range iterator.
+template <typename T>
+int64_t daughterRow(int64_t daughterId, T const& trackTable)
+{
+  const int64_t row = daughterId - trackTable.offset();
+  if (daughterId < 0 || row < 0 || row >= static_cast<int64_t>(trackTable.size())) {
+    LOG(fatal) << "Daughter index " << daughterId << " out of range for track table (offset "
+               << trackTable.offset() << ", size " << trackTable.size() << "). Breaking...";
+  }
+  return row;
+}
+
+template <typename T>
+float itsSignal(T const& track)
+{
+  uint32_t clsizeflag = track.itsClusterSizes();
+  auto clSizeLayer0 = (clsizeflag >> (0 * 4)) & 0xf;
+  auto clSizeLayer1 = (clsizeflag >> (1 * 4)) & 0xf;
+  auto clSizeLayer2 = (clsizeflag >> (2 * 4)) & 0xf;
+  auto clSizeLayer3 = (clsizeflag >> (3 * 4)) & 0xf;
+  auto clSizeLayer4 = (clsizeflag >> (4 * 4)) & 0xf;
+  auto clSizeLayer5 = (clsizeflag >> (5 * 4)) & 0xf;
+  auto clSizeLayer6 = (clsizeflag >> (6 * 4)) & 0xf;
+  int numLayers = 7;
+  int sumClusterSizes = clSizeLayer0 + clSizeLayer1 + clSizeLayer2 + clSizeLayer3 + clSizeLayer4 + clSizeLayer5 + clSizeLayer6;
+  double cosLamnda = 1. / std::cosh(track.eta());
+  double signal = (static_cast<double>(sumClusterSizes) / numLayers) * cosLamnda;
+  return static_cast<float>(signal);
+};
+
+inline double getPdgMass(int pdgCode)
+{
+  // use this function instead of TDatabasePDG to return masses defined in the PhysicsConstants.h header
+  // this approach saves a lot of memory and important partilces like deuteron are missing in TDatabasePDG anyway
+  double mass = 0.f;
+  // add new particles if necessary here
+  switch (std::abs(pdgCode)) {
+    case kPiPlus:
+      mass = o2::constants::physics::MassPiPlus;
+      break;
+    case kKPlus:
+      mass = o2::constants::physics::MassKPlus;
+      break;
+    case kProton:
+      mass = o2::constants::physics::MassProton;
+      break;
+    case kLambda0:
+      mass = o2::constants::physics::MassLambda;
+      break;
+    case o2::constants::physics::Pdg::kPhi:
+      mass = o2::constants::physics::MassPhi;
+      break;
+    case kRho770_0:
+      mass = 775.26; // not defined in O2?
+      break;
+    case kRho770Plus:
+      mass = 775.11; // not defined in O2?
+      break;
+    case o2::constants::physics::Pdg::kK0Star892:
+      mass = o2::constants::physics::MassK0Star892;
+      break;
+    case o2::constants::physics::Pdg::kLambdaCPlus:
+      mass = o2::constants::physics::MassLambdaCPlus;
+      break;
+    case o2::constants::physics::Pdg::kD0:
+      mass = o2::constants::physics::MassD0;
+      break;
+    case o2::constants::physics::Pdg::kDeuteron:
+      mass = o2::constants::physics::MassDeuteron;
+      break;
+    case o2::constants::physics::Pdg::kTriton:
+      mass = o2::constants::physics::MassTriton;
+      break;
+    case o2::constants::physics::Pdg::kHelium3:
+      mass = o2::constants::physics::MassHelium3;
+      break;
+    case kSigmaMinus:
+      mass = o2::constants::physics::MassSigmaMinus;
+      break;
+    case kSigmaPlus:
+      mass = o2::constants::physics::MassSigmaPlus;
+      break;
+    case kXiMinus:
+      mass = o2::constants::physics::MassXiMinus;
+      break;
+    case kOmegaMinus:
+      mass = o2::constants::physics::MassOmegaMinus;
+      break;
+    default:
+      LOG(warn) << "PDG code is not suppored. Return 0...";
+  }
+  return mass;
+}
+
+template <typename T>
+concept HasQvectors = requires(T col) {
+  col.qvecFT0CReVec();
+  col.qvecFT0CImVec();
+  col.sumAmplFT0C();
+  col.qvecFT0AReVec();
+  col.qvecFT0AImVec();
+  col.sumAmplFT0A();
+};
+
+template <typename T>
+concept HasEventShape = requires(T col) {
+  col.qvec();
+  col.eventPlaneAngle();
+};
+
+/// Recalculate pT for Kinks (Sigmas) using kinematic constraints
+inline float calcPtnew(float pxMother, float pyMother, float pzMother, float pxDaughter, float pyDaughter, float pzDaughter)
+{
+  float almost0 = 1e-6f;
+  // Particle masses in GeV/c^2
+  auto massPion = o2::constants::physics::MassPionCharged;
+  auto massNeutron = o2::constants::physics::MassNeutron;
+  auto massSigmaMinus = o2::constants::physics::MassSigmaMinus;
+
+  // Calculate mother momentum and direction versor
+  float pMother = std::sqrt(pxMother * pxMother + pyMother * pyMother + pzMother * pzMother);
+  if (pMother < almost0) {
+    return -999.f;
+  }
+
+  float versorX = pxMother / pMother;
+  float versorY = pyMother / pMother;
+  float versorZ = pzMother / pMother;
+
+  // Calculate daughter energy
+  float ePi = std::sqrt(massPion * massPion + pxDaughter * pxDaughter + pyDaughter * pyDaughter + pzDaughter * pzDaughter);
+
+  // Scalar product of versor with daughter momentum
+  float scalarProduct = versorX * pxDaughter + versorY * pyDaughter + versorZ * pzDaughter;
+
+  // Solve quadratic equation for momentum magnitude
+  float k = massSigmaMinus * massSigmaMinus + massPion * massPion - massNeutron * massNeutron;
+  float a = 4.f * (ePi * ePi - scalarProduct * scalarProduct);
+  float b = -4.f * scalarProduct * k;
+  float c = 4.f * ePi * ePi * massSigmaMinus * massSigmaMinus - k * k;
+
+  if (std::abs(a) < almost0) {
+    return -999.f;
+  }
+
+  float d = b * b - 4.f * a * c;
+  if (d < 0.f) {
+    return -999.f;
+  }
+
+  float sqrtD = std::sqrt(d);
+  float p1 = (-b + sqrtD) / (2.f * a);
+  float p2 = (-b - sqrtD) / (2.f * a);
+
+  // Pick physical solution: prefer P2 if positive, otherwise P1
+  if (p2 < 0.f && p1 < 0.f) {
+    return -999.f;
+  }
+  if (p2 < 0.f) {
+    return p1;
+  }
+
+  // Choose solution closest to original momentum
+  float p1Diff = std::abs(p1 - pMother);
+  float p2Diff = std::abs(p2 - pMother);
+  float p = (p1Diff < p2Diff) ? p1 : p2;
+
+  // Calculate pT from recalibrated momentum
+  float pxS = versorX * p;
+  float pyS = versorY * p;
+  return std::sqrt(pxS * pxS + pyS * pyS);
+}
+
+inline bool enableTable(const char* tableName, int userSetting, o2::framework::InitContext& initContext)
+{
+  if (userSetting == 1) {
+    LOG(info) << "Enabled femto table (forced on): " << tableName;
+    return true;
+  }
+  if (userSetting == 0) {
+    LOG(info) << "Disabled femto table (forced off): " << tableName;
+    return false;
+  }
+  bool required = o2::common::core::isTableRequiredInWorkflow(initContext, tableName);
+  if (required) {
+    LOG(info) << "Enabled femto table (auto): " << tableName;
+  }
+  return required;
+}
+
+// template <typename T>
+// using HasMass = decltype(std::declval<T&>().mass());
+//
+// template <typename T>
+// using HasSign = decltype(std::declval<T&>().sign());
+
+template <typename T>
+concept HasMass = requires(T t) {
+  { t.mass() } -> std::convertible_to<float>; // or double, whatever mass() returns
+};
+
+template <typename T>
+inline int signum(T x)
+{
+  return (T(0) < x) - (x < T(0));
+}
+
+template <typename T>
+T binLinear(float value, float lo, float hi, float step)
+{
+  float v = std::clamp(value, lo, hi);
+  auto idx = static_cast<int64_t>(std::round((v - lo) / step));
+  auto maxIdx = static_cast<int64_t>(std::numeric_limits<T>::max()) - static_cast<int64_t>(std::numeric_limits<T>::min());
+  idx = std::clamp(idx, static_cast<int64_t>(0), maxIdx);
+  return static_cast<T>(idx + std::numeric_limits<T>::min());
+}
+
+template <typename T>
+float unBinLinear(T binned, float lo, float step)
+{
+  auto idx = static_cast<int64_t>(binned) - static_cast<int64_t>(std::numeric_limits<T>::min());
+  return lo + static_cast<float>(idx) * step;
+}
+
+template <typename T>
+T binLogSigned(float signedValue, float magMin, float magMax)
+{
+  static_assert(std::is_unsigned_v<T>, "binLogSigned requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t HalfLevels = uint64_t{1} << (TotalBits - 1);
+  const uint64_t sign = (signedValue < 0.f) ? uint64_t{1} : uint64_t{0};
+  const float mag = std::clamp(std::fabs(signedValue), magMin, magMax);
+  const float logLo = std::log(magMin);
+  const float logHi = std::log(magMax);
+  const float step = (logHi - logLo) / static_cast<float>(HalfLevels - 1);
+  auto idx = static_cast<int64_t>(std::round((std::log(mag) - logLo) / step));
+  idx = std::clamp(idx, int64_t{0}, static_cast<int64_t>(HalfLevels - 1));
+  return static_cast<T>((sign << (TotalBits - 1)) | static_cast<uint64_t>(idx));
+}
+
+template <typename T>
+float unBinLogSigned(T binned, float magMin, float magMax)
+{
+  static_assert(std::is_unsigned_v<T>, "unBinLogSigned requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t HalfLevels = uint64_t{1} << (TotalBits - 1);
+  constexpr T SignMask = static_cast<T>(uint64_t{1} << (TotalBits - 1));
+  constexpr T MagMask = static_cast<T>(SignMask - 1);
+  const float sign = (binned & SignMask) ? -1.f : 1.f;
+  const auto idx = static_cast<uint64_t>(binned & MagMask);
+  const float logLo = std::log(magMin);
+  const float logHi = std::log(magMax);
+  const float step = (logHi - logLo) / static_cast<float>(HalfLevels - 1);
+  return sign * std::exp(logLo + static_cast<float>(idx) * step);
+}
+
+template <typename T>
+int unBinSign(T binned)
+{
+  static_assert(std::is_unsigned_v<T>, "unBinSign requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr T SignMask = static_cast<T>(uint64_t{1} << (TotalBits - 1));
+  return (binned & SignMask) ? -1 : 1;
+}
+
+template <typename T>
+T binLogUnsigned(float value, float magMin, float magMax)
+{
+  static_assert(std::is_unsigned_v<T>, "binLogUnsigned requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t Levels = uint64_t{1} << TotalBits; // number of representable values, e.g. 65536 for uint16_t
+  float mag = std::clamp(value, magMin, magMax);
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(Levels - 1);
+  auto idx = static_cast<uint64_t>(std::round((std::log(mag) - logLo) / step));
+  idx = std::clamp(idx, uint64_t{0}, Levels - 1);
+  return static_cast<T>(idx);
+}
+
+template <typename T>
+float unBinLogUnsigned(T binned, float magMin, float magMax)
+{
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t Levels = uint64_t{1} << TotalBits;
+  uint64_t idx = binned;
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(Levels - 1);
+  float mag = std::exp(logLo + static_cast<float>(idx) * step);
+  return mag;
+}
+
+}; // namespace utils
+}; // namespace o2::analysis::femto
+//
+#endif // PWGCF_FEMTO_CORE_FEMTOUTILS_H_

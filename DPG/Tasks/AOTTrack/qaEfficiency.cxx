@@ -16,28 +16,41 @@
 ///         In MC the efficiency for particles is computed according to the PDG code (sign included and not charge).
 ///
 
-// O2 includes
-#include <memory>
-#include <vector>
+#include "PWGLF/DataModel/LFParticleIdentification.h"
 
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/StaticFor.h"
-#include "ReconstructionDataFormats/DCA.h"
-#include "ReconstructionDataFormats/Track.h"
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/Core/RecoDecay.h"
 #include "Common/Core/TrackSelection.h"
+#include "Common/Core/TrackSelectionDefaults.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
-#include "Common/Core/TrackSelectionDefaults.h"
 #include "Common/DataModel/TrackSelectionTables.h"
-#include "PWGLF/DataModel/LFParticleIdentification.h"
-#include "Common/Core/RecoDecay.h"
 
-// ROOT includes
-#include "TPDGCode.h"
-#include "TEfficiency.h"
-#include "THashList.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/SliceCache.h>
+#include <Framework/StaticFor.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/PID.h>
+
+#include <TAxis.h>
+#include <TEfficiency.h>
+#include <THashList.h>
+#include <TMathBase.h>
+#include <TString.h>
+
+#include <array>
+#include <cmath>
+#include <memory>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -97,6 +110,9 @@ std::array<std::shared_ptr<TH1>, nParticles> hPtGeneratedRecoEv;
 std::array<std::shared_ptr<TH1>, nParticles> hPtItsPrm;
 std::array<std::shared_ptr<TH1>, nParticles> hPtItsTpcPrm;
 std::array<std::shared_ptr<TH1>, nParticles> hPtTrkItsTpcPrm;
+std::array<std::shared_ptr<TH2>, nParticles> hDeltaPtVsPtTrkItsTpcPrm;
+std::array<std::shared_ptr<TH2>, nParticles> hPtGenVsPtTrkItsTpcPrm;
+std::array<std::shared_ptr<TH2>, nParticles> hPtGenVsPIDTrkItsTpcPrm;
 std::array<std::shared_ptr<TH1>, nParticles> hPtItsTpcTofPrm;
 std::array<std::shared_ptr<TH1>, nParticles> hPtTrkItsTpcTofPrm;
 std::array<std::shared_ptr<TH1>, nParticles> hPtGeneratedPrm;
@@ -188,6 +204,7 @@ struct QaEfficiency {
   Configurable<bool> numSameCollision{"numSameCollision", false, "Flag to ask that the numerator is in the same collision as the denominator"};
   Configurable<bool> noFakesHits{"noFakesHits", false, "Flag to reject tracks that have fake hits"};
   Configurable<bool> skipEventsWithoutTPCTracks{"skipEventsWithoutTPCTracks", false, "Flag to reject events that have no tracks reconstructed in the TPC"};
+  Configurable<bool> skipParticlesFromBackgroundEvents{"skipParticlesFromBackgroundEvents", false, "Flag to reject particles from background events (for embedded MC)"};
   Configurable<float> maxProdRadius{"maxProdRadius", 9999.f, "Maximum production radius of the particle under study"};
   Configurable<float> nsigmaTPCDe{"nsigmaTPCDe", 3.f, "Value of the Nsigma TPC cut for deuterons PID"};
   // Charge selection
@@ -231,6 +248,7 @@ struct QaEfficiency {
   Configurable<bool> doPtEta{"doPtEta", false, "Flag to produce the efficiency vs pT and Eta"};
   Configurable<bool> doPtRadius{"doPtRadius", false, "Flag to produce the efficiency vs pT and Radius"};
   Configurable<int> applyEvSel{"applyEvSel", 0, "Flag to apply event selection: 0 -> no event selection, 1 -> Run 2 event selection, 2 -> Run 3 event selection"};
+  Configurable<bool> applyTimeFrameBorderCut{"applyTimeFrameBorderCut", false, "Flag to apply the TF border cut"};
   // Custom track cuts for debug purposes
   TrackSelection customTrackCuts;
   struct : ConfigurableGroup {
@@ -262,8 +280,10 @@ struct QaEfficiency {
 
   using CollisionCandidates = o2::soa::Join<o2::aod::Collisions, o2::aod::EvSels, aod::CentFT0Cs>;
   using CollisionCandidatesMC = o2::soa::Join<CollisionCandidates, o2::aod::McCollisionLabels>;
+  using CollisionsWithMcLabels = o2::soa::Join<o2::aod::Collisions, o2::aod::McCollisionLabels>;
   using TrackCandidates = o2::soa::Join<o2::aod::Tracks, o2::aod::TracksExtra, o2::aod::TrackSelection, o2::aod::TrackSelectionExtension, o2::aod::TracksDCA>;
   using TrackCandidatesMC = o2::soa::Join<TrackCandidates, o2::aod::McTrackLabels>;
+  using BCsInfo = soa::Join<aod::BCs, aod::Timestamps, aod::BcSels>;
 
   // Histograms
   HistogramRegistry histos{"Histos", {}, OutputObjHandlingPolicy::AnalysisObject};
@@ -308,6 +328,7 @@ struct QaEfficiency {
     const AxisSpec axisPhi{phiBins, "#it{#varphi} (rad)"};
     const AxisSpec axisRadius{radiusBins, "Radius (cm)"};
     const AxisSpec axisOcc{occBins, "Occupancy"};
+    const AxisSpec axisPIDFlag{16, -0.5, 15.5, "PID flag (top 4 bits)"};
 
     const char* partName = particleName(pdgSign, id);
     LOG(info) << "Preparing histograms for particle: " << partName << " pdgSign " << pdgSign;
@@ -359,6 +380,9 @@ struct QaEfficiency {
     hPtItsPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/its", PDGs[histogramIndex]), "ITS tracks (primaries) " + tagPt, kTH1D, {axisPt});
     hPtItsTpcPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/its_tpc", PDGs[histogramIndex]), "ITS-TPC tracks (primaries) " + tagPt, kTH1D, {axisPt});
     hPtTrkItsTpcPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/trk/its_tpc", PDGs[histogramIndex]), "ITS-TPC tracks (reco primaries) " + tagPt, kTH1D, {axisPt});
+    hDeltaPtVsPtTrkItsTpcPrm[histogramIndex] = histos.add<TH2>(Form("MC/pdg%i/pt/prm/generated_vs_reco_delta", PDGs[histogramIndex]), "Abs(Gen - Reco) pT vs Gen pT (primaries) " + tagPt, kTH2D, {axisPt, axisPt});
+    hPtGenVsPtTrkItsTpcPrm[histogramIndex] = histos.add<TH2>(Form("MC/pdg%i/pt/prm/generated_vs_reco", PDGs[histogramIndex]), "Reco pT vs Gen pT (primaries) " + tagPt, kTH2D, {axisPt, axisPt});
+    hPtGenVsPIDTrkItsTpcPrm[histogramIndex] = histos.add<TH2>(Form("MC/pdg%i/pt/prm/generated_vs_reco_pid_tracking", PDGs[histogramIndex]), "PID for tracking vs Gen pT (primaries) " + tagPt, kTH2D, {axisPt, axisPIDFlag});
     hPtItsTpcTofPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/its_tpc_tof", PDGs[histogramIndex]), "ITS-TPC-TOF tracks (primaries) " + tagPt, kTH1D, {axisPt});
     hPtTrkItsTpcTofPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/trk/its_tpc_tof", PDGs[histogramIndex]), "ITS-TPC-TOF tracks (reco primaries) " + tagPt, kTH1D, {axisPt});
     hPtGeneratedPrm[histogramIndex] = histos.add<TH1>(Form("MC/pdg%i/pt/prm/generated", PDGs[histogramIndex]), "Generated (primaries) " + tagPt, kTH1D, {axisPt});
@@ -579,6 +603,10 @@ struct QaEfficiency {
     }
     if (doprocessMC && doprocessMCWithoutCollisions) {
       LOG(fatal) << "Both processMC and processMCWithoutCollisions are set to true. Please set only one of them to true.";
+    }
+
+    if (numSameCollision && doprocessMCWithoutCollisions) {
+      LOG(fatal) << "Inconsistent configuration for process without MC collisions, but numSameCollision set to true. Please fix your configuration.";
     }
 
     auto h = histos.add<TH1>("MC/trackSelection", "Track Selection", kTH1D, {axisSel});
@@ -972,6 +1000,7 @@ struct QaEfficiency {
 
     histos.get<TH1>(HIST("eventSelection"))->GetXaxis()->SetBinLabel(3, "Passed Contrib.");
     histos.get<TH1>(HIST("eventSelection"))->GetXaxis()->SetBinLabel(4, "Passed Position");
+    histos.get<TH1>(HIST("eventSelection"))->GetXaxis()->SetBinLabel(5, "Passed Time Frame border cut");
 
     if (doprocessMC) {
       histos.add("MC/generatedCollisions", "Generated Collisions", kTH1D, {{10, 0.5, 10.5, "Generated collisions"}});
@@ -1038,7 +1067,7 @@ struct QaEfficiency {
     }
     return false; // Otherwise, not considered a tertiary particle
   }
-  template <int pdgSign, o2::track::PID::ID id>
+  template <int pdgSign, o2::track::PID::ID id, typename Colls>
   void fillMCTrackHistograms(const TrackCandidatesMC::iterator& track, const bool doMakeHistograms)
   {
     static_assert(pdgSign == 0 || pdgSign == 1);
@@ -1057,10 +1086,10 @@ struct QaEfficiency {
     }
     constexpr int histogramIndex = id + pdgSign * nSpecies;
     LOG(debug) << "fillMCTrackHistograms for pdgSign '" << pdgSign << "' and id '" << static_cast<int>(id) << "' " << particleName(pdgSign, id) << " with index " << histogramIndex;
-    const o2::aod::McParticles::iterator& mcParticle = track.mcParticle();
-    const CollisionCandidatesMC::iterator& collision = track.collision_as<CollisionCandidatesMC>();
+    auto const& mcParticle = track.mcParticle();
     float radius = std::sqrt(mcParticle.vx() * mcParticle.vx() + mcParticle.vy() * mcParticle.vy());
     if (numSameCollision) {
+      auto const& collision = track.collision_as<Colls>();
       if (!collision.has_mcCollision()) {
         return;
       }
@@ -1134,6 +1163,9 @@ struct QaEfficiency {
       if (passedITS && passedTPC) {
         hPtItsTpcPrm[histogramIndex]->Fill(mcParticle.pt());
         hPtTrkItsTpcPrm[histogramIndex]->Fill(track.pt());
+        hDeltaPtVsPtTrkItsTpcPrm[histogramIndex]->Fill(mcParticle.pt(), abs(track.pt() - mcParticle.pt()));
+        hPtGenVsPtTrkItsTpcPrm[histogramIndex]->Fill(mcParticle.pt(), track.pt());
+        hPtGenVsPIDTrkItsTpcPrm[histogramIndex]->Fill(mcParticle.pt(), track.pidForTracking());
         hEtaItsTpcPrm[histogramIndex]->Fill(mcParticle.eta());
         hEtaTrkItsTpcPrm[histogramIndex]->Fill(track.eta());
         hPhiItsTpcPrm[histogramIndex]->Fill(mcParticle.phi());
@@ -1265,7 +1297,7 @@ struct QaEfficiency {
           for (const auto& mother : mothers) {
             for (const auto& pdgToCheck : mothersPDGs.value) {
               if (mother.pdgCode() == pdgToCheck) {
-                motherIsAccepted = true; // Mother matches the list of specified PDGs
+                motherIsAccepted = true;                               // Mother matches the list of specified PDGs
                 hPtmotherGenerated[histogramIndex]->Fill(mother.pt()); // Fill generated pT for mother
                 break;
               }
@@ -1454,6 +1486,12 @@ struct QaEfficiency {
     if constexpr (doFillHistograms) {
       histos.fill(HIST("eventSelection"), 4);
     }
+    if (applyTimeFrameBorderCut && !collision.selection_bit(o2::aod::evsel::kNoTimeFrameBorder)) {
+      return false;
+    }
+    if constexpr (doFillHistograms) {
+      histos.fill(HIST("eventSelection"), 5);
+    }
     return true;
   }
 
@@ -1521,6 +1559,9 @@ struct QaEfficiency {
         histos.fill(countingHisto, trkCutIdxHasMcPart); // Tracks with particles (i.e. no fakes)
       }
       const auto mcParticle = track.mcParticle();
+      if (skipParticlesFromBackgroundEvents && mcParticle.fromBackgroundEvent()) {
+        return false;
+      }
       if (!isInAcceptance<true, doFillHisto>(mcParticle, countingHisto, trkCutIdxHasMcPart)) {
         // 3: pt cut 4: eta cut 5: phi cut 6: y cut
         return false;
@@ -1743,7 +1784,8 @@ struct QaEfficiency {
                  // o2::soa::SmallGroups<CollisionCandidatesMC> const& collisions,
                  CollisionCandidatesMC const& collisions,
                  TrackCandidatesMC const& tracks,
-                 o2::aod::McParticles const& mcParticles)
+                 o2::aod::McParticles const& mcParticles,
+                 BCsInfo const&)
   {
 
     /// loop over generated collisions
@@ -1849,15 +1891,15 @@ struct QaEfficiency {
           // Filling variable histograms
           histos.fill(HIST("MC/trackLength"), track.length());
           static_for<0, 1>([&](auto pdgSign) {
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Electron>(track, doEl);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Muon>(track, doMu);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Pion>(track, doPi);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon>(track, doKa);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Proton>(track, doPr);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron>(track, doDe);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Triton>(track, doTr);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3>(track, doHe);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha>(track, doAl);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Electron, CollisionCandidatesMC>(track, doEl);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Muon, CollisionCandidatesMC>(track, doMu);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Pion, CollisionCandidatesMC>(track, doPi);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon, CollisionCandidatesMC>(track, doKa);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Proton, CollisionCandidatesMC>(track, doPr);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron, CollisionCandidatesMC>(track, doDe);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Triton, CollisionCandidatesMC>(track, doTr);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3, CollisionCandidatesMC>(track, doHe);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha, CollisionCandidatesMC>(track, doAl);
           });
         }
 
@@ -1874,10 +1916,20 @@ struct QaEfficiency {
               continue;
             }
           }
+          // apply time-frame border cut also to the generated collision
+          if (applyTimeFrameBorderCut) {
+            auto bc = mcCollision.bc_as<BCsInfo>();
+            if (!bc.selection_bit(o2::aod::evsel::kNoTimeFrameBorder)) {
+              continue;
+            }
+          }
         }
 
         /// only to fill denominator of ITS-TPC matched primary tracks only in MC events with at least 1 reco. vtx
         for (const auto& particle : groupedMcParticles) { // Particle loop
+          if (skipParticlesFromBackgroundEvents && particle.fromBackgroundEvent()) {
+            continue;
+          }
 
           /// require generated particle in acceptance
           if (!isInAcceptance<true, false>(particle, nullptr)) {
@@ -1922,10 +1974,20 @@ struct QaEfficiency {
           continue;
         }
       }
+      // apply time-frame border cut also to the generated collision
+      if (applyTimeFrameBorderCut) {
+        auto bc = mcCollision.bc_as<BCsInfo>();
+        if (!bc.selection_bit(o2::aod::evsel::kNoTimeFrameBorder)) {
+          continue;
+        }
+      }
 
       // Loop on particles to fill the denominator
       float dNdEta = 0; // Multiplicity
       for (const auto& mcParticle : groupedMcParticles) {
+        if (skipParticlesFromBackgroundEvents && mcParticle.fromBackgroundEvent()) {
+          continue;
+        }
         if (TMath::Abs(mcParticle.eta()) <= 2.f && !mcParticle.has_daughters()) {
           dNdEta += 1.f;
         }
@@ -1974,9 +2036,10 @@ struct QaEfficiency {
   //  - considering also tracks not associated to any collision
   //  - ignoring the track-to-collision association
   void processMCWithoutCollisions(TrackCandidatesMC const& tracks,
-                                  o2::aod::Collisions const&,
+                                  CollisionsWithMcLabels const&,
                                   o2::aod::McParticles const& mcParticles,
-                                  o2::aod::McCollisions const&)
+                                  o2::aod::McCollisions const&,
+                                  BCsInfo const&)
   {
     // Track loop
     for (const auto& track : tracks) {
@@ -1986,7 +2049,7 @@ struct QaEfficiency {
 
       /// checking the PV z coordinate, if the track has been assigned to any collision
       if (applyPvZCutInProcessMcWoColl && track.has_collision()) {
-        const auto collision = track.collision();
+        const auto collision = track.collision_as<CollisionsWithMcLabels>();
         const float posZ = collision.posZ();
         if (posZ < vertexZMin || posZ > vertexZMax) {
           continue;
@@ -2003,15 +2066,15 @@ struct QaEfficiency {
       // Filling variable histograms
       histos.fill(HIST("MC/trackLength"), track.length());
       static_for<0, 1>([&](auto pdgSign) {
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Electron>(track, doEl);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Muon>(track, doMu);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Pion>(track, doPi);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon>(track, doKa);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Proton>(track, doPr);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron>(track, doDe);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Triton>(track, doTr);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3>(track, doHe);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha>(track, doAl);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Electron, CollisionsWithMcLabels>(track, doEl);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Muon, CollisionsWithMcLabels>(track, doMu);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Pion, CollisionsWithMcLabels>(track, doPi);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon, CollisionsWithMcLabels>(track, doKa);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Proton, CollisionsWithMcLabels>(track, doPr);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron, CollisionsWithMcLabels>(track, doDe);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Triton, CollisionsWithMcLabels>(track, doTr);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3, CollisionsWithMcLabels>(track, doHe);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha, CollisionsWithMcLabels>(track, doAl);
       });
     }
 
@@ -2025,6 +2088,14 @@ struct QaEfficiency {
         const auto mcCollision = mcParticle.mcCollision();
         const float posZ = mcCollision.posZ();
         if (posZ < vertexZMin || posZ > vertexZMax) {
+          continue;
+        }
+      }
+      // apply time-frame border cut also to the generated collision
+      if (applyTimeFrameBorderCut) {
+        const auto mcCollision = mcParticle.mcCollision();
+        auto bc = mcCollision.bc_as<BCsInfo>();
+        if (!bc.selection_bit(o2::aod::evsel::kNoTimeFrameBorder)) {
           continue;
         }
       }

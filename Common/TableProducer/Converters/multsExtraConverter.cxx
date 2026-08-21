@@ -9,10 +9,12 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
 #include "Common/DataModel/Multiplicity.h"
+
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -21,6 +23,7 @@ struct MultsExtraConverter {
   Produces<aod::MultsExtra_001> multsExtra_001;
   void process(aod::MultsExtra_000 const& multsExtra_000)
   {
+    multsExtra_001.reserve(multsExtra_000.size());
     for (const auto& r : multsExtra_000) {
       multsExtra_001(r.multPVTotalContributors(), r.multPVChi2(),
                      r.multCollisionTimeRes(), r.multRunNumber(), r.multPVz(), r.multSel8(),

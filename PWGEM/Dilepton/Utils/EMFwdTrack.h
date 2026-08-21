@@ -15,47 +15,33 @@
 #ifndef PWGEM_DILEPTON_UTILS_EMFWDTRACK_H_
 #define PWGEM_DILEPTON_UTILS_EMFWDTRACK_H_
 
-#include <vector>
+#include <cmath>
+#include <cstdint>
 
 namespace o2::aod::pwgem::dilepton::utils
 {
 class EMFwdTrack
 {
  public:
-  EMFwdTrack(int dfId, int globalId, int collisionId, int trackId, float pt, float eta, float phi, float mass, int8_t charge = 0, float dcaX = 0.f, float dcaY = 0.f, std::vector<int> amb_muon_self_ids = {})
+  EMFwdTrack(float pt, float eta, float phi, float /*mass*/, int8_t sign, float dcaX, float dcaY, float cXX, float cXY, float cYY)
   {
-    fDFId = dfId;
-    fGlobalId = globalId;
-    fCollisionId = collisionId;
-    fTrackId = trackId;
     fPt = pt;
     fEta = eta;
     fPhi = phi;
-    fMass = mass;
-    fCharge = charge;
+    fSign = sign;
     fDCAx = dcaX;
     fDCAy = dcaY;
-    fPairDCAXYinSigmaOTF = 0;
-
-    fAmbMuonSelfIds = amb_muon_self_ids;
-    if (fAmbMuonSelfIds.size() > 0) {
-      fIsAmbiguous = true;
-    } else {
-      fIsAmbiguous = false;
-    }
+    fCXX = cXX;
+    fCXY = cXY;
+    fCYY = cYY;
   }
 
   ~EMFwdTrack() {}
 
-  int dfId() const { return fDFId; }
-  int globalIndex() const { return fGlobalId; }
-  int collisionId() const { return fCollisionId; }
-  int fwdtrackId() const { return fTrackId; }
   float pt() const { return fPt; }
   float eta() const { return fEta; }
   float phi() const { return fPhi; }
-  float mass() const { return fMass; }
-  int8_t sign() const { return fCharge; }
+  int8_t sign() const { return fSign; }
   float fwdDcaX() const { return fDCAx; }
   float fwdDcaY() const { return fDCAy; }
   float fwdDcaXY() const { return std::sqrt(std::pow(fDCAx, 2) + std::pow(fDCAy, 2)); }
@@ -63,69 +49,58 @@ class EMFwdTrack
   float px() const { return fPt * std::cos(fPhi); }
   float py() const { return fPt * std::sin(fPhi); }
   float pz() const { return fPt * std::sinh(fEta); }
-  bool has_ambiguousMuons() const { return fIsAmbiguous; }
-  std::vector<int> ambiguousMuonsIds() const { return fAmbMuonSelfIds; }
-  float signed1Pt() const { return fCharge * 1.f / fPt; }
+  float signed1Pt() const { return fSign / fPt; }
 
-  float pairDcaXYinSigmaOTF() const { return fPairDCAXYinSigmaOTF; }
-  void setPairDcaXYinSigmaOTF(float dca) { fPairDCAXYinSigmaOTF = dca; }
+  float cXXatDCA() const { return fCXX; }
+  float cXYatDCA() const { return fCXY; }
+  float cYYatDCA() const { return fCYY; }
 
  protected:
-  int fDFId;
-  int fGlobalId;
-  int fCollisionId;
-  int fTrackId;
   float fPt;
   float fEta;
   float fPhi;
-  float fMass;
-  int8_t fCharge;
+  int8_t fSign;
   float fDCAx;
   float fDCAy;
-  float fPairDCAXYinSigmaOTF;
-  bool fIsAmbiguous;
-  std::vector<int> fAmbMuonSelfIds;
+  float fCXX;
+  float fCXY;
+  float fCYY;
 };
 
 class EMFwdTrackWithCov : public EMFwdTrack
 {
  public:
-  EMFwdTrackWithCov(int dfId, int globalId, int collisionId, int trackId, float pt, float eta, float phi, float mass, int8_t charge = 0, float dcaX = 0.f, float dcaY = 0.f, std::vector<int> amb_muon_self_ids = {},
-                    float X = 0.f, float Y = 0.f, float Z = 0.f, float Tgl = 0.f,
-                    float CXX = 0.f, float CXY = 0.f, float CYY = 0.f,
-                    float CPhiX = 0.f, float CPhiY = 0.f, float CPhiPhi = 0.f,
-                    float CTglX = 0.f, float CTglY = 0.f, float CTglPhi = 0.f, float CTglTgl = 0.f,
-                    float C1PtX = 0.f, float C1PtY = 0.f, float C1PtPhi = 0.f, float C1PtTgl = 0.f, float C1Pt21Pt2 = 0.f, float chi2 = 0.f) : EMFwdTrack(dfId, globalId, collisionId, trackId, pt, eta, phi, mass, charge, dcaX, dcaY, amb_muon_self_ids)
+  EMFwdTrackWithCov(float pt, float eta, float phi, float mass, int8_t sign, float dcaX, float dcaY, float cXX, float cXY, float cYY,
+                    float X = 0.f, float Y = 0.f, float Z = 0.f, float tgl = 0.f,
+                    float cPhiX = 0.f, float cPhiY = 0.f, float cPhiPhi = 0.f,
+                    float cTglX = 0.f, float cTglY = 0.f, float cTglPhi = 0.f, float cTglTgl = 0.f,
+                    float c1PtX = 0.f, float c1PtY = 0.f, float c1PtPhi = 0.f, float c1PtTgl = 0.f, float c1Pt21Pt2 = 0.f, float chi2 = 0.f) : EMFwdTrack(pt, eta, phi, mass, sign, dcaX, dcaY, cXX, cXY, cYY)
   {
     fX = X;
     fY = Y;
     fZ = Z;
-    fTgl = Tgl;
-    fCXX = CXX;
-    fCXY = CXY;
-    fCYY = CYY;
-    fCPhiX = CPhiX;
-    fCPhiY = CPhiY;
-    fCPhiPhi = CPhiPhi;
-    fCTglX = CTglX;
-    fCTglY = CTglY;
-    fCTglPhi = CTglPhi;
-    fCTglTgl = CTglTgl;
-    fC1PtX = C1PtX;
-    fC1PtY = C1PtY;
-    fC1PtPhi = C1PtPhi;
-    fC1PtTgl = C1PtTgl;
-    fC1Pt21Pt2 = C1Pt21Pt2;
+    fTgl = tgl;
+    fCPhiX = cPhiX;
+    fCPhiY = cPhiY;
+    fCPhiPhi = cPhiPhi;
+    fCTglX = cTglX;
+    fCTglY = cTglY;
+    fCTglPhi = cTglPhi;
+    fCTglTgl = cTglTgl;
+    fC1PtX = c1PtX;
+    fC1PtY = c1PtY;
+    fC1PtPhi = c1PtPhi;
+    fC1PtTgl = c1PtTgl;
+    fC1Pt21Pt2 = c1Pt21Pt2;
     fChi2 = chi2;
   }
+
+  ~EMFwdTrackWithCov() {}
 
   float x() const { return fX; }
   float y() const { return fY; }
   float z() const { return fZ; }
   float tgl() const { return fTgl; }
-  float cXX() const { return fCXX; }
-  float cXY() const { return fCXY; }
-  float cYY() const { return fCYY; }
   float cPhiX() const { return fCPhiX; }
   float cPhiY() const { return fCPhiY; }
   float cPhiPhi() const { return fCPhiPhi; }
@@ -140,18 +115,11 @@ class EMFwdTrackWithCov : public EMFwdTrack
   float c1Pt21Pt2() const { return fC1Pt21Pt2; }
   float chi2() const { return fChi2; }
 
-  void setCXX(float cXX) { fCXX = cXX; }
-  void setCXY(float cXY) { fCXY = cXY; }
-  void setCYY(float cYY) { fCYY = cYY; }
-
  protected:
   float fX;
   float fY;
   float fZ;
   float fTgl;
-  float fCXX;
-  float fCXY;
-  float fCYY;
   float fCPhiX;
   float fCPhiY;
   float fCPhiPhi;
@@ -164,7 +132,7 @@ class EMFwdTrackWithCov : public EMFwdTrack
   float fC1PtPhi;
   float fC1PtTgl;
   float fC1Pt21Pt2;
-  float fChi2;
+  float fChi2; // chi2 not chi2/ndf
 };
 
 } // namespace o2::aod::pwgem::dilepton::utils

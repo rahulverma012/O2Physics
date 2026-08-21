@@ -15,26 +15,50 @@
 ///
 /// \author Alexandre Bigot <alexandre.bigot@cern.ch>, IPHC Strasbourg
 
-#include <vector>
-#include <string>
-#include <memory>
-
-#include "CommonConstants/PhysicsConstants.h"
-#include "DCAFitter/DCAFitterN.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "ReconstructionDataFormats/DCA.h"
-#include "ReconstructionDataFormats/V0.h"
-
-#include "Common/Core/trackUtilities.h"
-#include "Common/DataModel/CollisionAssociationTables.h"
-
+#include "PWGHF/Core/DecayChannels.h"
 #include "PWGHF/Core/HfHelper.h"
+#include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 #include "PWGHF/Utils/utilsBfieldCCDB.h"
-#include "PWGHF/Utils/utilsTrkCandHf.h"
 #include "PWGHF/Utils/utilsMcGen.h"
+#include "PWGHF/Utils/utilsTrkCandHf.h"
+
+#include "Common/Core/RecoDecay.h"
+#include "Common/Core/trackUtilities.h"
+#include "Common/DataModel/CollisionAssociationTables.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <DCAFitter/DCAFitterN.h>
+#include <DetectorsBase/MatLayerCylSet.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/DCA.h>
+#include <ReconstructionDataFormats/V0.h>
+
+#include <TH1.h>
+#include <TPDGCode.h>
+
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::analysis;
@@ -43,6 +67,7 @@ using namespace o2::constants::physics;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 using namespace o2::hf_trkcandsel;
+using namespace o2::hf_decay::hf_cand_beauty;
 
 /// Reconstruction of B0 candidates
 struct HfCandidateCreatorB0 {
@@ -72,15 +97,11 @@ struct HfCandidateCreatorB0 {
   Configurable<std::string> ccdbPathGrp{"ccdbPathGrp", "GLO/GRP/GRP", "Path of the grp file (Run 2)"};
   Configurable<std::string> ccdbPathGrpMag{"ccdbPathGrpMag", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object (Run 3)"};
 
-  HfHelper hfHelper;
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
-  o2::base::MatLayerCylSet* lut;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
+  o2::base::MatLayerCylSet* lut{};
   o2::base::Propagator::MatCorrType matCorr = o2::base::Propagator::MatCorrType::USEMatCorrLUT;
-  int runNumber;
+  int runNumber{};
 
-  double massPi{0.};
-  double massD{0.};
-  double massB0{0.};
   double invMass2DPiMin{0.};
   double invMass2DPiMax{0.};
   double bz{0.};
@@ -112,11 +133,8 @@ struct HfCandidateCreatorB0 {
   void init(InitContext const&)
   {
     // invariant-mass window cut
-    massPi = MassPiPlus;
-    massD = MassDMinus;
-    massB0 = MassB0;
-    invMass2DPiMin = (massB0 - invMassWindowB0) * (massB0 - invMassWindowB0);
-    invMass2DPiMax = (massB0 + invMassWindowB0) * (massB0 + invMassWindowB0);
+    invMass2DPiMin = (MassB0 - invMassWindowB0) * (MassB0 - invMassWindowB0);
+    invMass2DPiMax = (MassB0 + invMassWindowB0) * (MassB0 + invMassWindowB0);
 
     // Initialise fitter for B vertex (2-prong vertex filter)
     df2.setPropagateToPCA(propagateToPCA);
@@ -205,7 +223,7 @@ struct HfCandidateCreatorB0 {
       auto candsDThisColl = candsD.sliceBy(candsDPerCollision, thisCollId);
 
       for (const auto& candD : candsDThisColl) { // start loop over filtered D candidates indices as associated to this collision in candidateCreator3Prong.cxx
-        hMassDToPiKPi->Fill(hfHelper.invMassDplusToPiKPi(candD), candD.pt());
+        hMassDToPiKPi->Fill(HfHelper::invMassDplusToPiKPi(candD), candD.pt());
         hPtD->Fill(candD.pt());
         hCPAD->Fill(candD.cpa());
 
@@ -264,14 +282,14 @@ struct HfCandidateCreatorB0 {
         df3.getTrack(2).getPxPyPzGlo(pVec2);
 
         // D∓ → π∓ K± π∓
-        std::array<float, 3> pVecPiK = RecoDecay::pVec(pVec0, pVec1);
+        std::array<float, 3> const pVecPiK = RecoDecay::pVec(pVec0, pVec1);
         std::array<float, 3> pVecD = RecoDecay::pVec(pVec0, pVec1, pVec2);
         auto trackParCovPiK = o2::dataformats::V0(df3.getPCACandidatePos(), pVecPiK, df3.calcPCACovMatrixFlat(), trackParCov0, trackParCov1);
         auto trackParCovD = o2::dataformats::V0(df3.getPCACandidatePos(), pVecD, df3.calcPCACovMatrixFlat(), trackParCovPiK, trackParCov2);
 
-        int indexTrack0 = track0.globalIndex();
-        int indexTrack1 = track1.globalIndex();
-        int indexTrack2 = track2.globalIndex();
+        int const indexTrack0 = track0.globalIndex();
+        int const indexTrack1 = track1.globalIndex();
+        int const indexTrack2 = track2.globalIndex();
 
         auto trackIdsThisCollision = trackIndices.sliceBy(trackIndicesPerCollision, thisCollId);
 
@@ -321,14 +339,13 @@ struct HfCandidateCreatorB0 {
           hCovSVXX->Fill(covMatrixPCA[0]);
           hCovPVXX->Fill(covMatrixPV[0]);
 
-          // propagate D and Pi to the B0 vertex
-          df2.propagateTracksToVertex();
+          // get D and Pi tracks (propagated to the B0 vertex if propagateToPCA==true)
           // track.getPxPyPzGlo(pVec) modifies pVec of track
           df2.getTrack(0).getPxPyPzGlo(pVecD);    // momentum of D at the B0 vertex
           df2.getTrack(1).getPxPyPzGlo(pVecPion); // momentum of Pi at the B0 vertex
 
           // calculate invariant mass square and apply selection
-          auto invMass2DPi = RecoDecay::m2(std::array{pVecD, pVecPion}, std::array{massD, massPi});
+          auto invMass2DPi = RecoDecay::m2(std::array{pVecD, pVecPion}, std::array{MassDMinus, MassPiPlus});
           if ((invMass2DPi < invMass2DPiMin) || (invMass2DPi > invMass2DPiMax)) {
             continue;
           }
@@ -341,7 +358,7 @@ struct HfCandidateCreatorB0 {
           trackParCovPi.propagateToDCA(primaryVertex, bz, &dcaPion);
 
           // get uncertainty of the decay length
-          double phi, theta;
+          double phi{}, theta{};
           // getPointDirection modifies phi and theta
           getPointDirection(std::array{collision.posX(), collision.posY(), collision.posZ()}, secondaryVertexB0, phi, theta);
           auto errorDecayLength = std::sqrt(getRotatedCovMatrixXX(covMatrixPV, phi, theta) + getRotatedCovMatrixXX(covMatrixPCA, phi, theta));
@@ -381,13 +398,14 @@ struct HfCandidateCreatorB0Expressions {
 
     int indexRec = -1;
     int8_t sign = 0;
-    int8_t flag = 0;
+    int8_t flagChannelMain = 0;
+    int8_t flagChannelReso = 0;
     int8_t origin = 0;
     int8_t debug = 0;
 
     // Match reconstructed candidates.
     for (const auto& candidate : candsB0) {
-      flag = 0;
+      flagChannelMain = 0;
       origin = 0;
       debug = 0;
       auto candD = candidate.prong0();
@@ -405,7 +423,7 @@ struct HfCandidateCreatorB0Expressions {
         // D- → π- K+ π-
         indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughtersD, Pdg::kDMinus, std::array{-kPiPlus, +kKPlus, -kPiPlus}, true, &sign, 2);
         if (indexRec > -1) {
-          flag = sign * BIT(hf_cand_b0::DecayTypeMc::B0ToDplusPiToPiKPiPi);
+          flagChannelMain = sign * DecayChannelMain::B0ToDminusPi;
         } else {
           debug = 1;
           LOGF(debug, "WARNING: B0 in decays in the expected final state but the condition on the intermediate state is not fulfilled");
@@ -413,44 +431,42 @@ struct HfCandidateCreatorB0Expressions {
       }
 
       // B0 → Ds- π+ → (K- K+ π-) π+
-      if (!flag) {
+      if (flagChannelMain == 0) {
         indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughtersB0, Pdg::kB0, std::array{-kKPlus, +kKPlus, -kPiPlus, +kPiPlus}, true, &sign, 3);
         if (indexRec > -1) {
           // Ds- → K- K+ π-
           indexRec = RecoDecay::getMatchedMCRec(mcParticles, arrayDaughtersD, -Pdg::kDS, std::array{-kKPlus, +kKPlus, -kPiPlus}, true, &sign, 2);
           if (indexRec > -1) {
-            flag = sign * BIT(hf_cand_b0::DecayTypeMc::B0ToDsPiToKKPiPi);
+            flagChannelMain = sign * DecayChannelMain::B0ToDsPi;
           }
         }
       }
 
       // Partly reconstructed decays, i.e. the 4 prongs have a common b-hadron ancestor
       // convention: final state particles are prong0,1,2,3
-      if (!flag) {
+      if (flagChannelMain == 0) {
         auto particleProng0 = arrayDaughtersB0[0].mcParticle();
         auto particleProng1 = arrayDaughtersB0[1].mcParticle();
         auto particleProng2 = arrayDaughtersB0[2].mcParticle();
         auto particleProng3 = arrayDaughtersB0[3].mcParticle();
         // b-hadron hypothesis
-        std::array<int, 3> bHadronMotherHypos = {Pdg::kB0, Pdg::kBS, Pdg::kLambdaB0};
+        std::array<int, 3> const bHadronMotherHypos = {Pdg::kB0, Pdg::kBS, Pdg::kLambdaB0};
 
         for (const auto& bHadronMotherHypo : bHadronMotherHypos) {
-          int index0Mother = RecoDecay::getMother(mcParticles, particleProng0, bHadronMotherHypo, true);
-          int index1Mother = RecoDecay::getMother(mcParticles, particleProng1, bHadronMotherHypo, true);
-          int index2Mother = RecoDecay::getMother(mcParticles, particleProng2, bHadronMotherHypo, true);
-          int index3Mother = RecoDecay::getMother(mcParticles, particleProng3, bHadronMotherHypo, true);
+          int const index0Mother = RecoDecay::getMother(mcParticles, particleProng0, bHadronMotherHypo, true);
+          int const index1Mother = RecoDecay::getMother(mcParticles, particleProng1, bHadronMotherHypo, true);
+          int const index2Mother = RecoDecay::getMother(mcParticles, particleProng2, bHadronMotherHypo, true);
+          int const index3Mother = RecoDecay::getMother(mcParticles, particleProng3, bHadronMotherHypo, true);
 
           // look for common b-hadron ancestor
-          if (index0Mother > -1 && index1Mother > -1 && index2Mother > -1 && index3Mother > -1) {
-            if (index0Mother == index1Mother && index1Mother == index2Mother && index2Mother == index3Mother) {
-              flag = BIT(hf_cand_b0::DecayTypeMc::PartlyRecoDecay);
-              break;
-            }
+          if (index0Mother > -1 && index0Mother == index1Mother && index1Mother == index2Mother && index2Mother == index3Mother) {
+            flagChannelMain = hf_cand_b0::DecayTypeMc::PartlyRecoDecay; // FIXME
+            break;
           }
         }
       }
 
-      rowMcMatchRec(flag, origin, debug);
+      rowMcMatchRec(flagChannelMain, flagChannelReso, origin, debug);
     } // rec
 
     hf_mc_gen::fillMcMatchGenB0(mcParticles, rowMcMatchGen); // gen

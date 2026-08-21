@@ -14,16 +14,22 @@
 /// \author Bong-Hwi Lim <bong-hwi.lim@cern.ch>
 /// \since 13/12/2024
 
-#include <TLorentzVector.h>
-#include <TPDGCode.h>
-
-#include "CommonConstants/PhysicsConstants.h"
-#include "Common/DataModel/Qvectors.h"
-#include "Common/Core/EventPlaneHelper.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/runDataProcessing.h"
 #include "PWGLF/DataModel/LFResonanceTables.h"
+
+#include "Common/Core/EventPlaneHelper.h"
+#include "Common/DataModel/Qvectors.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TLorentzVector.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -172,7 +178,7 @@ struct ResonanceCombine {
     }
   }
 
-  void process(soa::Join<aod::ResoCollisions, aod::Qvectors>::iterator const& collision, soa::Join<aod::ResoTracks, aod::Reso2TracksPIDExt> const& resotracks)
+  void process(soa::Join<aod::ResoCollisions, aod::ResoCollisionColls, aod::Qvectors>::iterator const& collision, soa::Join<aod::ResoTracks, aod::ResoTrackTracks, aod::Reso2TracksPIDExt> const& resotracks)
   {
     histos.fill(HIST("hVertexZ"), collision.posZ());
     // Both resoCollisions and Qvectors have the same cent column, so we have to use "_as" to access it

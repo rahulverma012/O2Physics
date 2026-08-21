@@ -16,22 +16,22 @@
 #ifndef PWGCF_FEMTO3D_CORE_FEMTO3DPAIRTASK_H_
 #define PWGCF_FEMTO3D_CORE_FEMTO3DPAIRTASK_H_
 
-#define THETA(eta) 2.0 * std::atan(std::exp(-eta))
-// #include "Framework/ASoA.h"
-// #include "Framework/DataTypes.h"
-// #include "Framework/AnalysisDataModel.h"
-// #include "Common/DataModel/PIDResponse.h"
-// #include "Framework/Logger.h"
-// #include "Common/DataModel/Multiplicity.h"
+#include <CommonConstants/MathConstants.h>
+#include <CommonConstants/PhysicsConstants.h>
 
-#include <vector>
+#include <TDatabasePDG.h>
+#include <TLorentzVector.h>
+#include <TVector3.h>
+
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <memory>
-#include "TLorentzVector.h"
-#include "TVector3.h"
-#include "TDatabasePDG.h"
+#include <string>
+#include <vector>
 
-#include "CommonConstants/PhysicsConstants.h"
-#include "CommonConstants/MathConstants.h"
+#define THETA(eta) 2.0 * std::atan(std::exp(-eta))
 
 double particle_mass(const int PDGcode)
 {
@@ -222,10 +222,12 @@ class FemtoPair
   }
   float GetPhiStarDiff(const float& radius = 1.2) const
   {
-    if (_first != NULL && _second != NULL)
-      return _first->phiStar(_magfield1, radius) - _second->phiStar(_magfield2, radius);
-    else
+    if (_first != NULL && _second != NULL) {
+      float dphi = _first->phiStar(_magfield1, radius) - _second->phiStar(_magfield2, radius);
+      return std::fabs(dphi) > o2::constants::math::PI ? (1.0 - 2.0 * o2::constants::math::PI / std::fabs(dphi)) * dphi : dphi;
+    } else {
       return 1000;
+    }
   }
   float GetAvgPhiStarDiff() const;
 
@@ -327,8 +329,7 @@ float FemtoPair<TrackType>::GetAvgPhiStarDiff() const
   float res = 0.0;
 
   for (const auto& radius : TPCradii) {
-    const float dphi = GetPhiStarDiff(radius);
-    res += std::fabs(dphi) > o2::constants::math::PI ? (1.0 - 2.0 * o2::constants::math::PI / std::fabs(dphi)) * dphi : dphi;
+    res += GetPhiStarDiff(radius);
   }
 
   return res / TPCradii.size();

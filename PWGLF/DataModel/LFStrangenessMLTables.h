@@ -9,14 +9,14 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#include <cmath>
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoAHelpers.h"
-#include "Common/Core/RecoDecay.h"
-#include "CommonConstants/PhysicsConstants.h"
-
 #ifndef PWGLF_DATAMODEL_LFSTRANGENESSMLTABLES_H_
 #define PWGLF_DATAMODEL_LFSTRANGENESSMLTABLES_H_
+
+#include <Framework/AnalysisDataModel.h>
+
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 // Creating output TTree for ML analysis
 namespace o2::aod
@@ -238,8 +238,8 @@ DECLARE_SOA_TABLE(CascMLCandidates, "AOD", "CAMLCANDIDATES",
 
 namespace CascMLSelection
 {
-DECLARE_SOA_COLUMN(XiBDTScore, xiBDTScore, float);
-DECLARE_SOA_COLUMN(OmegaBDTScore, omegaBDTScore, float);
+DECLARE_SOA_COLUMN(XiBDTScore, xiBDTScore, std::vector<float>);
+DECLARE_SOA_COLUMN(OmegaBDTScore, omegaBDTScore, std::vector<float>);
 } // namespace CascMLSelection
 
 DECLARE_SOA_TABLE(CascXiMLScores, "AOD", "CASCXIMLSCORES",

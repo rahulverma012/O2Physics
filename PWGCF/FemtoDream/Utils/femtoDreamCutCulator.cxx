@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -13,13 +13,11 @@
 /// \brief Executable that encodes physical selection criteria in a bit-wise
 /// selection \author Andi Mathis, TU München, andreas.mathis@ph.tum.de
 
-#include <iostream>
-#include <random>
-#include <string>
 #include "PWGCF/FemtoDream/Utils/femtoDreamCutCulator.h"
-#include "PWGCF/FemtoDream/Core/femtoDreamSelection.h"
-#include "PWGCF/FemtoDream/Core/femtoDreamTrackSelection.h"
-#include "PWGCF/DataModel/FemtoDerived.h"
+
+#include <fstream>
+#include <iostream>
+#include <string>
 
 using namespace o2::analysis::femtoDream;
 

@@ -94,6 +94,11 @@ o2physics_add_dpl_workflow(trackqa-converter-002
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(trackqa-converter-003
+                    SOURCES trackQA003Converter.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(run2bcinfos-converter
                     SOURCES run2bcinfosConverter.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
@@ -106,5 +111,10 @@ o2physics_add_dpl_workflow(run2-tracks-extra-converter
 
 o2physics_add_dpl_workflow(run2-tiny-to-full-pid
                     SOURCES run2TinyToFullPID.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(mult-bcs-converter
+                    SOURCES multBCsConverter.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)

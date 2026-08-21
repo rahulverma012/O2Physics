@@ -8,18 +8,31 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
+//
+/// \file UDTables.h
+/// \brief Defines tables and colums for derived data used by UD group
+/// \author Paul Buhler <paul.buhler@cern.ch>, Wiena
+/// \since  January 2023
+/// \author Sasha Bylinkin <sasha.bylinkin@cern.ch>, Bergen
+/// \since  January 2024
+/// \author Adam Matyja <adam.tomasz.matyja@cern.ch>, INP PAN Krakow, Poland
+/// \since  May 2025
 
 #ifndef PWGUD_DATAMODEL_UDTABLES_H_
 #define PWGUD_DATAMODEL_UDTABLES_H_
 
-#include <vector>
-#include <cmath>
-#include "Framework/ASoA.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/DataTypes.h"
-#include "MathUtils/Utils.h"
-#include "Common/DataModel/PIDResponse.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
+
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+
+#include <Rtypes.h>
+
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 namespace o2::aod
 {
@@ -111,6 +124,10 @@ DECLARE_SOA_COLUMN(ITSROFb, itsROFb, int);
 DECLARE_SOA_COLUMN(Sbp, sbp, int);
 DECLARE_SOA_COLUMN(ZvtxFT0vPV, zVtxFT0vPV, int);
 DECLARE_SOA_COLUMN(VtxITSTPC, vtxITSTPC, int);
+// information about mask names -> Common/CCDB/RCTSelectionFlags.h
+// DECLARE_SOA_COLUMN(Rct, rct, uint32_t); //! run condition table mask
+DECLARE_SOA_BITMAP_COLUMN(Rct, rct, 32); //! run condition table mask
+
 // Gap Side Information
 DECLARE_SOA_COLUMN(GapSide, gapSide, uint8_t); // 0 for side A, 1 for side C, 2 for both sides (or use an enum for better readability)
 // FIT selection flags
@@ -249,6 +266,24 @@ DECLARE_SOA_TABLE_VERSIONED(UDCollisionSelExtras_002, "AOD", "UDCOLSELEXTRA", 2,
                             udcollision::ZvtxFT0vPV,      //! kIsGoodZvtxFT0vsPV
                             udcollision::VtxITSTPC);      //! kIsVertexITSTPC
 
+DECLARE_SOA_TABLE_VERSIONED(UDCollisionSelExtras_003, "AOD", "UDCOLSELEXTRA", 3,
+                            udcollision::ChFT0A,          //! number of active channels in FT0A
+                            udcollision::ChFT0C,          //! number of active channels in FT0C
+                            udcollision::ChFDDA,          //! number of active channels in FDDA
+                            udcollision::ChFDDC,          //! number of active channels in FDDC
+                            udcollision::ChFV0A,          //! number of active channels in FV0A
+                            udcollision::OccupancyInTime, //! Occupancy
+                            udcollision::HadronicRate,    //! Interaction Rate
+                            udcollision::Trs,             //! kNoCollInTimeRangeStandard
+                            udcollision::Trofs,           //! kNoCollInRofStandard
+                            udcollision::Hmpr,            //! kNoHighMultCollInPrevRof
+                            udcollision::TFb,             //! kNoTimeFrameBorder
+                            udcollision::ITSROFb,         //! kNoITSROFrameBorder
+                            udcollision::Sbp,             //! kNoSameBunchPileup
+                            udcollision::ZvtxFT0vPV,      //! kIsGoodZvtxFT0vsPV
+                            udcollision::VtxITSTPC,       //! kIsVertexITSTPC
+                            udcollision::Rct);            //! RCT mask
+
 // central barrel-specific selections
 DECLARE_SOA_TABLE(UDCollisionsSelsCent, "AOD", "UDCOLSELCNT",
                   udcollision::DBcTOR,
@@ -272,7 +307,7 @@ DECLARE_SOA_TABLE(UDMcCollsLabels, "AOD", "UDMCCOLLSLABEL",
                   udcollision::UDMcCollisionId);
 
 using UDCollisions = UDCollisions_001;
-using UDCollisionSelExtras = UDCollisionSelExtras_002;
+using UDCollisionSelExtras = UDCollisionSelExtras_003;
 
 using UDCollision = UDCollisions::iterator;
 using SGCollision = SGCollisions::iterator;
@@ -372,6 +407,31 @@ DECLARE_SOA_TABLE(UDTracksFlags, "AOD", "UDTRACKFLAG",
 
 DECLARE_SOA_TABLE(UDTracksLabels, "AOD", "UDTRACKLABEL",
                   udtrack::TrackId);
+
+namespace udcollfitbits
+{
+DECLARE_SOA_COLUMN(Thr1W0, thr1W0, uint64_t); /// 1 MIP thresholds for FT0A ch 0 - ch 63
+DECLARE_SOA_COLUMN(Thr1W1, thr1W1, uint64_t); /// 1 MIP thresholds for FT0A ch 64 - ch 96 & FT0C ch 0 - ch 31
+DECLARE_SOA_COLUMN(Thr1W2, thr1W2, uint64_t); /// 1 MIP thresholds for FT0C ch 32 - ch 96
+DECLARE_SOA_COLUMN(Thr1W3, thr1W3, uint64_t); /// 1 MIP thresholds for FT0C ch 97 - 112 & FV0 0 - 47
+
+DECLARE_SOA_COLUMN(Thr2W0, thr2W0, uint64_t); /// 2 MIP thresholds for FT0A ch 0 - ch 63
+DECLARE_SOA_COLUMN(Thr2W1, thr2W1, uint64_t); /// 2 MIP thresholds for FT0A ch 63 - ch 96 & FT0C ch 0 - ch 31
+DECLARE_SOA_COLUMN(Thr2W2, thr2W2, uint64_t); /// 2 MIP thresholds for FT0C ch 32 - ch 96
+DECLARE_SOA_COLUMN(Thr2W3, thr2W3, uint64_t); /// 2 MIP thresholds for FT0C ch 97 - 112 & FV0 0 - 47
+} // namespace udcollfitbits
+
+DECLARE_SOA_TABLE(UDCollisionFITBits, "AOD", "UDCOLLFITBITS",
+                  o2::soa::Index<>,
+                  udcollfitbits::Thr1W0, /// 1 MIP thresholds for FT0A ch 0 - ch 63
+                  udcollfitbits::Thr1W1, /// 1 MIP thresholds for FT0A ch 63 - ch 96 & FT0C ch 0 - ch 31
+                  udcollfitbits::Thr1W2, /// 1 MIP thresholds for FT0C ch 32 - ch 96
+                  udcollfitbits::Thr1W3, /// 1 MIP thresholds for FT0C ch 97 - 112 & FV0 0 - 47
+                  udcollfitbits::Thr2W0, /// 2 MIP thresholds for FT0A ch 0 - ch 63
+                  udcollfitbits::Thr2W1, /// 2 MIP thresholds for FT0A ch 63 - ch 96 & FT0C ch 0 - ch 31
+                  udcollfitbits::Thr2W2, /// 2 MIP thresholds for FT0C ch 32 - ch 96
+                  udcollfitbits::Thr2W3  /// 2 MIP thresholds for FT0C ch 97 - 112 & FV0 0 - 47
+);
 
 using UDTrack = UDTracks::iterator;
 using UDTrackCov = UDTracksCov::iterator;

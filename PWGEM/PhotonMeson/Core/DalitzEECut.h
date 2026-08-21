@@ -9,37 +9,34 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-//
-// Class for dalitz ee selection
-//
+/// \file EMCPhotonCut.cxx
+/// \brief header of class for dalitz ee cuts.
+/// \author D. Sekihata, daiki.sekihata@cern.ch
 
 #ifndef PWGEM_PHOTONMESON_CORE_DALITZEECUT_H_
 #define PWGEM_PHOTONMESON_CORE_DALITZEECUT_H_
 
-#include <algorithm>
-#include <set>
-#include <vector>
-#include <utility>
-#include <string>
-#include "TNamed.h"
-#include "Math/Vector4D.h"
-
-#include "Tools/ML/MlResponse.h"
-#include "Tools/ML/model.h"
-
-#include "Framework/Logger.h"
-#include "Framework/DataTypes.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "PWGEM/Dilepton/Utils/PairUtilities.h"
 #include "PWGEM/Dilepton/Utils/EMTrackUtilities.h"
+#include "PWGEM/Dilepton/Utils/PairUtilities.h"
 
-using namespace o2::aod::pwgem::dilepton::utils::emtrackutil;
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/Concepts.h>
 
-class DalitzEECut : public TNamed
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
+#include <Math/Vector4Dfwd.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <set>
+#include <string>
+#include <utility>
+
+class DalitzEECut
 {
  public:
   DalitzEECut() = default;
-  DalitzEECut(const char* name, const char* title) : TNamed(name, title) {}
+  DalitzEECut(const char* name, const char* title) : name(name), title(title) {}
 
   enum class DalitzEECuts : int {
     // pair cut
@@ -57,14 +54,14 @@ class DalitzEECut : public TNamed
     kTPCChi2NDF,
     kTPCNsigmaEl,
     kTPCNsigmaPi,
+    kDCA3Dsigma,
     kDCAxy,
     kDCAz,
     kITSNCls,
     kITSChi2NDF,
-    kITSCluserSize,
     kNCuts
   };
-  static const char* mCutNames[static_cast<int>(DalitzEECuts::kNCuts)];
+  // static std::array<std::string, static_cast<std::size_t>(DalitzEECuts::kNCuts)> mCutNames;
 
   enum class PIDSchemes : int {
     kUnDef = -1,
@@ -72,13 +69,12 @@ class DalitzEECut : public TNamed
     kTPConly = 1,
   };
 
-  template <typename T = int, typename TPair>
-  bool IsSelected(TPair const& pair) const
-  {
-    auto t1 = std::get<0>(pair);
-    auto t2 = std::get<1>(pair);
-    float bz = std::get<2>(pair);
+  [[nodiscard]] const std::string& getName() const { return name; }
+  [[nodiscard]] const std::string& getTitle() const { return title; }
 
+  template <o2::soa::is_iterator TTrack1, o2::soa::is_iterator TTrack2>
+  bool IsSelected(TTrack1 const& t1, TTrack2 const& t2, float bz) const
+  {
     if (!IsSelectedTrack(t1) || !IsSelectedTrack(t2)) {
       return false;
     }
@@ -90,7 +86,7 @@ class DalitzEECut : public TNamed
     return true;
   }
 
-  template <typename TTrack1, typename TTrack2>
+  template <o2::soa::is_iterator TTrack1, o2::soa::is_iterator TTrack2>
   bool IsSelectedPair(TTrack1 const& t1, TTrack2 const& t2, const float bz) const
   {
     ROOT::Math::PtEtaPhiMVector v1(t1.pt(), t1.eta(), t1.phi(), o2::constants::physics::MassElectron);
@@ -112,10 +108,10 @@ class DalitzEECut : public TNamed
     return true;
   }
 
-  template <bool isML = false, typename TTrack, typename TCollision = int>
+  template <bool isML = false, o2::soa::is_iterator TTrack, typename TCollision = int>
   bool IsSelectedTrack(TTrack const& track, TCollision const& = 0) const
   {
-    if (!track.hasITS() || !track.hasTPC()) { // track has to be ITS-TPC matched track
+    if (!track.hasITS()) {
       return false;
     }
 
@@ -123,6 +119,9 @@ class DalitzEECut : public TNamed
       return false;
     }
     if (!IsSelectedTrack(track, DalitzEECuts::kTrackEtaRange)) {
+      return false;
+    }
+    if (!IsSelectedTrack(track, DalitzEECuts::kDCA3Dsigma)) {
       return false;
     }
     if (!IsSelectedTrack(track, DalitzEECuts::kDCAxy)) {
@@ -137,9 +136,6 @@ class DalitzEECut : public TNamed
       return false;
     }
     if (!IsSelectedTrack(track, DalitzEECuts::kITSChi2NDF)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DalitzEECuts::kITSCluserSize)) {
       return false;
     }
 
@@ -157,32 +153,48 @@ class DalitzEECut : public TNamed
       }
     }
 
+    if (!mIncludeITSsa && (!track.hasITS() || !track.hasTPC())) { // track has to be ITS-TPC matched track
+      return false;
+    }
+
+    if ((track.hasITS() && !track.hasTPC() && !track.hasTRD() && !track.hasTOF()) && track.pt() > mMaxPtITSsa) { // ITSsa
+      return false;
+    }
+
     // TPC cuts
-    if (!IsSelectedTrack(track, DalitzEECuts::kTPCNCls)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DalitzEECuts::kTPCCrossedRows)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DalitzEECuts::kTPCCrossedRowsOverNCls)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DalitzEECuts::kTPCFracSharedClusters)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DalitzEECuts::kTPCChi2NDF)) {
-      return false;
+    if (track.hasTPC()) {
+      if (!IsSelectedTrack(track, DalitzEECuts::kTPCNCls)) {
+        return false;
+      }
+      if (!IsSelectedTrack(track, DalitzEECuts::kTPCCrossedRows)) {
+        return false;
+      }
+      if (!IsSelectedTrack(track, DalitzEECuts::kTPCCrossedRowsOverNCls)) {
+        return false;
+      }
+      if (!IsSelectedTrack(track, DalitzEECuts::kTPCFracSharedClusters)) {
+        return false;
+      }
+      if (!IsSelectedTrack(track, DalitzEECuts::kTPCChi2NDF)) {
+        return false;
+      }
     }
 
     // PID cuts
-    if (!PassPID(track)) {
-      return false;
+    if (track.hasITS() && !track.hasTPC() && !track.hasTRD() && !track.hasTOF()) { // ITSsa
+      float meanClusterSizeITS = track.meanClusterSizeITS() * std::cos(std::atan(track.tgl()));
+      if (meanClusterSizeITS < mMinMeanClusterSizeITS || mMaxMeanClusterSizeITS < meanClusterSizeITS) {
+        return false;
+      }
+    } else {
+      if (!PassPID(track)) {
+        return false;
+      }
     }
-
     return true;
   }
 
-  template <typename T>
+  template <o2::soa::is_iterator T>
   bool PassPID(T const& track) const
   {
     switch (mPIDScheme) {
@@ -193,14 +205,12 @@ class DalitzEECut : public TNamed
         return PassTOFif(track);
 
       case static_cast<int>(PIDSchemes::kUnDef):
-        return true;
-
       default:
         return true;
     }
   }
 
-  template <typename T>
+  template <o2::soa::is_iterator T>
   bool PassTPConly(T const& track) const
   {
     bool is_el_included_TPC = mMinTPCNsigmaEl < track.tpcNSigmaEl() && track.tpcNSigmaEl() < mMaxTPCNsigmaEl;
@@ -208,7 +218,7 @@ class DalitzEECut : public TNamed
     return is_el_included_TPC && is_pi_excluded_TPC;
   }
 
-  template <typename T>
+  template <o2::soa::is_iterator T>
   bool PassTOFif(T const& track) const
   {
     bool is_el_included_TPC = mMinTPCNsigmaEl < track.tpcNSigmaEl() && track.tpcNSigmaEl() < mMaxTPCNsigmaEl;
@@ -217,15 +227,15 @@ class DalitzEECut : public TNamed
     return is_el_included_TPC && is_pi_excluded_TPC && is_el_included_TOF;
   }
 
-  template <typename T>
+  template <o2::soa::is_iterator T>
   bool IsSelectedTrack(T const& track, const DalitzEECuts& cut) const
   {
     switch (cut) {
       case DalitzEECuts::kTrackPtRange:
-        return track.pt() >= mMinTrackPt && track.pt() <= mMaxTrackPt;
+        return track.pt() > mMinTrackPt && track.pt() < mMaxTrackPt;
 
       case DalitzEECuts::kTrackEtaRange:
-        return track.eta() >= mMinTrackEta && track.eta() <= mMaxTrackEta;
+        return track.eta() > mMinTrackEta && track.eta() < mMaxTrackEta;
 
       case DalitzEECuts::kTPCNCls:
         return track.tpcNClsFound() >= mMinNClustersTPC;
@@ -237,25 +247,25 @@ class DalitzEECut : public TNamed
         return track.tpcCrossedRowsOverFindableCls() >= mMinNCrossedRowsOverFindableClustersTPC;
 
       case DalitzEECuts::kTPCFracSharedClusters:
-        return track.tpcFractionSharedCls() <= mMaxFracSharedClustersTPC;
+        return track.tpcFractionSharedCls() < mMaxFracSharedClustersTPC;
 
       case DalitzEECuts::kTPCChi2NDF:
         return mMinChi2PerClusterTPC < track.tpcChi2NCl() && track.tpcChi2NCl() < mMaxChi2PerClusterTPC;
 
+      case DalitzEECuts::kDCA3Dsigma:
+        return mMinDca3D < o2::aod::pwgem::dilepton::utils::emtrackutil::dca3DinSigma(track) && o2::aod::pwgem::dilepton::utils::emtrackutil::dca3DinSigma(track) < mMaxDca3D; // in sigma for single leg
+
       case DalitzEECuts::kDCAxy:
-        return std::fabs(track.dcaXY()) <= ((mMaxDcaXYPtDep) ? mMaxDcaXYPtDep(track.pt()) : mMaxDcaXY);
+        return std::fabs(track.dcaXY()) < ((mMaxDcaXYPtDep) ? mMaxDcaXYPtDep(track.pt()) : mMaxDcaXY);
 
       case DalitzEECuts::kDCAz:
-        return std::fabs(track.dcaZ()) <= mMaxDcaZ;
+        return std::fabs(track.dcaZ()) < mMaxDcaZ;
 
       case DalitzEECuts::kITSNCls:
         return mMinNClustersITS <= track.itsNCls() && track.itsNCls() <= mMaxNClustersITS;
 
       case DalitzEECuts::kITSChi2NDF:
         return mMinChi2PerClusterITS < track.itsChi2NCl() && track.itsChi2NCl() < mMaxChi2PerClusterITS;
-
-      case DalitzEECuts::kITSCluserSize:
-        return mMinMeanClusterSizeITS < track.meanClusterSizeITS() * std::cos(std::atan(track.tgl())) && track.meanClusterSizeITS() * std::cos(std::atan(track.tgl())) < mMaxMeanClusterSizeITS;
 
       default:
         return false;
@@ -265,8 +275,8 @@ class DalitzEECut : public TNamed
   // Setters
   void SetPairPtRange(float minPt = 0.f, float maxPt = 1e10f);
   void SetPairYRange(float minY = -1e10f, float maxY = 1e10f);
-  void SetMeeRange(float min = 0.f, float max = 0.5);
-  void SetMaxPhivPairMeeDep(std::function<float(float)> meeDepCut);
+  void SetMeeRange(float min = 0.f, float max = 0.04);
+  void SetMaxPhivPairMeeDep(const std::function<float(float)>& meeDepCut);
   void SelectPhotonConversion(bool flag);
 
   void SetTrackPtRange(float minPt = 0.f, float maxPt = 1e10f);
@@ -288,16 +298,20 @@ class DalitzEECut : public TNamed
   void RequireITSibAny(bool flag);
   void RequireITSib1st(bool flag);
 
-  void SetMaxDcaXY(float maxDcaXY); // in cm
-  void SetMaxDcaZ(float maxDcaZ);   // in cm
-  void SetMaxDcaXYPtDep(std::function<float(float)> ptDepCut);
+  void SetTrackDca3DRange(float min, float max); // in sigma
+  void SetMaxDcaXY(float maxDcaXY);              // in cm
+  void SetMaxDcaZ(float maxDcaZ);                // in cm
+  void SetMaxDcaXYPtDep(const std::function<float(float)>& ptDepCut);
   void ApplyPrefilter(bool flag);
   void ApplyPhiV(bool flag);
+  void IncludeITSsa(bool flag, float maxpt);
 
   // Getters
-  bool IsPhotonConversionSelected() const { return mSelectPC; }
+  [[nodiscard]] bool IsPhotonConversionSelected() const { return mSelectPC; }
 
  private:
+  std::string name;
+  std::string title;
   static const std::pair<int8_t, std::set<uint8_t>> its_ib_any_Requirement;
   static const std::pair<int8_t, std::set<uint8_t>> its_ib_1st_Requirement;
   // pair cuts
@@ -305,8 +319,8 @@ class DalitzEECut : public TNamed
   float mMinPairPt{0.f}, mMaxPairPt{1e10f};  // range in pT
   float mMinPairY{-1e10f}, mMaxPairY{1e10f}; // range in rapidity
   float mMinPhivPair{0.f}, mMaxPhivPair{+3.2};
-  std::function<float(float)> mMaxPhivPairMeeDep{}; // max phiv as a function of mee
-  bool mSelectPC{false};                            // flag to select photon conversion used in mMaxPhivPairMeeDep
+  std::function<float(float)> mMaxPhivPairMeeDep; // max phiv as a function of mee
+  bool mSelectPC{false};                          // flag to select photon conversion used in mMaxPhivPairMeeDep
 
   // kinematic cuts
   float mMinTrackPt{0.f}, mMaxTrackPt{1e10f};      // range in pT
@@ -324,20 +338,22 @@ class DalitzEECut : public TNamed
   bool mRequireITSibAny{true};
   bool mRequireITSib1st{false};
 
-  float mMaxDcaXY{1.0f};                        // max dca in xy plane
-  float mMaxDcaZ{1.0f};                         // max dca in z direction
-  std::function<float(float)> mMaxDcaXYPtDep{}; // max dca in xy plane as function of pT
+  float mMinDca3D{0.0f};                      // min dca in 3D in units of sigma
+  float mMaxDca3D{1e+10};                     // max dca in 3D in units of sigma
+  float mMaxDcaXY{1.0f};                      // max dca in xy plane
+  float mMaxDcaZ{1.0f};                       // max dca in z direction
+  std::function<float(float)> mMaxDcaXYPtDep; // max dca in xy plane as function of pT
   bool mApplyPhiV{true};
-  float mMinMeanClusterSizeITS{-1e10f}, mMaxMeanClusterSizeITS{1e10f}; // max <its cluster size> x cos(Lmabda)
+  float mMinMeanClusterSizeITS{-1e10f}, mMaxMeanClusterSizeITS{1e10f}; // <its cluster size> x cos(lmabda)
   float mMinChi2TOF{-1e10f}, mMaxChi2TOF{1e10f};                       // max tof chi2 per
+  bool mIncludeITSsa{false};
+  float mMaxPtITSsa{0.15};
 
   // pid cuts
   int mPIDScheme{-1};
   float mMinTPCNsigmaEl{-1e+10}, mMaxTPCNsigmaEl{+1e+10};
   float mMinTPCNsigmaPi{0}, mMaxTPCNsigmaPi{0};
   float mMinTOFNsigmaEl{-1e+10}, mMaxTOFNsigmaEl{+1e+10};
-
-  ClassDef(DalitzEECut, 1);
 };
 
 #endif // PWGEM_PHOTONMESON_CORE_DALITZEECUT_H_

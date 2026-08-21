@@ -8,9 +8,10 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -20,6 +21,7 @@ struct mcCollisionConverter {
 
   void process(aod::McCollisions_000 const& mcCollisionTable)
   {
+    mcCollisions_001.reserve(mcCollisionTable.size());
     for (auto& mcCollision : mcCollisionTable) {
 
       // Repopulate new table

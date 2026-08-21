@@ -16,26 +16,47 @@
 /// \author Deepa Thomas <deepa.thomas@cern.ch>, UT Austin
 /// \author Nima Zardoshti <nima.zardoshti@cern.ch>, CERN
 
-#include <algorithm>
-#include <string>
-#include <vector>
-
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/RunningWorkflowInfo.h"
-
-#include "Common/Core/TrackSelectorPID.h"
-
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/Core/HfMlResponseBplusToD0Pi.h"
 #include "PWGHF/Core/SelectorCuts.h"
+#include "PWGHF/DataModel/AliasTables.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
+#include "PWGHF/Utils/utilsPid.h"
+
+#include "Common/Core/TrackSelectorPID.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include <CCDB/CcdbApi.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TH2.h>
+
+#include <Rtypes.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <iterator>
+#include <numeric>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::aod;
 using namespace o2::framework;
 using namespace o2::analysis;
+using namespace o2::aod::pid_tpc_tof_utils;
 
 struct HfCandidateSelectorBplusToD0Pi {
   Produces<aod::HfSelBplusToD0Pi> hfSelBplusToD0PiCandidate; // table defined in CandidateSelectionTables.h
@@ -44,7 +65,7 @@ struct HfCandidateSelectorBplusToD0Pi {
   Configurable<double> ptCandMin{"ptCandMin", 0., "Lower bound of candidate pT"};
   Configurable<double> ptCandMax{"ptCandMax", 50., "Upper bound of candidate pT"};
   // Enable PID
-  Configurable<int> pionPidMethod{"pionPidMethod", 1, "PID selection method for the bachelor pion (0: none, 1: TPC or TOF, 2: TPC and TOF)"};
+  Configurable<int> pionPidMethod{"pionPidMethod", PidMethod::TpcOrTof, "PID selection method for the bachelor pion (PidMethod::NoPid: none, PidMethod::TpcOrTof: TPC or TOF, PidMethod::TpcAndTof: TPC and TOF)"};
   Configurable<bool> acceptPIDNotApplicable{"acceptPIDNotApplicable", true, "Switch to accept Status::NotApplicable [(NotApplicable for one detector) and (NotApplicable or Conditional for the other)] in PID selection"};
   // TPC PID
   Configurable<double> ptPidTpcMin{"ptPidTpcMin", 0.15, "Lower bound of track pT for TPC PID"};
@@ -80,10 +101,9 @@ struct HfCandidateSelectorBplusToD0Pi {
 
   o2::analysis::HfMlResponseBplusToD0Pi<float> hfMlResponse;
   float outputMlNotPreselected = -1.;
-  std::vector<float> outputMl = {};
+  std::vector<float> outputMl;
   o2::ccdb::CcdbApi ccdbApi;
 
-  HfHelper hfHelper;
   TrackSelectorPi selectorPion;
 
   using TracksPion = soa::Join<aod::TracksWExtra, aod::TracksPidPi, aod::TrackSelection>;
@@ -97,11 +117,11 @@ struct HfCandidateSelectorBplusToD0Pi {
       LOGP(fatal, "Only one process function for data should be enabled at a time.");
     }
 
-    if (pionPidMethod < 0 || pionPidMethod > 2) {
+    if (pionPidMethod < 0 || pionPidMethod >= PidMethod::NPidMethods) {
       LOGP(fatal, "Invalid PID option in configurable, please set 0 (no PID), 1 (TPC or TOF), or 2 (TPC and TOF)");
     }
 
-    if (pionPidMethod != 0) {
+    if (pionPidMethod != PidMethod::NoPid) {
       selectorPion.setRangePtTpc(ptPidTpcMin, ptPidTpcMax);
       selectorPion.setRangeNSigmaTpc(-nSigmaTpcMax, nSigmaTpcMax);
       selectorPion.setRangeNSigmaTpcCondTof(-nSigmaTpcCombinedMax, nSigmaTpcCombinedMax);
@@ -142,7 +162,7 @@ struct HfCandidateSelectorBplusToD0Pi {
   /// \param withDmesMl is the flag to use the table with ML scores for the D- daughter (only possible if present in the derived data)
   /// \param hfCandsBp B+ candidates
   /// \param pionTracks pion tracks
-  template <bool withDmesMl, typename Cands, typename CandsDmes>
+  template <bool WithDmesMl, typename Cands, typename CandsDmes>
   void runSelection(Cands const& hfCandsBp,
                     CandsDmes const& /*hfCandsD0*/,
                     TracksPion const& /*pionTracks*/)
@@ -158,7 +178,7 @@ struct HfCandidateSelectorBplusToD0Pi {
       }
 
       // topological cuts
-      if (!hfHelper.selectionBplusToD0PiTopol(hfCandBp, cuts, binsPt)) {
+      if (!HfHelper::selectionBplusToD0PiTopol(hfCandBp, cuts, binsPt)) {
         hfSelBplusToD0PiCandidate(statusBplus);
         if (applyBplusMl) {
           hfMlBplusToD0PiCandidate(outputMlNotPreselected);
@@ -170,7 +190,7 @@ struct HfCandidateSelectorBplusToD0Pi {
       auto trackPi = hfCandBp.template prong1_as<TracksPion>();
       auto hfCandD = hfCandBp.template prong0_as<CandsDmes>();
 
-      if constexpr (withDmesMl) {
+      if constexpr (WithDmesMl) {
         std::vector<float> mlScoresD;
         if (trackPi.sign() < 0) {
           std::copy(hfCandD.mlProbD0().begin(), hfCandD.mlProbD0().end(), std::back_inserter(mlScoresD));
@@ -178,7 +198,7 @@ struct HfCandidateSelectorBplusToD0Pi {
           std::copy(hfCandD.mlProbD0bar().begin(), hfCandD.mlProbD0bar().end(), std::back_inserter(mlScoresD));
         }
 
-        if (!hfHelper.selectionDmesMlScoresForB(hfCandD, cutsDmesMl, binsPtDmesMl, mlScoresD)) {
+        if (!HfHelper::selectionDmesMlScoresForB(hfCandD, cutsDmesMl, binsPtDmesMl, mlScoresD)) {
           hfSelBplusToD0PiCandidate(statusBplus);
           if (applyBplusMl) {
             hfMlBplusToD0PiCandidate(outputMlNotPreselected);
@@ -194,14 +214,14 @@ struct HfCandidateSelectorBplusToD0Pi {
       }
 
       // track-level PID selection
-      if (pionPidMethod) {
+      if (pionPidMethod == PidMethod::TpcOrTof || pionPidMethod == PidMethod::TpcAndTof) {
         int pidTrackPi{TrackSelectorPID::Status::NotApplicable};
-        if (pionPidMethod == 1) {
+        if (pionPidMethod == PidMethod::TpcOrTof) {
           pidTrackPi = selectorPion.statusTpcOrTof(trackPi);
-        } else {
+        } else if (pionPidMethod == PidMethod::TpcAndTof) {
           pidTrackPi = selectorPion.statusTpcAndTof(trackPi);
         }
-        if (!hfHelper.selectionBplusToD0PiPid(pidTrackPi, acceptPIDNotApplicable.value)) {
+        if (!HfHelper::selectionBplusToD0PiPid(pidTrackPi, acceptPIDNotApplicable.value)) {
           // LOGF(info, "B+ candidate selection failed at PID selection");
           hfSelBplusToD0PiCandidate(statusBplus);
           if (applyBplusMl) {
@@ -220,8 +240,8 @@ struct HfCandidateSelectorBplusToD0Pi {
         if (trackPi.sign() > 0) {
           pdgCode = -1 * pdgCode;
         }
-        std::vector<float> inputFeatures = hfMlResponse.getInputFeatures<withDmesMl>(hfCandBp, hfCandD, pdgCode, trackPi);
-        bool isSelectedMl = hfMlResponse.isSelectedMl(inputFeatures, ptCandBplus, outputMl);
+        std::vector<float> inputFeatures = hfMlResponse.getInputFeatures<WithDmesMl>(hfCandBp, hfCandD, pdgCode, trackPi);
+        bool const isSelectedMl = hfMlResponse.isSelectedMl(inputFeatures, ptCandBplus, outputMl);
         hfMlBplusToD0PiCandidate(outputMl[1]); // storing ML score for signal class
 
         if (!isSelectedMl) {

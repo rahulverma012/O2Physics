@@ -18,18 +18,18 @@
 #ifndef PWGJE_CORE_JETFINDER_H_
 #define PWGJE_CORE_JETFINDER_H_
 
-#include <memory>
+#include <fastjet/AreaDefinition.hh>
+#include <fastjet/ClusterSequenceArea.hh>
+#include <fastjet/GhostedAreaSpec.hh>
+#include <fastjet/JetDefinition.hh>
+#include <fastjet/PseudoJet.hh>
+#include <fastjet/Selector.hh>
+
+#include <Rtypes.h>
+
 #include <vector>
 
-#include <TDatabasePDG.h>
-#include <TPDGCode.h>
-#include <TMath.h>
-
-#include "fastjet/PseudoJet.hh"
-#include "fastjet/ClusterSequenceArea.hh"
-#include "fastjet/AreaDefinition.hh"
-#include "fastjet/JetDefinition.hh"
-#include "fastjet/tools/Subtractor.hh"
+#include <math.h>
 
 enum class JetType {
   full = 0,
@@ -48,7 +48,7 @@ class JetFinder
   /// \return ClusterSequenceArea object needed to access constituents
   // fastjet::ClusterSequenceArea findJets(std::vector<fastjet::PseudoJet> &inputParticles, std::vector<fastjet::PseudoJet> &jets);
 
-  float phiMin = 0.;
+  float phiMin = -1. * M_PI;
   float phiMax = 2. * M_PI;
   float etaMin = -.9;
   float etaMax = .9;
@@ -56,14 +56,12 @@ class JetFinder
   float jetR = .4;
   float jetPtMin = 0.;
   float jetPtMax = 1000.;
-  float jetPhiMin = 0.;
+  float jetPhiMin = -1. * M_PI;
   float jetPhiMax = 2. * M_PI;
   float jetEtaMin = -99.;
   float jetEtaMax = 99.;
   bool jetEtaDefault = false;
 
-  float ghostEtaMin = -.9;
-  float ghostEtaMax = .9;
   float ghostArea = .005;
   int ghostRepeatN = 1;
   double ghostktMean = 1.e-100;

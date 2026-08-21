@@ -9,12 +9,15 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+/// \file GFWPowerArray.h/.cxx
+/// \brief Class to compute necessary powers of Q-vectors based on input correlations
+/// \author Emil Gorm Nielsen, NBI, emil.gorm.nielsen@cern.ch
+
 #ifndef PWGCF_GENERICFRAMEWORK_CORE_GFWPOWERARRAY_H_
 #define PWGCF_GENERICFRAMEWORK_CORE_GFWPOWERARRAY_H_
 
-#include <vector>
 #include <cmath>
-#include <string>
+#include <vector>
 
 typedef std::vector<int> HarSet;
 class GFWPowerArray

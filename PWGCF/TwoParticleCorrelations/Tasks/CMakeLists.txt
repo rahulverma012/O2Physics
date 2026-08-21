@@ -9,7 +9,7 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
-o2physics_add_dpl_workflow(twopartcorr
+o2physics_add_dpl_workflow(two-particle-correlations
                            SOURCES twoParticleCorrelations.cxx
                            PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::TwoPartCorrCore
                            COMPONENT_NAME Analysis)
@@ -23,14 +23,9 @@ o2physics_add_dpl_workflow(lambdacorr
                            PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                            COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(identifiedbf
-                           SOURCES identifiedbf.cxx
-                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
-                           COMPONENT_NAME Analysis)
-
-o2physics_add_dpl_workflow(identifiedbf-filter-qa
-                           SOURCES identifiedbfqa.cxx
-                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+o2physics_add_dpl_workflow(lambda-spin-polarization
+                           SOURCES lambdaSpinPolarization.cxx
+                           PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                            COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(dpt-dpt-efficiency-and-qc
@@ -40,7 +35,7 @@ o2physics_add_dpl_workflow(dpt-dpt-efficiency-and-qc
 
 o2physics_add_dpl_workflow(dpt-dpt-per-run-qc
                            SOURCES dptDptPerRunQc.cxx
-                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2::DataFormatsITSMFT
                            COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(dpt-dpt-per-run-extra-qc
@@ -48,8 +43,8 @@ o2physics_add_dpl_workflow(dpt-dpt-per-run-extra-qc
                            PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB
                            COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(corr-sparse
-                           SOURCES corrSparse.cxx
+o2physics_add_dpl_workflow(corr-reso
+                           SOURCES corrReso.cxx
                            PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
                            COMPONENT_NAME Analysis)
 
@@ -58,6 +53,77 @@ o2physics_add_dpl_workflow(neutron-proton-corr-zdc
                            PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                            COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(di-hadron-cor
+                           SOURCES diHadronCor.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(pid-di-hadron
+                           SOURCES pidDiHadron.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(longrange-correlation
+                           SOURCES longrangeCorrelation.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(longrangecorr-derived
+                           SOURCES longrangecorrDerived.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(long-range-dihadron-cor
+                           SOURCES longRangeDihadronCor.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(two-particle-correlation-pp
+                           SOURCES twoParticleCorrelationPp.cxx
+                           PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(flow-decorrelation
+                           SOURCES flowDecorrelation.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(eta-dihadron
+                           SOURCES etaDihadron.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(nuclei-balance
+                           SOURCES nucleibalance.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(lambdacascadecorrelation
+                           SOURCES Lambdacascadecorrelation.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::AnalysisCCDB
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(particle-origin-analysis
+                           SOURCES particleOriginAnalysis.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(corr-fit
+                           SOURCES corrFit.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(casc-di-hadron-corr
+                           SOURCES cascDiHadronCorr.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore O2Physics::AnalysisCCDB O2Physics::GFWCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(two-particle-correlations-mpi
+                           SOURCES twoParticleCorrelationsMpi.cxx
+                           PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGCFCore
+                           COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(charge-balance-function
+                           SOURCES chargeBalanceFunction.cxx
+                           PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+                           COMPONENT_NAME Analysis)

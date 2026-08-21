@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -20,7 +20,9 @@
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEPAIRCLEANER_H_
 
 #include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
-#include "Framework/HistogramRegistry.h"
+
+#include <Framework/HistogramRegistry.h>
+#include <Framework/Logger.h>
 
 namespace o2::analysis::femto_universe
 {
@@ -37,8 +39,8 @@ class FemtoUniversePairCleaner
   virtual ~FemtoUniversePairCleaner() = default;
 
   /// Initialization of the QA histograms
-  /// \param registry HistogramRegistry
-  void init(HistogramRegistry* registry)
+  /// \param registry o2::framework::HistogramRegistry
+  void init(framework::HistogramRegistry* registry)
   {
     if (registry) {
       mHistogramRegistry = registry;
@@ -131,6 +133,23 @@ class FemtoUniversePairCleaner
         return false;
       }
       return part1.globalIndex() != part2.globalIndex();
+    } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kV0 && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+      /// V0-Cascade combination where part1 is a V0 and part2 is a cascade
+      if (part1.partType() != o2::aod::femtouniverseparticle::ParticleType::kV0 || part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kCascade) {
+        LOG(fatal) << "FemtoUniversePairCleaner: passed arguments don't agree with FemtoUniversePairCleaner instantiation! Please provide first argument kV0 candidate and second argument kCascade candidate.";
+        return false;
+      }
+      // part1 v0 children
+      const auto& posChild1 = particles.iteratorAt(part1.index() - 2);
+      const auto& negChild1 = particles.iteratorAt(part1.index() - 1);
+      // part2 cascade children
+      const auto& posChild2 = particles.iteratorAt(part2.index() - 3);
+      const auto& negChild2 = particles.iteratorAt(part2.index() - 2);
+      const auto& bachelor2 = particles.iteratorAt(part2.index() - 1);
+      if (posChild1.globalIndex() == posChild2.globalIndex() || negChild1.globalIndex() == negChild2.globalIndex() || posChild1.globalIndex() == bachelor2.globalIndex() || negChild1.globalIndex() == bachelor2.globalIndex()) {
+        return false;
+      }
+      return part1.globalIndex() != part2.globalIndex();
     } else if constexpr (kPartOneType == o2::aod::femtouniverseparticle::ParticleType::kTrack && kPartTwoType == o2::aod::femtouniverseparticle::ParticleType::kD0) {
       /// Track-D0 combination part1 is hadron and part2 is D0
       if (part2.partType() != o2::aod::femtouniverseparticle::ParticleType::kD0) {
@@ -167,7 +186,7 @@ class FemtoUniversePairCleaner
   }
 
  private:
-  HistogramRegistry* mHistogramRegistry;                                                ///< For QA output
+  framework::HistogramRegistry* mHistogramRegistry;                                     ///< For QA output
   static constexpr o2::aod::femtouniverseparticle::ParticleType kPartOneType = partOne; ///< Type of particle 1
   static constexpr o2::aod::femtouniverseparticle::ParticleType kPartTwoType = partTwo; ///< Type of particle 2
 };

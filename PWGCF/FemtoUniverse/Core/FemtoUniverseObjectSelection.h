@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -17,17 +17,19 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEOBJECTSELECTION_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEOBJECTSELECTION_H_
 
-#include <algorithm>
-#include <string>
-#include <vector>
-
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseSelection.h"
-#include "ReconstructionDataFormats/PID.h"
-#include "Framework/HistogramRegistry.h"
 #include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
 
-using namespace o2;
-using namespace o2::framework;
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+
+#include <TH1.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <string>
+#include <vector>
 
 namespace o2::analysis
 {
@@ -53,7 +55,7 @@ class FemtoUniverseObjectSelection
   {
     int nBins = mSelections.size();
     LOGF(info, "%s", (static_cast<std::string>(o2::aod::femtouniverseparticle::ParticleTypeName[part]) + "/cuthist").c_str());
-    mHistogramRegistry->add((static_cast<std::string>(o2::aod::femtouniverseparticle::ParticleTypeName[part]) + "/cuthist").c_str(), "; Cut; Value", kTH1F, {{nBins, 0, static_cast<double>(nBins)}});
+    mHistogramRegistry->add((static_cast<std::string>(o2::aod::femtouniverseparticle::ParticleTypeName[part]) + "/cuthist").c_str(), "; Cut; Value", o2::framework::HistType::kTH1F, {{nBins, 0, static_cast<double>(nBins)}});
     auto hist = mHistogramRegistry->get<TH1>(HIST(o2::aod::femtouniverseparticle::ParticleTypeName[part]) + HIST("/cuthist"));
     for (size_t i = 0; i < mSelections.size(); ++i) {
       hist->GetXaxis()->SetBinLabel(i + 1, Form("%u", mSelections.at(i).getSelectionVariable()));
@@ -181,7 +183,8 @@ class FemtoUniverseObjectSelection
     std::vector<selVariable> selVarVec;
     for (auto it : mSelections) {
       auto selVar = it.getSelectionVariable();
-      if (std::none_of(selVarVec.begin(), selVarVec.end(), [selVar](selVariable a) { return a == selVar; })) {
+      if (std::none_of(selVarVec.begin(), selVarVec.end(),
+                       [selVar](selVariable a) { return a == selVar; })) {
         selVarVec.push_back(selVar);
       }
     }
@@ -189,7 +192,7 @@ class FemtoUniverseObjectSelection
   }
 
  protected:
-  HistogramRegistry* mHistogramRegistry;                                        ///< For QA output
+  o2::framework::HistogramRegistry* mHistogramRegistry;                         ///< For QA output
   std::vector<FemtoUniverseSelection<selValDataType, selVariable>> mSelections; ///< Vector containing all selections
 };
 

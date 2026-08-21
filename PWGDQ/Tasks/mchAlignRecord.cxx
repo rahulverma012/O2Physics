@@ -14,63 +14,48 @@
 ///
 /// \author Chi ZHANG, CEA-Saclay, chi.zhang@cern.ch
 
-#include <gsl/span>
-#include <cmath>
-#include <string>
-#include <unordered_map>
-#include <vector>
-#include <iostream>
-#include <memory>
-
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-
-#include <TCanvas.h>
-#include <TDatabasePDG.h>
-#include <TF1.h>
-#include <TFile.h>
-#include <TH1F.h>
-#include <TH2F.h>
-#include <TLegend.h>
-#include <TMatrixD.h>
-#include <TParameter.h>
-#include <TSystem.h>
-#include <TTree.h>
-#include <TTreeReader.h>
-#include <TTreeReaderValue.h>
-#include <TChain.h>
-#include <TGraph.h>
-#include <TGraphErrors.h>
-#include <TLine.h>
-#include <TSystem.h>
-
-#include "CommonConstants/LHCConstants.h"
-#include "CommonUtils/NameConf.h"
-#include "Common/DataModel/EventSelection.h"
 #include "PWGDQ/Core/VarManager.h"
 
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "DetectorsBase/GRPGeomHelper.h"
-#include "DetectorsBase/Propagator.h"
-#include "Framework/Logger.h"
-#include "Framework/CallbackService.h"
-#include "CCDB/BasicCCDBManager.h"
+#include <CCDB/BasicCCDBManager.h>
+#include <DataFormatsMCH/Cluster.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DetectorsBase/GRPGeomHelper.h>
+#include <DetectorsBase/GeometryManager.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/CallbackService.h>
+#include <Framework/Configurable.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
+#include <Framework/runDataProcessing.h>
+#include <GPU/GPUROOTCartesianFwd.h>
+#include <MCHAlign/Aligner.h>
+#include <MCHBase/TrackerParam.h>
+#include <MCHGeometryTransformer/Transformations.h>
+#include <MCHTracking/Track.h>
+#include <MCHTracking/TrackExtrap.h>
+#include <MCHTracking/TrackFitter.h>
+#include <MCHTracking/TrackParam.h>
+#include <MathUtils/Cartesian.h>
 
-#include "MCHGeometryTransformer/Transformations.h"
-#include "DataFormatsMCH/Cluster.h"
-#include "DataFormatsMCH/TrackMCH.h"
-#include "MCHTracking/Track.h"
-#include "MCHTracking/TrackExtrap.h"
-#include "MCHTracking/TrackParam.h"
-#include "MCHTracking/TrackFitter.h"
-#include "MCHBase/TrackerParam.h"
-#include "ReconstructionDataFormats/TrackMCHMID.h"
-#include "MCHAlign/Aligner.h"
-#include "DetectorsCommonDataFormats/AlignParam.h"
-#include "DetectorsCommonDataFormats/DetID.h"
-#include "DetectorsCommonDataFormats/DetectorNameConf.h"
+#include <TGeoManager.h>
+#include <TLegend.h>
+#include <TObjArray.h>
+#include <TString.h>
+
+#include <RtypesCore.h>
+
+#include <cmath>
+#include <cstdint>
+#include <exception>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -78,8 +63,6 @@ using namespace o2::framework::expressions;
 using namespace o2::aod;
 
 using namespace std;
-using std::cout;
-using std::endl;
 
 const int fgNCh = 10;
 const int fgNDetElemCh[fgNCh] = {4, 4, 4, 4, 18, 18, 26, 26, 26, 26};
@@ -105,13 +88,13 @@ struct mchAlignRecordTask {
   map<int, math_utils::Transform3D> transformNew;
   mch::geo::TransformationCreator transformation;
 
-  Configurable<string> fConfigCcdbUrl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
-  Configurable<string> geoPath{"geoPath", "GLO/Config/GeometryAligned", "Path of the geometry file"};
-  Configurable<string> grpmagPath{"grpmagPath", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object"};
-  Configurable<string> fFixChamber{"fix-chamber", "", "Fixing chamber"};
+  Configurable<std::string> fConfigCcdbUrl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
+  Configurable<std::string> geoPath{"geoPath", "GLO/Config/GeometryAligned", "Path of the geometry file"};
+  Configurable<std::string> grpmagPath{"grpmagPath", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object"};
+  Configurable<std::string> fFixChamber{"fix-chamber", "", "Fixing chamber"};
   Configurable<bool> fDoNewGeo{"do-realign", false, "Transform to a given new geometry"};
   Configurable<bool> fDoEvaluation{"do-evaluation", false, "Enable storage of residuals"};
-  Configurable<string> fConfigNewGeoFile{"new-geo", "o2sim_geometry-aligned.root", "New geometry for transformation"};
+  Configurable<std::string> fConfigNewGeoFile{"new-geo", "o2sim_geometry-aligned.root", "New geometry for transformation"};
   Configurable<double> fAllowedVarX{"variation-x", 2.0, "Allowed variation for x axis in cm"};
   Configurable<double> fAllowedVarY{"variation-y", 0.3, "Allowed variation for y axis in cm"};
   Configurable<double> fAllowedVarPhi{"variation-phi", 0.002, "Allowed variation for phi axis in rad"};
@@ -130,7 +113,7 @@ struct mchAlignRecordTask {
                                               "List of param mask for d.o.f to be fixed"};
   } fFixDetElem;
 
-  Preslice<aod::FwdTrkCl> perMuon = aod::fwdtrkcl::fwdtrackId;
+  Preslice<aod::FwdTrkCls> perMuon = aod::fwdtrkcl::fwdtrackId;
 
   void init(InitContext& ic)
   {

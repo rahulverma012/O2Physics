@@ -30,39 +30,34 @@
 //    david.dobrigkeit.chinellato@cern.ch
 //
 
-#include <Math/Vector4D.h>
-#include <cmath>
+#include "PWGUD/Core/SGSelector.h"
+#include "PWGUD/DataModel/UDTables.h"
+
+#include "Common/Core/RecoDecay.h"
+
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Array2D.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/O2DatabasePDGPlugin.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+
+#include <TObject.h>
+
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
-#include <map>
 #include <string>
 #include <vector>
-
-#include <TFile.h>
-#include <TH2F.h>
-#include <TProfile.h>
-#include <TLorentzVector.h>
-#include <TPDGCode.h>
-
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "ReconstructionDataFormats/Track.h"
-#include "CCDB/BasicCCDBManager.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "Common/Core/trackUtilities.h"
-#include "Common/Core/TrackSelection.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/EventSelection.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "PWGUD/Core/SGSelector.h"
-
-#include "EventFiltering/Zorro.h"
-#include "EventFiltering/ZorroSummary.h"
 
 using namespace o2;
 using namespace o2::framework;
@@ -414,9 +409,9 @@ struct upcQuarkoniaCentralBarrel {
     // __________________________________________
     // main analysis
     if (doMCAssociation) {
-      if constexpr (requires { proton.template udMcParticle(); }) { // check if MC information is available
-        auto protonMC = fullTrackMCs.iteratorAt(proton.template udMcParticle().globalIndex());
-        auto antiProtonMC = fullTrackMCs.iteratorAt(antiProton.template udMcParticle().globalIndex());
+      if constexpr (requires { proton.udMcParticle(); }) { // check if MC information is available
+        auto protonMC = fullTrackMCs.iteratorAt(proton.udMcParticle().globalIndex());
+        auto antiProtonMC = fullTrackMCs.iteratorAt(antiProton.udMcParticle().globalIndex());
 
         if (!protonMC.has_mothers())
           return;

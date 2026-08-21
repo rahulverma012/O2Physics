@@ -12,28 +12,23 @@
 // **Hadronic Correction in the EMCAL framework: to avoid the double counting of the charged particles' contribution in jets**
 /// \author Archita Rani Dash <archita.rani.dash@cern.ch>
 
-#include <algorithm>
-#include <iostream>
-#include <memory>
-#include <cmath>
-#include <vector>
-#include <TF1.h>
-#include "TVector2.h"
-
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoA.h"
-#include "Framework/HistogramRegistry.h"
-
-#include "DetectorsBase/GeometryManager.h"
-
-#include "PWGJE/DataModel/JetReducedData.h"
 #include "PWGJE/DataModel/Jet.h"
+#include "PWGJE/DataModel/JetReducedData.h"
 
-#include "PWGJE/Core/JetUtilities.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
 
-#include "CommonDataFormat/InteractionRecord.h"
+#include <TF1.h>
+
+#include <cmath>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -47,12 +42,6 @@ struct EmcalClusterHadronicCorrectionTask {
   PresliceUnsorted<aod::JEMCTracks> perTrackMatchedTrack = aod::jemctrack::trackId;
 
   // define configurables here
-  Configurable<std::string> clusterDefinitionS{"clusterDefinition", "kV3Default", "cluster definition to be selected, e.g. V3Default"};
-
-  Configurable<float> minTime{"minTime", -25., "Minimum cluster time for time cut"};
-  Configurable<float> maxTime{"maxTime", 20., "Maximum cluster time for time cut"};
-  Configurable<float> minM02{"minM02", 0.1, "Minimum M02 for M02 cut"};
-  Configurable<float> maxM02{"maxM02", 0.9, "Maximum M02 for M02 cut"};
   Configurable<float> minTrackPt{"minTrackPt", 0.15, "Minimum pT for tracks"};
   Configurable<double> hadCorr1{"hadCorr1", 1., "hadronic correction fraction for complete cluster energy subtraction for one matched track"};                // 100% - default
   Configurable<double> hadCorr2{"hadCorr2", 0.7, "hadronic correction fraction for systematic studies for one matched track"};                                // 70%
@@ -89,7 +78,7 @@ struct EmcalClusterHadronicCorrectionTask {
     registry.add("h_Ecluster2", "; Ecluster2 (GeV); entries", {HistType::kTH1F, {{350, 0., 350.}}});
     registry.add("h_EclusterAll1", "; EclusterAll1 (GeV); entries", {HistType::kTH1F, {{350, 0., 350.}}});
     registry.add("h_EclusterAll2", "; EclusterAll2 (GeV); entries", {HistType::kTH1F, {{350, 0., 350.}}});
-    registry.add("h_ClsTime", "Cluster time distribution of uncorrected cluster E; #it{t}_{cls} (ns); entries", {HistType::kTH1F, {{500, -250., 250.}}});
+    registry.add("h_ClsTime", "Cluster time distribution of uncorrected cluster E; #it{t}_{cls} (ns); entries", {HistType::kTH1F, {{1500, -600., 900.}}});
     registry.add("h_ClsM02", "Cluster M02 distribution of uncorrected cluster E; #it{M}_{02}; entries", {HistType::kTH1F, {{400, 0., 5.}}});
     registry.add("h2_ClsEvsNmatches", "Original cluster energy vs Nmatches; Cls E w/o correction (GeV); Nmatches", {HistType::kTH2F, {{350, 0., 350.}, {100, -0.5, 21.}}});
     registry.add("h2_ClsEvsEcluster1", "; Cls E w/o correction (GeV); Ecluster1 (GeV)", {HistType::kTH2F, {{350, 0., 350.}, {350, 0., 350.}}});
@@ -101,13 +90,10 @@ struct EmcalClusterHadronicCorrectionTask {
     registry.add("h_matchedtracks", "Total matched tracks; track status;entries", {HistType::kTH1F, {{1, 0.5, 1.5}}});
   }
 
-  aod::EMCALClusterDefinition clusterDefinition = aod::emcalcluster::getClusterDefinitionFromString(clusterDefinitionS.value);
-  Filter clusterDefinitionSelection = (aod::jcluster::definition == static_cast<int>(clusterDefinition));
-
   // The matching of clusters and tracks is already centralised in the EMCAL framework.
   // One only needs to apply a filter on matched clusters
   // Here looping over all collisions matched to EMCAL clusters
-  void processMatchedCollisions(aod::JetCollision const&, soa::Filtered<soa::Join<aod::JClusters, aod::JClusterTracks>> const& clusters, aod::JEMCTracks const& emcTracks, aod::JetTracks const&)
+  void processMatchedCollisions(aod::JetCollision const&, soa::Join<aod::JClusters, aod::JClusterTracks> const& clusters, aod::JEMCTracks const& emcTracks, aod::JetTracks const&)
   {
     registry.fill(HIST("h_allcollisions"), 1);
 
@@ -118,6 +104,7 @@ struct EmcalClusterHadronicCorrectionTask {
 
     // Looping over all clusters matched to the collision
     for (const auto& cluster : clusters) {
+
       registry.fill(HIST("h_matchedclusters"), 1);
 
       double clusterE1;
@@ -139,7 +126,7 @@ struct EmcalClusterHadronicCorrectionTask {
       TF1 funcPtDepEta("func", "[1] + 1 / pow(x + pow(1 / ([0] - [1]), 1 / [2]), [2])");
       funcPtDepEta.SetParameters(eta0, eta1, eta2);
       TF1 funcPtDepPhi("func", "[1] + 1 / pow(x + pow(1 / ([0] - [1]), 1 / [2]), [2])");
-      funcPtDepEta.SetParameters(phi0, phi1, phi2);
+      funcPtDepPhi.SetParameters(phi0, phi1, phi2);
 
       // No matched tracks (trackless case)
       if (cluster.matchedTracks().size() == 0) {
@@ -163,11 +150,12 @@ struct EmcalClusterHadronicCorrectionTask {
         if (matchedTrack.pt() < minTrackPt) {
           continue;
         }
-        double mom = abs(matchedTrack.p());
+        double mom = std::abs(matchedTrack.p());
         registry.fill(HIST("h_matchedtracks"), 1);
 
         // CASE 1: skip tracks with a very low pT
-        if (mom < 1e-6) {
+        constexpr double kMinMom = 1e-6;
+        if (mom < kMinMom) {
           continue;
         } // end CASE 1
 
@@ -178,8 +166,8 @@ struct EmcalClusterHadronicCorrectionTask {
 
         // Perform dEta/dPhi matching
         auto emcTrack = (emcTracks.sliceBy(perTrackMatchedTrack, matchedTrack.globalIndex())).iteratorAt(0);
-        double dEta = emcTrack.etaEmcal() - cluster.eta();
-        double dPhi = TVector2::Phi_mpi_pi(emcTrack.phiEmcal() - cluster.phi());
+        double dEta = emcTrack.etaDiff();
+        double dPhi = emcTrack.phiDiff();
 
         // Apply the eta and phi matching thresholds
         // dEta and dPhi cut : ensures that the matched track is within the desired eta/phi window
@@ -190,7 +178,7 @@ struct EmcalClusterHadronicCorrectionTask {
           auto trackPhiHigh = +funcPtDepPhi.Eval(mom);
           auto trackPhiLow = -funcPtDepPhi.Eval(mom);
 
-          if ((dPhi < trackPhiHigh && dPhi > trackPhiLow) && fabs(dEta) < trackEtaMax) {
+          if ((dPhi < trackPhiHigh && dPhi > trackPhiLow) && std::fabs(dEta) < trackEtaMax) {
             if (nMatches == 0) {
               closestTrkP = mom;
             }
@@ -199,7 +187,7 @@ struct EmcalClusterHadronicCorrectionTask {
           }
         } else {
           // Do fixed dEta/dPhi matching (non-pT dependent)
-          if (fabs(dEta) >= minDEta || fabs(dPhi) >= minDPhi) {
+          if (std::fabs(dEta) >= minDEta || std::fabs(dPhi) >= minDPhi) {
             continue; // Skip this track if outside the fixed cut region
           }
 
@@ -246,7 +234,6 @@ struct EmcalClusterHadronicCorrectionTask {
 
       // Fill the table with all four corrected energies
       clusterEnergyCorrectedTable(clusterE1, clusterE2, clusterEAll1, clusterEAll2);
-
     } // End of cluster loop
   } // process function ends
   PROCESS_SWITCH(EmcalClusterHadronicCorrectionTask, processMatchedCollisions, "hadronic correction", true);

@@ -16,21 +16,12 @@
 #ifndef PWGUD_CORE_SGTRACKSELECTOR_H_
 #define PWGUD_CORE_SGTRACKSELECTOR_H_
 
+#include <TVector3.h>
+
+#include <cmath>
+#include <stdexcept>
 #include <vector>
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "iostream"
-#include "PWGUD/DataModel/UDTables.h"
-#include "PWGUD/Core/SGSelector.h"
-#include <TString.h>
-#include "TVector3.h"
-using namespace std;
-using namespace o2;
-using namespace o2::aod;
-using namespace o2::framework;
-using namespace o2::framework::expressions;
+
 template <typename T>
 int trackselector(const T& track, const std::vector<float>& params)
 {

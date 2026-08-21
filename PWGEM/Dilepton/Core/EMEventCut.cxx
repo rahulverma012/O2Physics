@@ -13,8 +13,11 @@
 // Class for em event selection
 //
 
-#include "Framework/Logger.h"
 #include "PWGEM/Dilepton/Core/EMEventCut.h"
+
+#include <Framework/Logger.h>
+
+#include <Rtypes.h>
 
 ClassImp(EMEventCut);
 
@@ -59,6 +62,12 @@ void EMEventCut::SetRequireVertexITSTPC(bool flag)
 {
   mRequireVertexITSTPC = flag;
   LOG(info) << "EM Event Cut, require vertex reconstructed by ITS-TPC matched track: " << mRequireVertexITSTPC;
+}
+
+void EMEventCut::SetRequireVertexTOFmatched(bool flag)
+{
+  mRequireVertexTOFmatched = flag;
+  LOG(info) << "EM Event Cut, require vertex reconstructed by ITS-TPC-TOF matched track: " << mRequireVertexTOFmatched;
 }
 
 void EMEventCut::SetRequireGoodZvtxFT0vsPV(bool flag)

@@ -17,19 +17,20 @@
 #ifndef PWGHF_CORE_HFMLRESPONSELCTOK0SP_H_
 #define PWGHF_CORE_HFMLRESPONSELCTOK0SP_H_
 
-#include <map>
-#include <string>
-#include <vector>
-
 #include "PWGHF/Core/HfHelper.h"
 #include "PWGHF/Core/HfMlResponse.h"
+
+#include "Tools/ML/MlResponse.h"
+
+#include <cstdint>
+#include <vector>
 
 // Fill the map of available input features
 // the key is the feature's name (std::string)
 // the value is the corresponding value in EnumInputFeatures
-#define FILL_MAP_LC(FEATURE)                                         \
-  {                                                                  \
-#FEATURE, static_cast < uint8_t>(InputFeaturesLcToK0sP::FEATURE) \
+#define FILL_MAP_LC(FEATURE)                                       \
+  {                                                                \
+    #FEATURE, static_cast<uint8_t>(InputFeaturesLcToK0sP::FEATURE) \
   }
 
 // Check if the index of mCachedIndices (index associated to a FEATURE)
@@ -51,10 +52,10 @@
   }
 
 // Variation of CHECK_AND_FILL_VEC_LC_FULL(OBJECT, FEATURE, GETTER)
-// where GETTER is a method of hfHelper
+// where GETTER is a method of HfHelper
 #define CHECK_AND_FILL_VEC_LC_HFHELPER(OBJECT, FEATURE, GETTER) \
   case static_cast<uint8_t>(InputFeaturesLcToK0sP::FEATURE): {  \
-    inputFeatures.emplace_back(hfHelper.GETTER(OBJECT));        \
+    inputFeatures.emplace_back(HfHelper::GETTER(OBJECT));       \
     break;                                                      \
   }
 
@@ -81,6 +82,7 @@ enum class InputFeaturesLcToK0sP : uint8_t {
   v0MK0Short,
   v0MGamma,
   ctV0,
+  decayLengthV0,
   dcaV0daughters,
   ptV0Pos,
   dcaPosToPV,
@@ -102,8 +104,6 @@ class HfMlResponseLcToK0sP : public HfMlResponse<TypeOutputScore>
   HfMlResponseLcToK0sP() = default;
   /// Default destructor
   virtual ~HfMlResponseLcToK0sP() = default;
-
-  HfHelper hfHelper;
 
   /// Method to get the input features vector needed for ML inference
   /// \param candidate is the Lc candidate
@@ -137,6 +137,7 @@ class HfMlResponseLcToK0sP : public HfMlResponse<TypeOutputScore>
         CHECK_AND_FILL_VEC_LC_FULL(candidate, v0MGamma, mGamma);
         CHECK_AND_FILL_VEC_LC_HFHELPER(candidate, ctV0, ctV0K0s);
         // CHECK_AND_FILL_VEC_LC_HFHELPER(candidate, ctV0, ctV0Lambda);
+        CHECK_AND_FILL_VEC_LC(decayLengthV0);
         CHECK_AND_FILL_VEC_LC(dcaV0daughters);
         CHECK_AND_FILL_VEC_LC(ptV0Pos);
         CHECK_AND_FILL_VEC_LC_FULL(candidate, dcaPosToPV, dcapostopv);
@@ -181,6 +182,7 @@ class HfMlResponseLcToK0sP : public HfMlResponse<TypeOutputScore>
       FILL_MAP_LC(v0MK0Short),
       FILL_MAP_LC(v0MGamma),
       FILL_MAP_LC(ctV0),
+      FILL_MAP_LC(decayLengthV0),
       FILL_MAP_LC(dcaV0daughters),
       FILL_MAP_LC(ptV0Pos),
       FILL_MAP_LC(dcaPosToPV),

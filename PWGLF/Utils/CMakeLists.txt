@@ -16,3 +16,23 @@ o2physics_add_library(v0SelectionGroup
 o2physics_target_root_dictionary(v0SelectionGroup
     HEADERS v0SelectionGroup.h
     LINKDEF v0SelectionGroupLinkDef.h)
+
+o2physics_add_library(collisionCutsGroup
+    SOURCES collisionCutsGroup.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore)
+
+o2physics_target_root_dictionary(collisionCutsGroup
+    HEADERS collisionCutsGroup.h
+    LINKDEF collisionCutsGroupLinkDef.h)
+
+o2physics_add_library(LfDecay3bodyBuilderHelper
+    SOURCES decay3bodyBuilderHelper.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore KFParticle::KFParticle)
+
+o2physics_add_library(LfStrangenessBuilderHelper
+    SOURCES strangenessBuilderHelper.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore KFParticle::KFParticle)
+
+o2physics_add_library(LfStrangenessBuilderModule
+    SOURCES strangenessBuilderModule.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore KFParticle::KFParticle)

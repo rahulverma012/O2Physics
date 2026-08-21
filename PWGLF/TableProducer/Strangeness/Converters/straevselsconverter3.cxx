@@ -8,11 +8,13 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "ITStracking/Vertexer.h"
 #include "PWGLF/DataModel/LFStrangenessTables.h"
+
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/Vertex.h>
 
 using namespace o2;
 using namespace o2::framework;
@@ -23,6 +25,7 @@ struct straevselsconverter3 {
 
   void process(aod::StraEvSels_002 const& straEvSels_002)
   {
+    straEvSels_003.reserve(straEvSels_002.size());
     for (auto& values : straEvSels_002) {
       straEvSels_003(values.sel8(),
                      values.selection_raw(),
@@ -53,7 +56,7 @@ struct straevselsconverter3 {
                      values.totalFDDAmplitudeC(),
                      values.energyCommonZNA(),
                      values.energyCommonZNC(),
-                     o2::its::Vertex::FlagsMask /*dummy flag value*/);
+                     o2::dataformats::Vertex<bool>::FlagsMask /*dummy flag value*/);
     }
   }
 };

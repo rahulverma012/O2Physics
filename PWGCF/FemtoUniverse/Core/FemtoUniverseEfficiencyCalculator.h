@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -16,24 +16,35 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEEFFICIENCYCALCULATOR_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEEFFICIENCYCALCULATOR_H_
 
-#include <vector>
+#include <CCDB/BasicCCDBManager.h>
+#include <Framework/Configurable.h>
+#include <Framework/Logger.h>
+
+#include <TH1.h>
+#include <TH2.h>
+#include <TH3.h>
+
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <map>
 #include <string>
-
-#include "Framework/Configurable.h"
-#include "CCDB/BasicCCDBManager.h"
-#include "PWGCF/FemtoUniverse/DataModel/FemtoDerived.h"
-#include "FemtoUniverseParticleHisto.h"
+#include <vector>
 
 namespace o2::analysis::femto_universe::efficiency
 {
 enum ParticleNo : size_t {
   ONE = 1,
-  TWO
+  TWO,
 };
 
 template <size_t T>
-concept isOneOrTwo = T == ParticleNo::ONE || T == ParticleNo::TWO;
+concept IsOneOrTwo = T == ParticleNo::ONE || T == ParticleNo::TWO;
 
 template <typename T>
 consteval auto getHistDim() -> int
@@ -48,14 +59,14 @@ consteval auto getHistDim() -> int
     return -1;
 }
 
-struct EfficiencyConfigurableGroup : ConfigurableGroup {
-  Configurable<bool> confEfficiencyApplyCorrections{"confEfficiencyApplyCorrections", false, "Should apply corrections from efficiency"};
-  Configurable<int> confEfficiencyCCDBTrainNumber{"confEfficiencyCCDBTrainNumber", -1, "Train number for which to query CCDB objects (set to -1 to ignore)"};
-  Configurable<std::vector<std::string>> confEfficiencyCCDBTimestamps{"confEfficiencyCCDBTimestamps", {}, "Timestamps of efficiency histograms in CCDB, to query for specific objects (default: ['-1', '-1'], gets the latest valid objects for both)"};
+struct EfficiencyConfigurableGroup : framework::ConfigurableGroup {
+  framework::Configurable<bool> confEfficiencyApplyCorrections{"confEfficiencyApplyCorrections", false, "Should apply corrections from efficiency"};
+  framework::Configurable<int> confEfficiencyCCDBTrainNumber{"confEfficiencyCCDBTrainNumber", 0, "Train number for which to query CCDB objects (set 0 to ignore)"};
+  framework::Configurable<std::vector<std::string>> confEfficiencyCCDBTimestamps{"confEfficiencyCCDBTimestamps", {}, "Timestamps of efficiency histograms in CCDB, to query for specific objects (default: [], set 0 to ignore, useful when running subwagons)"};
 
   // NOTE: in the future we might move the below configurables to a separate struct, eg. CCDBConfigurableGroup
-  Configurable<std::string> confCCDBUrl{"confCCDBUrl", "http://alice-ccdb.cern.ch", "CCDB URL to be used"};
-  Configurable<std::string> confCCDBPath{"confCCDBPath", "", "CCDB base path to where to upload objects"};
+  framework::Configurable<std::string> confCCDBUrl{"confCCDBUrl", "http://alice-ccdb.cern.ch", "CCDB URL to be used"};
+  framework::Configurable<std::string> confCCDBPath{"confCCDBPath", "", "CCDB base path to where to upload objects"};
 };
 
 template <typename HistType>
@@ -73,17 +84,23 @@ class EfficiencyCalculator
     ccdb.setLocalObjectValidityChecking();
     ccdb.setFatalWhenNull(false);
 
-    int64_t now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    auto now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     ccdb.setCreatedNotAfter(now);
 
     shouldApplyCorrections = config->confEfficiencyApplyCorrections;
 
     if (config->confEfficiencyApplyCorrections && !config->confEfficiencyCCDBTimestamps.value.empty()) {
-      for (const auto& timestamp : config->confEfficiencyCCDBTimestamps.value) {
-        hLoaded.push_back(loadEfficiencyFromCCDB(std::stol(timestamp)));
-      }
+      for (auto idx = 0UL; idx < config->confEfficiencyCCDBTimestamps.value.size(); idx++) {
+        auto timestamp = 0L;
+        try {
+          timestamp = std::max(0L, std::stol(config->confEfficiencyCCDBTimestamps.value[idx]));
+        } catch (const std::exception&) {
+          LOGF(error, notify("Could not parse CCDB timestamp \"%s\""), config->confEfficiencyCCDBTimestamps.value[idx]);
+          continue;
+        }
 
-      LOGF(info, notify("Successfully loaded %d efficiency histogram(s)"), hLoaded.size());
+        hLoaded[idx] = timestamp > 0 ? loadEfficiencyFromCCDB(timestamp) : nullptr;
+      }
     }
   }
 
@@ -92,15 +109,12 @@ class EfficiencyCalculator
   auto getWeight(ParticleNo partNo, const BinVars&... binVars) const -> float
   {
     auto weight = 1.0f;
+    auto hEff = hLoaded[partNo - 1];
 
-    if (partNo - 1 < config->confEfficiencyCCDBTimestamps.value.size()) {
-      auto hEff = hLoaded[partNo - 1];
-
-      if (shouldApplyCorrections && hEff) {
-        auto bin = hEff->FindBin(binVars...);
-        auto eff = hEff->GetBinContent(bin);
-        weight /= eff > 0 ? eff : 1.0f;
-      }
+    if (shouldApplyCorrections && hEff) {
+      auto bin = hEff->FindBin(static_cast<double>(binVars)...);
+      auto eff = hEff->GetBinContent(bin);
+      weight /= eff > 0 ? eff : 1.0f;
     }
 
     return weight;
@@ -143,7 +157,11 @@ class EfficiencyCalculator
       LOGF(warn, notify("Histogram \"%s/%ld\" has been loaded, but it is empty"), config->confCCDBPath.value, timestamp);
     }
 
-    return hEff;
+    auto clonedEffHist = static_cast<HistType*>(hEff->Clone());
+    clonedEffHist->SetDirectory(nullptr);
+
+    LOGF(info, notify("Successfully loaded %ld"), timestamp);
+    return clonedEffHist;
   }
 
   EfficiencyConfigurableGroup* config{};
@@ -151,7 +169,7 @@ class EfficiencyCalculator
   bool shouldApplyCorrections = false;
 
   o2::ccdb::BasicCCDBManager& ccdb{o2::ccdb::BasicCCDBManager::instance()};
-  std::vector<HistType*> hLoaded{};
+  std::array<HistType*, 2> hLoaded{nullptr, nullptr};
 };
 
 } // namespace o2::analysis::femto_universe::efficiency
