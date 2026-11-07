@@ -287,7 +287,7 @@ struct AnalysisEventSelection {
     Configurable<std::string> fConfigZorroTrigMask{"cfgZorroTriggerMask", "fDiMuon", "DQ Trigger masks: fSingleE,fLMeeIMR,fLMeeHMR,fDiElectron,fSingleMuLow,fSingleMuHigh,fDiMuon"};
     Configurable<bool> fConfigRunZorroSel{"cfgRunZorroSel", false, "Select events with trigger mask"};
     Configurable<uint64_t> fBcTolerance{"cfgBcTolerance", 100, "Number of BCs of margin for software triggers"};
-    Configurable<std::string> fConfigCcdbPathZorro{"ccdb-path-zorro", "/Users/m/mpuccio/EventFiltering/OTS/Chunked/", "base path to the ccdb object for zorro"};
+    Configurable<std::string> fConfigCcdbPathZorro{"ccdb-path-zorro", "EventFiltering/Zorro/", "base path to the ccdb object for zorro"};
   } fConfigZorro;
 
   // RCT selection
@@ -1362,7 +1362,7 @@ struct AnalysisSameEventPairing {
   std::map<int, std::vector<TString>> fTrackMuonHistNames; // for electron-muon pairs: key = iTrack * fNCutsMuon + iMuon
 
   std::vector<AnalysisCompositeCut> fPairCuts;
-  AnalysisCompositeCut fMCGenAccCut;
+  AnalysisCompositeCut fMCGenAccCut{};
   // bool fUseMCGenAccCut = false;
 
   uint32_t fTrackFilterMask = 0; // mask for the track cuts required in this task to be applied on the barrel cuts produced upstream
@@ -1551,7 +1551,7 @@ struct AnalysisSameEventPairing {
     fHistMan->SetUseDefaultVariableNames(kTRUE);
     fHistMan->SetDefaultVarNames(static_cast<TString*>(VarManager::fgVariableNames), static_cast<TString*>(VarManager::fgVariableUnits));
 
-    VarManager::SetCollisionSystem((TString)fConfigOptions.collisionSystem, fConfigOptions.centerMassEnergy); // set collision system and center of mass energy
+    VarManager::SetCollisionSystem(TString(fConfigOptions.collisionSystem), fConfigOptions.centerMassEnergy); // set collision system and center of mass energy
 
     DefineHistograms(fHistMan, histNames.Data(), fConfigOptions.fConfigAddSEPHistogram.value.data());     // define all histograms
     dqhistograms::AddHistogramsFromJSON(fHistMan, fConfigOptions.fConfigAddJSONHistograms.value.c_str()); // ad-hoc histograms via JSON
@@ -1861,7 +1861,7 @@ struct AnalysisSameEventPairing {
             for (unsigned int iPairCut = 0; iPairCut < fPairCuts.size(); iPairCut++) {
               AnalysisCompositeCut cut = fPairCuts.at(iPairCut);
               if (!cut.IsSelected(static_cast<float*>(VarManager::fgValues))) {
-                continue;              // apply pair cuts
+                continue; // apply pair cuts
               }
               if (sign1 * sign2 < 0) { // opposite sign pairs
                 fHistMan->FillHistClass(histNames[ncuts + icut * fPairCuts.size() + iPairCut][0].Data(), static_cast<float*>(VarManager::fgValues));
